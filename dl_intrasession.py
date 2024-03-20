@@ -14,9 +14,10 @@ from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, SubsetRandomSampler, DataLoader
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, balanced_accuracy_score, accuracy_score
+from skorch import NeuralNetClassifier
 
 import preprocess_functions as preprocess_functions
-from new_data_loader import CapgMyoSubjectLoader, intrasession_load, majority_voting
+from data_loaders import CapgmyoFrameLoader, majority_voting, majority_voting_segments
 from networks import CapgMyoNet
 
 from torch.utils.tensorboard import SummaryWriter
@@ -45,9 +46,9 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, val_loa
             running_correct += (predicted.squeeze() == labels.view(-1)).sum().item()
 
             if (i + 1) % 100 == 0:
-                print('Epoch {} / {}, step {} / {}, loss = {:4f}'.format(epoch+1, num_epochs, i+1, len(train), loss.item()))
+                print('Epoch {} / {}, step {} / {}, loss = {:4f}'.format(epoch+1, num_epochs, i+1, len(train_loader), loss.item()))
                 writer.add_scalar('training loss', running_loss/100, epoch * len(train_loader) + i)
-                writer.add_scalar('accuracy', running_correct/100, epoch * len(train_loader) + i)
+                writer.add_scalar('training accuracy', running_correct/100, epoch * len(train_loader) + i)
                 running_loss = 0.0
                 running_correct = 0
 
@@ -73,27 +74,24 @@ if __name__ == '__main__':
     # Predefine lists to take in different metrics
     DIR = '../datasets/capgmyo/dba'
     subs = []
-    accs, bal_accs, maj_accs, maj_bal_accs = [], [], [], [] # different metrics to be saved in csv from experiment
+    accs, maj_accs = [], [] # different metrics to be saved in csv from experiment
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
     for sub in tqdm(range(1, 19)):
         # Load data for given subject
         print('\n SUBJECT #00{}'.format(sub))
+        sub = '00' + str(sub) if sub < 10 else '0' + str(sub)
         subs.append(sub)
-        X_train, y_train, X_test, y_test = intrasession_load(DIR=DIR, sub=sub, wlen=1, stride=1)
-        train = CapgMyoSubjectLoader(X=X_train, Y=y_train, window=1, stride=1)
-        test = CapgMyoSubjectLoader(X=X_test, Y=y_test, window=1, stride=1)
-        train_loader = DataLoader(train, batch_size=64, shuffle=True)
-        test_loader = DataLoader(test, batch_size=64, shuffle=False)
-
-        # Get class weights based on class imbalance
-        class_weights = torch.Tensor(train.weights).to(device) # to account for imbalanced data
+        train_data = CapgmyoFrameLoader(sub=sub, intrasession=True, test_rep=9)
+        test_data = train_data.train_test_split()
+        train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
+        test_loader = DataLoader(test_data, batch_size=512, shuffle=False)
 
         # Model/training set-up
-        model = CapgMyoNet(channels=128, num_classes=9).to(device)
-        num_epochs = 2
-        criterion = nn.CrossEntropyLoss(weight=class_weights)
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-5)
+        model = CapgMyoNet(channels=128, num_classes=8).to(device)
+        num_epochs = 5
+        criterion = nn.CrossEntropyLoss()
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=1e-4)
 
         # # TENSORBOARD
         # examples = iter(test_loader)
@@ -104,7 +102,7 @@ if __name__ == '__main__':
         # running_loss = 0.0
         # running_correct = 0
 
-        train_model(model, train_loader, optimizer, criterion, val_loader=test_loader) # run training loop
+        train_model(model, train_loader, optimizer, criterion, num_epochs=num_epochs) # run training loop
 
         # TESTING
         all_labs, all_preds = [], []
@@ -113,33 +111,24 @@ if __name__ == '__main__':
             n_correct = 0
             n_samples = 0
             for i, (signals, labels) in enumerate(test_loader):
-                signals = signals.to(device)
-                labels = labels.view(-1).to(device)
+                signals, labels = signals.to(device), labels.view(-1).to(device)
                 outputs = model(signals).to(device)
                 _,predictions = torch.max(outputs, 1) # get class labels
+                all_labs.extend(labels.cpu().tolist())
+                all_preds.extend(predictions.cpu().tolist())
 
-                # Store predictions and labels
-                all_labs.extend(labels.tolist())
-                all_preds.extend(predictions.tolist())
-
-        acc = accuracy_score(all_labs, all_preds)
-        accs.append(acc)
-        bal_acc = balanced_accuracy_score(all_labs, all_preds)
-        bal_accs.append(bal_acc)
-        print('Test Accuracy:', acc)
-        print('Balanced Test Accuracy:', bal_acc)
+            acc = accuracy_score(all_labs, all_preds)
+            accs.append(acc)
+            print('Test Accuracy:', acc)
 
         # MAJORITY VOTING PREDICTIONS
-        all_preds_maj = np.array(majority_voting(all_preds, M=128))
+        all_preds_maj = np.array(majority_voting_segments(all_preds, M=32, n_samples=train_data.n_samples))
         maj_acc = accuracy_score(all_labs, all_preds_maj)
         maj_accs.append(maj_acc)
-        maj_bal_acc = balanced_accuracy_score(all_labs, all_preds_maj)
-        maj_bal_accs.append(maj_bal_acc)
         print('Majority Voting Test Accuracy:', maj_acc)
-        print('Majority Voting Balanced Test Accuracy:', maj_bal_acc)
 
     # Save experiment data in .csv file
-    data = np.array([subs, accs, bal_accs, maj_accs, maj_bal_accs]).T
-    df = pd.DataFrame(data=data, columns=['Subjects', 'Accuracy', 'Balanced Accuracy', 'MV Accuracy', 'MV Balanced Accuracy'])
-    df.to_csv('./run.csv')
+    data = np.array([subs, accs, maj_accs]).T
+    df = pd.DataFrame(data=data, columns=['Subjects', 'Accuracy', 'MV Accuracy'])
+    df.to_csv('./bandstop.csv')
         
