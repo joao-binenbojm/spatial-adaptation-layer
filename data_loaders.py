@@ -6,553 +6,376 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
+from scipy import signal
 
 import preprocess_functions as preprocess_functions
+from collections import Counter
+from copy import deepcopy
+
+from utils import bandpass, bandstop
 
 
-# File structure
-# 7 classes
-# CSL , CGM
-# Windowed vs Non-windowed
-# Single subject vs Multi Subject
+def extract_frames_csl(DIR, num_gestures=26, num_repetitions=10, num_samples=2048, input_shape=(7,24)):
+    ''' Extract frames for the given subject/session.'''
 
+    # Initialize data container for given session
+    filenames = os.listdir(DIR)
+    X = np.zeros((num_gestures, num_repetitions, num_samples, 1, input_shape[0], input_shape[1]))
+    Y = np.zeros((num_gestures, num_repetitions, num_samples))
 
-class CapGMyoLoader(Dataset):
-    def __init__(self, path='./CapGMyo', db='dbb',train=True, transform=None, target_transform=None,
-                 subject_list=[1], window=64, stride=1, norm=0, num_gestures=8, train_repetitions=10, intrasession=False  ):
-        super(CapGMyoLoader, self).__init__()
+    for gdx, name in enumerate(filenames):
+        mat = sio.loadmat(os.path.join(DIR, name))
+        cur_label = int(name.replace('gest', '').replace('.mat', '')) # get the label for the given gesture
+        if cur_label == 0: continue # exclude rest
+        else: cur_label -= 1
 
-        self.num_gestures = num_gestures
-        self.num_repetitions = 10
-        self.train_repetitions = train_repetitions
-        self.samples = 1000
-        self.channels = 128
+        # Account for exception case of missing repetitions
+        reps = mat['gestures'].shape[0]
+        missing = num_repetitions - reps # number of missing repetitions from the protocol
 
-        self.num_subjects = len(subject_list)
+        # For each repetition available 
+        for idx in range(reps):
+            emg = mat['gestures'][idx, 0].T
+            emg = bandpass(emg)
+            # emg = bandstop(emg) 
+            center = len(emg) // 2 # get the central index of the given repetition
+            images = emg[center - num_samples//2 : center + num_samples//2, :]
+            images = np.flip(images.reshape(num_samples, 1, 8, 24, order='F'), axis=0)
+            images = images[:, :, 1:, :] # drop first row given bipolar nature of data and create list
 
-        self.path = os.path.join(path, db)
+            # Add data extracted from given repetition to our data matrix            
+            X[cur_label, idx, :, 0, :, :] = images # add EMG surface images onto our data matrix
+            Y[cur_label, idx, :] = np.array([cur_label]*num_samples)  # add labels onto our label matrix
+        
+        # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
+        for idx in range(reps, reps+missing):
+            rep_idx = np.random.randint(0, reps, size=num_samples)
+            sample_idx = np.random.randint(0, num_samples, size=num_samples)
+
+            Xsample = X[cur_label, rep_idx, sample_idx, :, :, :, :]
+            X[cur_label, idx, :, :, :, :, :] = Xsample
+            Ysample = Y[cur_label, rep_idx, sample_idx]
+            Y[cur_label, idx, :] = Ysample
+
+    return np.array(X), np.array(Y)
+
+def extract_frames_capgmyo(filenames, num_gestures=8, num_repetitions=10, num_samples=1000, input_shape=(8,16)):
+    ''' Extract frames for the given subject/session.'''
+
+    # Initialize data container for given session
+    X = np.zeros((num_gestures, num_repetitions, num_samples, 1, input_shape[0], input_shape[1]))
+    Y = np.zeros((num_gestures, num_repetitions, num_samples))
+
+    for gdx, name in enumerate(filenames):
+        mat = sio.loadmat(name)
+        emg = mat['data']
+        cur_label = int(name[4:7].lstrip('0')) - 1 # get the label for the given gesture
+
+        # Account for exception case of missing repetitions
+        labels = mat['gesture'].ravel()
+        labels_rolled = np.roll(np.copy(labels), 1)
+        delta = (labels - labels_rolled)
+        indices = np.where(delta != 0)[0]
+        reps = indices // 2 # number of repetitions is equivalent to half of the number of changepoints
+        missing = num_repetitions - reps # number of missing repetitions from the protocol
+
+        # For each repetition available
+        for idx in range(0, len(indices), 2):
+            start, end = indices[idx], indices[idx+1]
+            center = (start + end) // 2 # get the central index of the given repetition
+            emg = bandpass(emg)
+            # emg = bandstop(emg) 
+            images = emg[center - num_samples//2 : center + num_samples//2, :]
+            images = images.reshape(num_samples, 1, 8, 16, order='F')
+
+            # Add data extracted from given repetition to our data matrix            
+            X[cur_label, idx, :, 0, :, :] = images # add EMG surface images onto our data matrix
+            Y[cur_label, idx, :] = np.array([cur_label]*num_samples)  # add labels onto our label matrix
+        
+        # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
+        for idx in range(reps, reps+missing):
+            rep_idx = np.random.randint(0, reps, size=num_samples)
+            sample_idx = np.random.randint(0, num_samples, size=num_samples)
+
+            Xsample = X[cur_label, rep_idx, sample_idx, :, :, :, :]
+            X[cur_label, idx, :, :, :, :, :] = Xsample
+            Ysample = Y[cur_label, rep_idx, sample_idx]
+            Y[cur_label, idx, :] = Ysample
+
+    return np.array(X), np.array(Y)
+
+def load_tensors(self, DIR='../datasets/csl', sub='subject1', extract_frames=extract_frames_csl, transform=None, target_transform=None,
+                  norm=0, num_gestures=8, num_repetitions=10, input_shape=(8, 16), fs=1000, sessions='session1'):
+    ''' Takes in data files and cretes complete data tensor for either intrasession or intersession case.'''
+    num_samples = fs # equivalent to 1s worth of samples
+    path = os.path.join(path, sub)
+    intrasession = not isinstance(sessions, list) # if a session selected, only load that given session for intrasession performance
+    if intrasession: num_sessions = 1
+    else: num_sessions = len(sessions)
+
+    # Given data containers
+    X = np.zeros((num_sessions, num_gestures, num_repetitions, num_samples, 1, input_shape[0], input_shape[1]))
+    Y = np.zeros((num_sessions, num_gestures, num_repetitions, num_samples))
+
+    # If intrasession, store information for only a given session
+    if self.intrasession:
+        DIR = os.path.join(path, sub, sessions)
+        Xs, Ys = extract_frames(DIR, num_gestures=num_gestures, num_repetitions=num_repetitions, num_samples=num_samples, input_shape=input_shape)
+        X[:, :, :, :, :, :, :], Y[:, :, :, :] = Xs, Ys # set data to frames extracted from single session
+
+    else:
+        for idx, session in enumerate(sessions):
+            DIR = os.path.join(path, sub, session)
+            X, Y = extract_frames(DIR, num_gestures=num_gestures, num_repetitions=num_repetitions, num_samples=num_samples, input_shape=input_shape)
+            X[idx, :, :, :, :, :, :] = X # add data extracted from given session
+            Y[idx, :, :, :] = Y # add labels extracted from given session
+
+    # Convert data to tensor
+    X = torch.tensor(np.array(self.X)).to(torch.float32)
+    Y = torch.tensor(np.array(self.Y)).to(torch.float32)
+    return X, Y
+
+# Dataset then just very simply takes in images and labels and does preprocessing/train test splits
+class EMGFrameLoader(Dataset):
+    def __init__(self, X, Y, transform=None, target_transform=None, norm=0, train=True, stats=None):
+        super(EMGFrameLoader, self).__init__()
         self.transform = transform
         self.target_transform = target_transform
 
-        self.train = train
-        subject_list.sort()
-        self.subject_list = subject_list
-
-        self.window = window
-        self.stride = stride
-
-
-
-        data_emg = []
-        labels = []
-        for subject in self.subject_list:
-            for i in range(self.num_gestures):
-                for j in range(self.num_repetitions):
-                    file_ext = f'{subject:03}-{i + 1:03}-{j + 1:03}.mat'
-                    mat = sio.loadmat(os.path.join(self.path, file_ext))
-                    data_emg.append(mat['data'])
-                    labels.append(mat['gesture'][0][0])
-
-        self.data_tensor = np.stack(data_emg)
-        self.label_tensor = np.stack(labels)
-
-        self.data_tensor = torch.tensor(self.data_tensor).to(torch.float32).reshape(self.num_subjects, self.num_gestures,
-                                                                        self.num_repetitions, self.samples, self.channels)
-        self.label_tensor = torch.tensor(self.label_tensor)
-
-        # if intrasession is specified, remove some of the gesture
-        if intrasession:
+        if norm  == 1: # standardization
             if train:
-                self.data_tensor = self.data_tensor[:, :, :self.train_repetitions, :, :]
-                self.num_repetitions = self.train_repetitions
+                self.mean = self.X.mean()
+                self.std = self.X.std()
             else:
-                self.data_tensor = self.data_tensor[:, :, self.train_repetitions:,  :, :]
-                self.num_repetitions = self.num_repetitions - self.train_repetitions
+                self.mean = stats['mean'] # use training stats 
+                self.std = stats['std']
+            self.X = (self.X - self.mean)/(self.std + 1.e-12)
 
-
-
-        if norm  == 1:
-            self.mean = self.data_tensor.mean(dim=[1,2,3], keepdim=True)
-            self.std = self.data_tensor.std(dim=[1,2,3], keepdim=True)
-
-            self.data_tensor = (self.data_tensor - self.mean)/(self.std + 1.e-12)
-        elif norm == -1:
-            self.max = self.data_tensor.amax(dim=[0,1,2,3], keepdim=True)
-            self.min = self.data_tensor.amin(dim=[0,1,2,3], keepdim=True)
-
-            self.data_tensor = (self.data_tensor - self.min)/(self.max - self.min)*2 -1
+        elif norm == -1: # scale between [-1, 1]
+            if train:
+                self.max = self.X.amax(keepdim=True)
+                self.min = self.X.amin(keepdim=True)
+            else:
+                self.max = stats['max']
+                self.min = stats['min']
+            self.X = (self.X - self.min)/(self.max - self.min)*2 - 1
 
         if transform:
-            self.data_tensor = transform(self.data_tensor)
+            self.X = transform(self.X)
 
-        self.len = self.num_subjects * self.num_gestures * self.num_repetitions * self.samples // self.stride
+        self.len = X.shape[0]
 
     def __len__(self):
         return self.len
 
     def __getitem__(self, idx):
-        samples_per_repetition = self.samples // self.stride
-
-        sample = idx % samples_per_repetition
-        idx //= samples_per_repetition
-
-        repetition = idx % self.num_repetitions
-        idx //= self.num_repetitions
-
-        gesture = idx % self.num_gestures
-        idx //= self.num_gestures
-
-        subject = idx % self.num_subjects
-
-        # find window according to index
-        window_middle = sample * self.stride
-        right_lim = window_middle + self.window // 2
-        left_lim = window_middle - self.window // 2
-        point = self.data_tensor[subject, gesture, repetition, max(left_lim, 0):min(right_lim, self.samples), :]
-
-
-        # pad the data on the left and right
-        left_padding_len = -left_lim if left_lim < 0 else 0
-        right_padding_len = right_lim - self.samples if right_lim > self.samples else 0
-        point = F.pad(point, (0, 0, left_padding_len, right_padding_len), "constant", 0)
-
-        return point.T, gesture
-
-
-import os
-
-import scipy.io as sio
-import numpy as np
-
-import torch
-import torch.nn.functional as F
-from torch.utils.data import Dataset
-
-import preprocess_functions as preprocess_functions
-
-# currently this only computes stats for each separate subject
-#TODO change this
-class CSLSMultiSubjectWindow(Dataset):
-    def __init__(self, path='./CSL', train=True, transform=None, target_transform=None, window=160, stride=8, \
-                 subject_list=[1], sessions=[1], num_gestures=27, downsample=1, norm=False):
-
-        super(CSLSMultiSubjectWindow, self).__init__()
-        self.num_gestures = num_gestures
-
-        self.path = path
-        self.transform = transform
-        self.target_transform = target_transform
-
-        self.sessions = sessions
-        self.m_sessions = len(sessions)
-        self.train = train
-
-        self.data_list = []
-        self.n_subs = len(subject_list)
-
-        total = 0
-        self.slice_list = [0]
-        for i in range(len(subject_list)):
-            self.data_list.append(CSLSubjectPreprocWindow(path, subject=subject_list[i],
-                                                          train=train, sessions=sessions,
-                                                          num_gestures=num_gestures,
-                                                          transform=transform, downsample=downsample,
-                                                          window=window, stride=stride, norm=norm))
-            total += len(self.data_list[i])
-            self.slice_list.append(total)
-
-        self.data_size = total
-        # if norm:
-        #     stats = torch.stack([preprocess_functions.normalise_csl_preproc(subject_item.data_matrix, subject_item.total) for subject_item in self.data_list])
-
-        if transform:
-            for sub in self.data_list:
-                preprocess_functions.apply_transform(sub.data_matrix, transform)
-
-    def __len__(self):
-        return self.data_size
-
-    def __getitem__(self, idx):
-        for i in range(1, len(self.slice_list)):
-            if self.slice_list[i] > idx:
-                idx -= self.slice_list[i - 1]
-                break
-        return self.data_list[i - 1][idx]
-
-
-class CSLSubjectPreprocWindow(Dataset):
-    def __init__(self, path='./CSL/', train=True, transform=None, target_transform=None, \
-                 subject=1, sessions=[1], num_gestures=27, downsample=1, window=64, stride=1, return_2d=False,
-                 norm=False):
-        super(CSLSubjectPreprocWindow, self).__init__()
-
-        self.num_gestures = num_gestures
-
-        self.path = path
-        self.transform = transform
-        self.target_transform = target_transform
-
-        self.sessions = sessions
-        self.m_sessions = len(sessions)
-        self.train = train
-
-        self.slice_map = [0]
-        prev_slice = 0
-
-        sessions.sort()
-
-        self.window = window
-        self.stride = stride
-        self.return_2d = return_2d
-
-        self.data_matrix = [[0 for s in sessions] for i in range(num_gestures)]
-
-        for i in range(num_gestures):
-            for s in range(len(sessions)):
-                # iterate for 10 repetitions
-                file_ext = f'subject{subject:01}/session{sessions[s]:01}/gest_preproc{i:01}.pt'
-                self.data_matrix[i][s] = torch.load(os.path.join(path, file_ext)).reshape(-1, 7, 24)
-                self.data_matrix[i][s] = torch.tensor(np.float32(self.data_matrix[i][s]))
-                if downsample > 1:
-                    self.data_matrix[i][s] = self.data_matrix[i][s][::downsample]
-
-                l = self.data_matrix[i][s].shape[0] // self.stride
-
-                prev_slice += l
-                self.slice_map.append(prev_slice)
-
-        self.total = prev_slice
-
-        if norm:
-            self.mean, self.std = preprocess_functions.normalise_csl_preproc(self.data_matrix, self.total)
-
-        if transform:
-            preprocess_functions.apply_transform(self.data_matrix, transform)
-
-        # Put time as the last dimension
-        for i in range(num_gestures):
-            for s in range(len(sessions)):
-                self.data_matrix[i][s] = self.data_matrix[i][s].transpose(0, 1)
-                self.data_matrix[i][s] = self.data_matrix[i][s].transpose(1, 2)
-        if not return_2d:
-            preprocess_functions.apply_transform(self.data_matrix, lambda t: t.reshape(7 * 24, -1))
-
-    def __len__(self):
-        return self.total
-
-    def binary_lower_bound(arr, low, high, x):
-        # Check base case
-        if arr[high] <= x:
-            return high
-        if high - low <= 1:
-            return low
-        if high >= low:
-
-            mid = (high + low) // 2
-
-            if arr[mid] == x:
-                return mid
-            elif arr[mid] > x:
-                return CSLSubjectPreprocWindow.binary_lower_bound(arr, low, mid - 1, x)
-
-            else:
-                return CSLSubjectPreprocWindow.binary_lower_bound(arr, mid, high, x)
-
-        else:
-            return low
-
-    def __getitem__(self, idx):
-
-        index = CSLSubjectPreprocWindow.binary_lower_bound(self.slice_map, 0, len(self.slice_map) - 1, idx)
-        offset = idx - self.slice_map[index]
-
-        gesture_id = index // self.m_sessions
-        session_id = index % self.m_sessions
-
-        segment_size = self.data_matrix[gesture_id][session_id].shape[-1]
-
-        window_middle = offset * self.stride
-        right_lim = window_middle + self.window // 2
-        left_lim = window_middle - self.window // 2
-        if self.return_2d:
-            point = self.data_matrix[gesture_id][session_id][:, :, max(left_lim, 0):  min(right_lim, segment_size)]
-        else:
-            point = self.data_matrix[gesture_id][session_id][:, max(left_lim, 0):  min(right_lim, segment_size)]
-            # pad the data on the left and right
-        left_padding_len = -left_lim if left_lim < 0 else 0
-        right_padding_len = right_lim - segment_size if right_lim > segment_size else 0
-        point = F.pad(point, (left_padding_len, right_padding_len), "constant", 0)
-
-        return point, gesture_id
-
-
-# TODO
-# Consider transforming data into tensors instead of keeping them as numpy array
-class CSLSubjectPreproc(Dataset):
-    def __init__(self, path='./CSL/', train=True, transform=None, target_transform=None, \
-                 subject=1, sessions=[1], num_gestures=27, downsample=1, norm=False):
-        super(CSLSubjectPreproc, self).__init__()
-
-        self.num_gestures = num_gestures
-
-        self.path = path
-        self.transform = transform
-        self.target_transform = target_transform
-
-        self.sessions = sessions
-        self.m_sessions = len(sessions)
-        self.train = train
-
-        self.slice_map = [0]
-        prev_slice = 0
-
-        sessions.sort()
-
-        self.data_matrix = [[0 for s in sessions] for i in range(num_gestures)]
-
-        for i in range(num_gestures):
-            for s in range(len(sessions)):
-                # iterate for 10 repetitions
-                file_ext = f'subject{subject:01}/session{sessions[s]:01}/gest_preproc{i:01}.pt'
-                self.data_matrix[i][s] = torch.load(os.path.join(path, file_ext)).reshape(-1, 7, 24)
-                self.data_matrix[i][s] = torch.tensor(np.float32(self.data_matrix[i][s]))
-
-                if downsample > 1:
-                    self.data_matrix[i][s] = self.data_matrix[i][s][::downsample]
-                l = self.data_matrix[i][s].shape[0]
-                prev_slice += l
-                self.slice_map.append(prev_slice)
-
-        self.total = prev_slice
-        if norm:
-            self.mean, self.std = preprocess_functions.normalise_csl_preproc(self.data_matrix, self.total)
-        if transform:
-            preprocess_functions.apply_transform(self.data_matrix, transform)
-
-    def __len__(self):
-        return self.total
-
-    def binary_lower_bound(arr, low, high, x):
-        # Check base case
-        if arr[high] <= x:
-            return high
-        if high - low <= 1:
-            return low
-        if high >= low:
-
-            mid = (high + low) // 2
-
-            if arr[mid] == x:
-                return mid
-            elif arr[mid] > x:
-                return CSLSubjectPreproc.binary_lower_bound(arr, low, mid - 1, x)
-
-            else:
-                return CSLSubjectPreproc.binary_lower_bound(arr, mid, high, x)
-
-        else:
-            return low
-
-    def __getitem__(self, idx):
-
-        index = CSLSubjectPreproc.binary_lower_bound(self.slice_map, 0, len(self.slice_map) - 1, idx)
-        offset = idx - self.slice_map[index]
-
-        gesture_id = index // self.m_sessions
-        session_id = index % self.m_sessions
-        return self.data_matrix[gesture_id][session_id][offset], gesture_id
-
-
-class CSLSMultiSubject(Dataset):
-    def __init__(self, path='./CSL', train=True, transform=None, target_transform=None, \
-                 subject_list=[1], sessions=[1], num_gestures=27, downsample=1, norm=False):
-        self.num_gestures = num_gestures
-
-        self.path = path
-        self.transform = transform
-        self.target_transform = target_transform
-
-        self.sessions = sessions
-        self.m_sessions = len(sessions)
-        self.train = train
-
-        self.data_list = []
-        self.n_subs = len(subject_list)
-
-        total = 0
-        self.slice_list = [0]
-        for i in range(len(subject_list)):
-            self.data_list.append(CSLSubjectPreproc(path, subject=subject_list[i],
-                                                    train=train, sessions=sessions,
-                                                    num_gestures=num_gestures,
-                                                    transform=transform, downsample=downsample, norm=False))
-            total += len(self.data_list[i])
-            self.slice_list.append(total)
-
-        self.data_size = total
-        if norm:
-            self.mean, self.std = preprocess_functions.normalise_csl_preproc_multisub(self.data_list)
-
-        if transform:
-            for sub in self.data_list:
-                preprocess_functions.apply_transform(sub.data_matrix, transform)
-
-    def __len__(self):
-        return self.data_size
-
-    def __getitem__(self, idx):
-        for i in range(1, len(self.slice_list)):
-            if self.slice_list[i] > idx:
-                idx -= self.slice_list[i - 1]
-                break
-        return self.data_list[i - 1][idx]
-
-
-
-
-
-# Custom sampler for Adaptive batch normalization according to CapGMyo Paper
-from torch.utils.data import Sampler
-
-
-class CustomShuffleSampler(Sampler):
-    def __init__(self, data_source, custom_shuffle_function):
-        self.data_source = data_source
-        self.custom_shuffle_function = custom_shuffle_function
-
-    def __iter__(self):
-        self.indices = list(range(len(self.data_source)))
-        self.shuffled_indices, self.subs_id = self.custom_shuffle_function(self.indices)
-        return iter(self.shuffled_indices)
-
-    def __len__(self):
-        return len(self.data_source)
-
-
-def compute_batch_subject(indices):
-    return [indices[i] // 80 for i in range(len(indices))]
-
-
-def custom_shuffle(indices):
-    import random
-    # split per subject
-    sliced_array = [indices[i * 80000:(i + 1) * 80000] for i in range(len(indices) // 80000)]
-    # shuffle
-    for i in range(len(sliced_array)):
-        random.shuffle(sliced_array[i])
-
-    # reconnect array
-    tmp = []
-    for i in range(len(sliced_array)):
-        tmp = tmp + sliced_array[i]
-
-    # split per batch and shuffle
-    sliced_array = [tmp[i * 1000:(i + 1) * 1000] for i in range(len(tmp) // 1000)]
-    batch_indices = list(range(len(sliced_array)))
-    random.shuffle(batch_indices)
-
-    final = []
-    for i in range(len(sliced_array)):
-        final = final + sliced_array[batch_indices[i]]
-
-    subjects_id = compute_batch_subject(batch_indices)
-    return final, subjects_id
-
-# Example usage:
-# Assuming you have a custom dataset named 'my_dataset' and it's initialized properly
-
-
-
-
-
-
-# Delsys loader
-
-class DTLoader(Dataset):
-    def __init__(self, path='./pilot.csv', db='dbb', train=True, transform=None,
-                 target_transform=None, window=256, stride=8, norm=True, intrasession=False):
-        super(DTLoader, self)
-        self.path = os.path.join(path, db)
-        self.transform = transform
-        self.target_transform = target_transform
-
-        self.train = train
-
-        self.window = window
-        self.stride = stride
-
-        total_reps = 40
-        if intrasession:
-            total_reps = 80
-
-        # compute labels positions
-        data_raw = np.genfromtxt(path, delimiter=',')[1:, 1:]
-        labels_raw = data_raw[:,8]
-        labels_rolled = np.roll(np.copy(labels_raw), 1)
-        delta = (labels_raw - labels_rolled)
-        indices = np.where(delta != 0)[0][:]
-
-        self.interval_size = 1000
-
-        middle_segments = []
-        labels_seg = []
-        for i in range(len(indices) // 2):
-            ci = 2*i
-            start = indices[ci]
-            end = indices[ci + 1]
-            middle = (start + end) // 2
-
-            seg = data_raw[middle - self.interval_size//2:middle + self.interval_size//2,0:8]
-
-            middle_segments.append(seg)
-            labels_seg.append(data_raw[middle][8])
-
-
-        self.data  = np.stack(middle_segments)
-        self.labels = np.stack(labels_seg)
-
-        self.data = self.data.reshape(8, 10, self.interval_size, 8)
-        self.labels = self.labels.reshape(8, 10)
-        #print(self.data.shape)
-
-        if not intrasession:
-            if train:
-                self.data = self.data[:, :5,:,:]
-                self.labels = self.labels[:, :5]
-            else:
-                self.data = self.data[:, 5:,:, :]
-                self.labels = self.labels[:, 5:]
-
-
-        self.data = self.data.reshape(total_reps * self.interval_size, 8)
-        self.data = self.data.T
-        self.labels = torch.tensor(self.labels.reshape(-1)).to(torch.long) - 1
-
-        self.data = torch.tensor(self.data).to(torch.float32)
-        self.len = total_reps * (self.interval_size // self.stride)
-
-        if norm:
-            self.mean = self.data.mean(dim=1)[:, None]
-            self.std = self.data.std(dim=1)[:, None]
-            self.data = (self.data - self.mean) / (self.std + 1.e-12)
-
-        if transform:
-            self.data = transform(self.data)
-
-
-    def __len__(self):
-        return self.len
-
-    def __getitem__(self, idx):
-        samples_per_session = self.interval_size // self.stride
-        session_start = (idx // samples_per_session) * self.interval_size
-
-        window_middle = (idx % samples_per_session) * self.stride
-        right_lim = window_middle + self.window // 2
-        left_lim = window_middle - self.window // 2
-        point = self.data[:, session_start + max(left_lim, 0):session_start + min(right_lim, self.interval_size)]
-        left_padding_len = -left_lim if left_lim < 0 else 0
-        right_padding_len = right_lim - self.interval_size if right_lim > self.interval_size else 0
-        point = F.pad(point, (left_padding_len, right_padding_len), "constant", 0)
-
-        return point, self.labels[idx // samples_per_session]
+        X, Y = self.X[idx], self.Y[idx]
+        return X, Y
+
+# def get_indices(labels):
+#     ''' Determines at which indices the labels change (i.e. a new gesture label has begun).'''
+#     labels_rolled = np.roll(np.copy(labels), 1)
+#     delta = (labels - labels_rolled)
+#     indices = np.where(delta != 0)[0]
+#     return indices
+# class CapgmyoFrameLoader(Dataset):
+#     def __init__(self, path='../datasets/capgmyo', db='dba', sub='001', transform=None, target_transform=None,
+#                   norm=0, num_gestures=8, num_repetitions=10, intrasession=False, test_rep=None):
+#         super(CapgmyoFrameLoader, self).__init__()
+
+#         self.num_gestures = num_gestures
+#         self.num_repetitions = num_repetitions - int(intrasession)
+#         self.n_samples = 1000
+#         self.fs = 1000
+#         self.channels = 128
+
+#         self.path = os.path.join(path, db)
+#         self.transform = transform
+#         self.target_transform = target_transform
+
+#         # Filter for only files of the given subject
+#         filenames = os.listdir(self.path)
+#         filenames = [name for name in filenames if (name[:3] == sub) and (name[4] == '0')]
+
+#         # Extract EMG 'frames' from capgmyo
+#         self.X, self.Y = [], []
+#         if intrasession:
+#             self.X_test, self.Y_test = [], []
+
+#         # For each gesture
+#         for gdx, name in enumerate(filenames):
+#             mat = sio.loadmat(os.path.join(self.path, name))
+#             emg, labels = mat['data'], mat['gesture'].ravel()
+#             emg = bandpass(emg)
+#             emg = bandstop(emg) ## TESTING WHETHER BANDSTOPPING IMPROVES PERFORMANCE
+#             indices = get_indices(labels)
+#             cur_label = int(name[4:7].lstrip('0')) -1 # get the label for the given gesture
+
+#             # For each repetition
+#             for idx in range(0, len(indices), 2):
+#                 start, end = indices[idx], indices[idx+1]
+#                 center = (start + end) // 2 # get the central index of the given repetition
+#                 images = list(emg[center - self.fs//2 : center + self.fs//2, :].reshape(self.n_samples, 1, 8, 16, order='F'))
+                
+#                 # If intrasession, use given repetition for testing
+#                 if intrasession and (idx+1)==test_rep:
+#                     self.X_test.extend(images)
+#                     self.Y_test.extend( [cur_label]*self.n_samples )
+#                 else:
+#                     self.X.extend(images) # add EMG surface images onto our data matrix
+#                     self.Y.extend( [cur_label]*self.n_samples ) # add labels onto our label matrix
+        
+        
+#         # Convert data to tensor
+#         self.X = torch.tensor(np.array(self.X)).to(torch.float32)
+#         self.Y = torch.tensor(np.array(self.Y)).to(torch.float32)
+#         if intrasession:
+#             self.X_test = torch.tensor(np.array(self.X_test)).to(torch.float32)
+#             self.Y_test = torch.tensor(np.array(self.Y_test)).to(torch.float32)
+
+#         if norm  == 1: # standardization
+#             self.mean = self.X.mean()
+#             self.std = self.X.std()
+#             self.X = (self.X - self.mean)/(self.std + 1.e-12)
+#             if intrasession: self.X_test = (self.X_test - self.mean)/(self.std + 1.e-12)
+
+#         elif norm == -1: # scale between [-1, 1]
+#             self.max = self.X.amax(keepdim=True)
+#             self.min = self.X.amin(keepdim=True)
+#             self.X = (self.X - self.min)/(self.max - self.min)*2 -1
+#             if intrasession: self.X_test = (self.X_test - self.min)/(self.max - self.min)*2 -1
+
+#         if transform:
+#             self.X = transform(self.X)
+
+#         self.len = self.n_samples * self.num_repetitions * self.num_gestures
+
+#     def __len__(self):
+#         return self.len
+    
+#     def train_test_split(self):
+#         '''Gets a deepcopy of the current loader with test data set as training data.'''
+#         test_loader = deepcopy(self) # make a copy of current loader
+#         test_loader.X, test_loader.Y = deepcopy(test_loader.X_test), deepcopy(test_loader.Y_test)
+#         del test_loader.X_test, test_loader.Y_test, self.X_test, self.Y_test
+#         test_loader.num_repetitions = 1 # only a single repetition in the given test set
+#         test_loader.len = len(self) // self.num_repetitions
+#         return test_loader # returns test loader
+
+#     def __getitem__(self, idx):
+#         X, Y = self.X[idx], self.Y[idx]
+#         return X, Y
+    
+
+# class CSLFrameLoader(Dataset):
+#     def __init__(self, path='../datasets/csl', sub='subject1', transform=None, target_transform=None,
+#                   norm=0, num_gestures=8, num_repetitions=10, intrasession=False, session=False, test_rep=None):
+#         super(CSLFrameLoader, self).__init__()
+
+#         self.num_gestures = num_gestures
+#         self.num_repetitions = num_repetitions - int(intrasession)
+#         self.fs = 2048
+#         self.n_samples = self.fs
+#         self.channels = 192
+
+#         self.path = os.path.join(path, sub)
+#         self.transform = transform
+#         self.target_transform = target_transform
+#         self.intrasession = intrasession
+#         self.test_rep = test_rep
+
+#         # Initialize variables
+#         self.X_test, self.Y_test = [], []
+#         self.X, self.Y = [], []
+
+#         # If intrasession, store information for only a given session
+#         if intrasession:
+#             DIR = os.path.join(path, sub, session)
+#             X, Y = self.extract_frames(DIR)
+#             self.X.extend(X)
+#             self.Y.extend(Y)
+
+#         else:
+#             sessions = ['session{}'.format(idx) for idx in range(1, 6)]
+#             for idx, session in enumerate(sessions):
+#                 DIR = os.path.join(path, sub, session)
+#                 X, Y = self.extract_frames(DIR)
+#                 if test_rep == (idx+1):
+#                     self.X_test.extend(X)
+#                     self.Y_test.extend(Y)
+#                 else:
+#                     self.X.extend(X)
+#                     self.Y.extend(Y)
+
+#         # Convert data to tensor
+#         self.X = torch.tensor(np.array(self.X)).to(torch.float32)
+#         self.Y = torch.tensor(np.array(self.Y)).to(torch.float32)
+#         if intrasession:
+#             self.X_test = torch.tensor(np.array(self.X_test)).to(torch.float32)
+#             self.Y_test = torch.tensor(np.array(self.Y_test)).to(torch.float32)
+
+#         if norm  == 1: # standardization
+#             self.mean = self.X.mean()
+#             self.std = self.X.std()
+#             self.X = (self.X - self.mean)/(self.std + 1.e-12)
+#             if intrasession: self.X_test = (self.X_test - self.mean)/(self.std + 1.e-12)
+
+#         elif norm == -1: # scale between [-1, 1]
+#             self.max = self.X.amax(keepdim=True)
+#             self.min = self.X.amin(keepdim=True)
+#             self.X = (self.X - self.min)/(self.max - self.min)*2 - 1
+#             if intrasession: self.X_test = (self.X_test - self.min)/(self.max - self.min)*2 - 1
+
+#         if transform:
+#             self.X = transform(self.X)
+
+#         self.len = self.n_samples * self.num_repetitions * self.num_gestures
+
+#     def __len__(self):
+#         return self.len
+    
+#     def extract_frames(self, DIR):
+#         ''' Extract frames for the given subject/session.'''
+#         filenames = os.listdir(DIR)
+#         X, Y = [], []
+#         for gdx, name in enumerate(filenames):
+#             mat = sio.loadmat(os.path.join(DIR, name))
+#             reps = mat['gestures'].shape[0] # number of repetitions stored
+#             cur_label = int(name.replace('gest', '').replace('.mat', '')) # get the label for the given gesture
+#             if cur_label == 0: continue # exclude rest
+#             else: cur_label -= 1 
+
+#             # For each repetition
+#             for idx in range(reps):
+#                 emg = mat['gestures'][idx, 0].T
+#                 emg = bandpass(emg)
+#                 # emg = bandstop(emg) 
+#                 center = len(emg) // 2 # get the central index of the given repetition
+#                 images = emg[center - self.fs//2 : center + self.fs//2, :]
+#                 images = np.flip(images.reshape(self.n_samples, 1, 8, 24, order='F'), axis=0)
+#                 images = list(images[:, :, 1:, :]) # drop first row given bipolar nature of data and create list
+                
+#                 # If intrasession, use given repetition for testing
+#                 if self.intrasession and (idx+1)==self.test_rep:
+#                     self.X_test.extend(images)
+#                     self.Y_test.extend( [cur_label]*self.n_samples )
+#                 else:
+#                     X.extend(images) # add EMG surface images onto our data matrix
+#                     Y.extend( [cur_label]*self.n_samples ) # add labels onto our label matrix
+#         return X, Y
+    
+#     def train_test_split(self):
+#         '''Gets a deepcopy of the current loader with test data set as training data.'''
+#         test_loader = deepcopy(self) # make a copy of current loader
+#         test_loader.X, test_loader.Y = deepcopy(test_loader.X_test), deepcopy(test_loader.Y_test)
+#         del test_loader.X_test, test_loader.Y_test, self.X_test, self.Y_test
+#         test_loader.num_repetitions = 1 # only a single repetition in the given test set
+#         if self.intrasession:
+#             test_loader.len = len(self) // self.num_repetitions
+#         else:
+#             test_loader.len = self.n_samples * self.num_repetitions * self.num_gestures
+#         return test_loader # returns test loader
+
+#     def __getitem__(self, idx):
+#         X, Y = self.X[idx], self.Y[idx]
+#         return X, Y

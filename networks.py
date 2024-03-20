@@ -96,13 +96,12 @@ class CapgMyoNet(nn.Module):
 
     def forward(self, x):
 
-        # Reshape EMG channels into grid
-        batch_size = x.shape[0]
-        x = x.squeeze() # remove any redundant dimensions
-        x = x.view(batch_size, self.input_shape[1], self.input_shape[0]) # convert from channels into grid
-        x = torch.transpose(x, 1, 2) # tranpose required as reshape is not the default ordering
+        # # Reshape EMG channels into grid
+        # batch_size = x.shape[0]
+        # x = x.squeeze() # remove any redundant dimensions
+        # x = x.view(batch_size, self.input_shape[1], self.input_shape[0]) # convert from channels into grid
+        # x = torch.transpose(x, 1, 2) # tranpose required as reshape is not the default ordering
 
-        x = x[:, None, :, :]
         x = self.batchnorm0(x)
         x = self.relu1(self.batchnorm1(self.conv1(x)))
         x = self.relu2(self.batchnorm2(self.conv2(x)))
