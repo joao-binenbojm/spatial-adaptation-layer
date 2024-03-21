@@ -12,7 +12,7 @@ import preprocess_functions as preprocess_functions
 from collections import Counter
 from copy import deepcopy
 
-from utils import bandpass, bandstop
+from utils_emg import bandpass, bandstop
 
 
 def extract_frames_csl(DIR, num_gestures=26, num_repetitions=10, num_samples=2048, input_shape=(7,24)):
@@ -44,17 +44,16 @@ def extract_frames_csl(DIR, num_gestures=26, num_repetitions=10, num_samples=204
             images = images[:, :, 1:, :] # drop first row given bipolar nature of data and create list
 
             # Add data extracted from given repetition to our data matrix            
-            X[cur_label, idx, :, 0, :, :] = images # add EMG surface images onto our data matrix
+            X[cur_label, idx, :, :, :, :] = images # add EMG surface images onto our data matrix
             Y[cur_label, idx, :] = np.array([cur_label]*num_samples)  # add labels onto our label matrix
         
-        # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
+        # For each repetition that is missing from total number of repetitions, oversample a previous repetition
         for idx in range(reps, reps+missing):
-            rep_idx = np.random.randint(0, reps, size=num_samples)
-            sample_idx = np.random.randint(0, num_samples, size=num_samples)
+            rep_idx = np.random.randint(0, reps)
 
-            Xsample = X[cur_label, rep_idx, sample_idx, :, :, :, :]
-            X[cur_label, idx, :, :, :, :, :] = Xsample
-            Ysample = Y[cur_label, rep_idx, sample_idx]
+            Xsample = X[cur_label, rep_idx, :, :, :, :] # get entire repetition
+            X[cur_label, idx, :, :, :, :] = Xsample
+            Ysample = Y[cur_label, rep_idx, :]
             Y[cur_label, idx, :] = Ysample
 
     return np.array(X), np.array(Y)
@@ -89,26 +88,24 @@ def extract_frames_capgmyo(filenames, num_gestures=8, num_repetitions=10, num_sa
             images = images.reshape(num_samples, 1, 8, 16, order='F')
 
             # Add data extracted from given repetition to our data matrix            
-            X[cur_label, idx, :, 0, :, :] = images # add EMG surface images onto our data matrix
+            X[cur_label, idx, :, :, :, :] = images # add EMG surface images onto our data matrix
             Y[cur_label, idx, :] = np.array([cur_label]*num_samples)  # add labels onto our label matrix
         
         # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
         for idx in range(reps, reps+missing):
-            rep_idx = np.random.randint(0, reps, size=num_samples)
-            sample_idx = np.random.randint(0, num_samples, size=num_samples)
+            rep_idx = np.random.randint(0, reps)
 
-            Xsample = X[cur_label, rep_idx, sample_idx, :, :, :, :]
-            X[cur_label, idx, :, :, :, :, :] = Xsample
-            Ysample = Y[cur_label, rep_idx, sample_idx]
+            Xsample = X[cur_label, rep_idx, :, :, :, :]
+            X[cur_label, idx, :, :, :, :] = Xsample
+            Ysample = Y[cur_label, rep_idx, :]
             Y[cur_label, idx, :] = Ysample
 
     return np.array(X), np.array(Y)
 
-def load_tensors(self, DIR='../datasets/csl', sub='subject1', extract_frames=extract_frames_csl, transform=None, target_transform=None,
+def load_tensors(path='../datasets/csl', sub='subject1', extract_frames=extract_frames_csl, transform=None, target_transform=None,
                   norm=0, num_gestures=8, num_repetitions=10, input_shape=(8, 16), fs=1000, sessions='session1'):
     ''' Takes in data files and cretes complete data tensor for either intrasession or intersession case.'''
     num_samples = fs # equivalent to 1s worth of samples
-    path = os.path.join(path, sub)
     intrasession = not isinstance(sessions, list) # if a session selected, only load that given session for intrasession performance
     if intrasession: num_sessions = 1
     else: num_sessions = len(sessions)
@@ -118,10 +115,10 @@ def load_tensors(self, DIR='../datasets/csl', sub='subject1', extract_frames=ext
     Y = np.zeros((num_sessions, num_gestures, num_repetitions, num_samples))
 
     # If intrasession, store information for only a given session
-    if self.intrasession:
+    if intrasession:
         DIR = os.path.join(path, sub, sessions)
         Xs, Ys = extract_frames(DIR, num_gestures=num_gestures, num_repetitions=num_repetitions, num_samples=num_samples, input_shape=input_shape)
-        X[:, :, :, :, :, :, :], Y[:, :, :, :] = Xs, Ys # set data to frames extracted from single session
+        X[0, :, :, :, :, :, :], Y[0, :, :, :] = Xs, Ys # set data to frames extracted from single session
 
     else:
         for idx, session in enumerate(sessions):
@@ -131,8 +128,8 @@ def load_tensors(self, DIR='../datasets/csl', sub='subject1', extract_frames=ext
             Y[idx, :, :, :] = Y # add labels extracted from given session
 
     # Convert data to tensor
-    X = torch.tensor(np.array(self.X)).to(torch.float32)
-    Y = torch.tensor(np.array(self.Y)).to(torch.float32)
+    X = torch.tensor(X).to(torch.float32)
+    Y = torch.tensor(Y).to(torch.float32)
     return X, Y
 
 # Dataset then just very simply takes in images and labels and does preprocessing/train test splits
@@ -141,6 +138,8 @@ class EMGFrameLoader(Dataset):
         super(EMGFrameLoader, self).__init__()
         self.transform = transform
         self.target_transform = target_transform
+        self.X = X
+        self.Y = Y
 
         if norm  == 1: # standardization
             if train:
