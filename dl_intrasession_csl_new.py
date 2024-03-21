@@ -9,6 +9,7 @@ from tqdm import tqdm
 from collections import Counter
 import matplotlib.pyplot as plt
 from scipy.io import loadmat
+from copy import deepcopy
 
 import torch
 from torch import nn
@@ -19,14 +20,16 @@ from skorch import NeuralNetClassifier
 
 import preprocess_functions as preprocess_functions
 from data_loaders import load_tensors, extract_frames_csl, EMGFrameLoader
-from utils_emg import majority_voting_segments, train_model, test_model
+from utils_emg import majority_voting_segments, train_model, test_model, bandpass, bandstop
 from networks import CapgMyoNet
 
 # from torch.utils.tensorboard import SummaryWriter
 # writer = SummaryWriter('runs/capgmyo')
 
 # Prepare data specific and hyperparameter settings for experiment
-data = {'DIR': '../datasets/csl',
+both = lambda x,fs : bandstop(bandpass(x, fs=fs), fs=fs)
+
+experiment1 = ['baseline', {'DIR': '../datasets/csl',
         'num_gestures': 26,
         'num_repetitions': 10,
         'input_shape': (7, 24),
@@ -34,71 +37,78 @@ data = {'DIR': '../datasets/csl',
         'fs': 2048,
         'subs': list(range(1, 6)),
         'sessions': list(range(1, 6))
-        }
+        },
 
-exp = {
-    'num_epochs': 1,
-    'lr': 0.001,
-    'batch_size': 32,
+    {'num_epochs': 15,
+    'lr': 0.01,
+    'batch_size': 128,
     'momentum': 0.9,
     'weight_decay': 1e-5,
-    'M': 32
-}
+    'M': 500,
+    'filters': bandpass
+}]
+
+experiment2 = deepcopy(experiment1)
+experiment2[0] = 'bandstop'
+experiment2[2]['filters'] = both # both bandstop and bandpass
 
 if __name__ == '__main__':
-    # Preinitialize metric arrays
-    subs, sessions = [], []
-    accs, maj_accs = [], [] # different metrics to be saved in csv from experiment
-    device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
+    for edx, experiment in enumerate([experiment1, experiment2]):
+        print('EXPERIMENT:', edx)
+        name, data, exp = experiment[0], experiment[1], experiment[2]
 
-    for sub in tqdm(data['subs']):
-        for session in data['sessions']:
-            # Load data for given subject/session
-            print('\n SUBJECT #{} - SESSION #{}'.format(sub, session))
-            sub_id = 'subject{}'.format(sub)
-            session = 'session{}'.format(session)
-            subs.append(sub)
-            sessions.append(session)
+        # Preinitialize metric arrays
+        subs, sessions = [], []
+        accs, maj_accs = [], [] # different metrics to be saved in csv from experiment
+        device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
-            # Load EMG data
-            X, Y = load_tensors(path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
-                                 input_shape=data['input_shape'], fs=data['fs'], sessions=session)
-            X_train = torch.flatten(X[:, :, :-1, :, :, :, :], end_dim=3) # get all but one repetition
-            Y_train = torch.flatten(Y[:, :, :-1, :], end_dim=3) # get all but one repetition
-            X_test = torch.flatten(X[:, :, [-1], :, :, :, :], end_dim=3) # get one repetition
-            Y_test = torch.flatten(Y[:, :, [-1], :], end_dim=3) # get one repetition
-            
-            # Create torch dataloaders
-            train_data = EMGFrameLoader(X=X_train, Y=Y_train)
-            test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False)
-            train_loader = DataLoader(train_data, batch_size=exp['batch_size'], shuffle=True)
-            test_loader = DataLoader(test_data, batch_size=32, shuffle=False)
+        for sub in tqdm(data['subs']):
+            for session in data['sessions']:
+                # Load data for given subject/session
+                print('\n SUBJECT #{} - SESSION #{}'.format(sub, session))
+                sub_id = 'subject{}'.format(sub)
+                session = 'session{}'.format(session)
+                subs.append(sub)
+                sessions.append(session)
 
-            # Model/training set-up
-            model = CapgMyoNet(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_gestures']).to(device)
-            num_epochs = exp['num_epochs']
-            criterion = nn.CrossEntropyLoss()
-            optimizer = torch.optim.SGD(model.parameters(), lr=exp['num_epochs'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
+                # Load EMG data
+                X, Y = load_tensors(path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
+                                    input_shape=data['input_shape'], fs=data['fs'], filters=exp['filters'], sessions=session)
+                X_train = torch.flatten(X[:, :, :-1, :, :, :, :], end_dim=3) # get all but one repetition
+                Y_train = torch.flatten(Y[:, :, :-1, :], end_dim=3) # get all but one repetition
+                X_test = torch.flatten(X[:, :, [-1], :, :, :, :], end_dim=3) # get one repetition
+                Y_test = torch.flatten(Y[:, :, [-1], :], end_dim=3) # get one repetition
 
-            # Train the model
-            train_model(model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs']) # run training loop
+                train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=0)
+                test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False, norm=0, stats=train_data.stats)
+                train_loader = DataLoader(train_data, batch_size=exp['batch_size'], shuffle=True)
+                test_loader = DataLoader(test_data, batch_size=32, shuffle=False)
 
-            # Testing loop over test loader
-            model.eval()
-            with torch.no_grad():
-                all_labs, all_preds = test_model(model, test_loader)
+                # Model/training set-up
+                model = CapgMyoNet(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_gestures']).to(device)
+                num_epochs = exp['num_epochs']
+                criterion = nn.CrossEntropyLoss()
+                optimizer = torch.optim.SGD(model.parameters(), lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
 
-            acc = accuracy_score(all_labs, all_preds)
-            accs.append(acc)
-            print('Test Accuracy:', acc)
+                # Train the model
+                train_model(model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs']) # run training loop
 
-            # MAJORITY VOTING PREDICTIONS
-            all_preds_maj = np.array(majority_voting_segments(all_preds, M=exp['32'], n_samples=train_data.n_samples))
-            maj_acc = accuracy_score(all_labs, all_preds_maj)
-            maj_accs.append(maj_acc)
-            print('Majority Voting Test Accuracy:', maj_acc)
+                # Testing loop over test loader
+                model.eval()
+                with torch.no_grad():
+                    all_labs, all_preds = test_model(model, test_loader)
 
-    # Save experiment data in .csv file
-    data = np.array([subs, accs, sessions, maj_accs]).T
-    df = pd.DataFrame(data=data, columns=['Subjects', 'Sessions', 'Accuracy', 'MV Accuracy'])
-    df.to_csv('./baseline.csv')
+                acc = accuracy_score(all_labs, all_preds)
+                accs.append(acc)
+                print('Test Accuracy:', acc)
+
+                # MAJORITY VOTING PREDICTIONS
+                all_preds_maj = np.array(majority_voting_segments(all_preds, M=exp['M'], n_samples=data['fs']))
+                maj_acc = accuracy_score(all_labs, all_preds_maj)
+                maj_accs.append(maj_acc)
+                print('Majority Voting Test Accuracy:', maj_acc)
+
+        # Save experiment data in .csv file
+        data = np.array([subs, accs, sessions, maj_accs]).T
+        df = pd.DataFrame(data=data, columns=['Subjects', 'Sessions', 'Accuracy', 'MV Accuracy'])
+        df.to_csv('./{}.csv'.format(name))
