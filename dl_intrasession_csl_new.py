@@ -37,7 +37,7 @@ data = {'DIR': '../datasets/csl',
         }
 
 exp = {
-    'num_epochs': 15,
+    'num_epochs': 1,
     'lr': 0.001,
     'batch_size': 32,
     'momentum': 0.9,
@@ -61,12 +61,12 @@ if __name__ == '__main__':
             sessions.append(session)
 
             # Load EMG data
-            X, Y = load_tensors(path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_gestures'],
+            X, Y = load_tensors(path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
                                  input_shape=data['input_shape'], fs=data['fs'], sessions=session)
-            X_train = torch.flatten(X[:, :, :-1, :, :, :, :], end_dim=2) # get all but one repetition
-            Y_train = torch.flatten(Y[:, :, :-1, :], end_dim=2) # get all but one repetition
-            X_test = torch.flatten(X[:, :, -1, :, :, :, :], end_dim=2) # get one repetition
-            Y_test = torch.flatten(Y[:, :, -1, :], end_dim=2) # get one repetition
+            X_train = torch.flatten(X[:, :, :-1, :, :, :, :], end_dim=3) # get all but one repetition
+            Y_train = torch.flatten(Y[:, :, :-1, :], end_dim=3) # get all but one repetition
+            X_test = torch.flatten(X[:, :, [-1], :, :, :, :], end_dim=3) # get one repetition
+            Y_test = torch.flatten(Y[:, :, [-1], :], end_dim=3) # get one repetition
             
             # Create torch dataloaders
             train_data = EMGFrameLoader(X=X_train, Y=Y_train)
@@ -75,7 +75,7 @@ if __name__ == '__main__':
             test_loader = DataLoader(test_data, batch_size=32, shuffle=False)
 
             # Model/training set-up
-            model = CapgMyoNet(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_classes']).to(device)
+            model = CapgMyoNet(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_gestures']).to(device)
             num_epochs = exp['num_epochs']
             criterion = nn.CrossEntropyLoss()
             optimizer = torch.optim.SGD(model.parameters(), lr=exp['num_epochs'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
