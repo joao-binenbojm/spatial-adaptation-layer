@@ -12,10 +12,9 @@ import preprocess_functions as preprocess_functions
 from collections import Counter
 from copy import deepcopy
 
-from utils_emg import bandpass, bandstop
+from utils_emg import bandpass, bandstop, identity
 
-
-def extract_frames_csl(DIR, num_gestures=26, num_repetitions=10, fs=2048, input_shape=(7,24)):
+def extract_frames_csl(DIR, num_gestures=26, num_repetitions=10, fs=2048, filters=identity, input_shape=(7,24)):
     ''' Extract frames for the given subject/session.'''
 
     # Initialize data container for given session
@@ -37,8 +36,7 @@ def extract_frames_csl(DIR, num_gestures=26, num_repetitions=10, fs=2048, input_
         # For each repetition available 
         for idx in range(reps):
             emg = mat['gestures'][idx, 0].T
-            emg = bandpass(emg, fs=fs)
-            # emg = bandstop(emg, fs=fs) 
+            emg = filters(emg, fs=fs)
             center = len(emg) // 2 # get the central index of the given repetition
             images = emg[center - num_samples//2 : center + num_samples//2, :]
             images = np.flip(images.reshape(num_samples, 1, 8, 24, order='F'), axis=0)
@@ -57,7 +55,7 @@ def extract_frames_csl(DIR, num_gestures=26, num_repetitions=10, fs=2048, input_
             Ysample = Y[cur_label, rep_idx, :]
             Y[cur_label, idx, :] = Ysample
 
-    return np.array(X), np.array(Y)
+    return X, Y
 
 def extract_frames_capgmyo(filenames, num_gestures=8, num_repetitions=10, num_samples=1000, input_shape=(8,16)):
     ''' Extract frames for the given subject/session.'''
@@ -104,7 +102,7 @@ def extract_frames_capgmyo(filenames, num_gestures=8, num_repetitions=10, num_sa
     return np.array(X), np.array(Y)
 
 def load_tensors(path='../datasets/csl', sub='subject1', extract_frames=extract_frames_csl, transform=None, target_transform=None,
-                  norm=0, num_gestures=8, num_repetitions=10, input_shape=(8, 16), fs=1000, sessions='session1'):
+                  norm=0, num_gestures=8, num_repetitions=10, input_shape=(8, 16), fs=1000, filters=identity, sessions='session1'):
     ''' Takes in data files and cretes complete data tensor for either intrasession or intersession case.'''
     num_samples = fs # equivalent to 1s worth of samples
     intrasession = not isinstance(sessions, list) # if a session selected, only load that given session for intrasession performance
@@ -118,13 +116,13 @@ def load_tensors(path='../datasets/csl', sub='subject1', extract_frames=extract_
     # If intrasession, store information for only a given session
     if intrasession:
         DIR = os.path.join(path, sub, sessions)
-        Xs, Ys = extract_frames(DIR, num_gestures=num_gestures, num_repetitions=num_repetitions, num_samples=num_samples, input_shape=input_shape)
+        Xs, Ys = extract_frames(DIR, num_gestures=num_gestures, num_repetitions=num_repetitions, fs=fs, filters=filters, input_shape=input_shape)
         X[0, :, :, :, :, :, :], Y[0, :, :, :] = Xs, Ys # set data to frames extracted from single session
 
     else:
         for idx, session in enumerate(sessions):
             DIR = os.path.join(path, sub, session)
-            X, Y = extract_frames(DIR, num_gestures=num_gestures, num_repetitions=num_repetitions, num_samples=num_samples, input_shape=input_shape)
+            X, Y = extract_frames(DIR, num_gestures=num_gestures, num_repetitions=num_repetitions, fs=fs, filters=filters, input_shape=input_shape)
             X[idx, :, :, :, :, :, :] = X # add data extracted from given session
             Y[idx, :, :, :] = Y # add labels extracted from given session
 
@@ -139,6 +137,7 @@ class EMGFrameLoader(Dataset):
         super(EMGFrameLoader, self).__init__()
         self.transform = transform
         self.target_transform = target_transform
+        self.stats = stats
         self.X = X
         self.Y = Y
 
@@ -149,6 +148,7 @@ class EMGFrameLoader(Dataset):
             else:
                 self.mean = stats['mean'] # use training stats 
                 self.std = stats['std']
+            self.stats = {'mean': self.mean, 'std': self.std}
             self.X = (self.X - self.mean)/(self.std + 1.e-12)
 
         elif norm == -1: # scale between [-1, 1]
@@ -158,6 +158,7 @@ class EMGFrameLoader(Dataset):
             else:
                 self.max = stats['max']
                 self.min = stats['min']
+            self.stats = {'max': self.max, 'min': self.min}
             self.X = (self.X - self.min)/(self.max - self.min)*2 - 1
 
         if transform:

@@ -49,6 +49,8 @@ def majority_voting_segments(predictions, M=32, n_samples=1000):
 
 ## FILTERING
 
+identity = lambda x, fs: x
+
 def bandstop(data, fs=1000):
     '''Used to remove powerline interference and its multiples.'''
     sos = signal.butter(2, (45, 55), btype='bandstop', output='sos', fs=fs)
