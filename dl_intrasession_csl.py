@@ -18,7 +18,8 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, balanced_a
 from skorch import NeuralNetClassifier
 
 import preprocess_functions as preprocess_functions
-from data_loaders import CSLFrameLoader, majority_voting, majority_voting_segments
+from data_loaders import CSLFrameLoader
+from utils_emg import majority_voting_segments
 from networks import CapgMyoNet
 
 from torch.utils.tensorboard import SummaryWriter
@@ -126,7 +127,7 @@ if __name__ == '__main__':
                 print('Test Accuracy:', acc)
 
             # MAJORITY VOTING PREDICTIONS
-            all_preds_maj = np.array(majority_voting_segments(all_preds, M=32, n_samples=train_data.n_samples))
+            all_preds_maj = np.array(majority_voting_segments(all_preds, M=150, n_samples=train_data.n_samples))
             maj_acc = accuracy_score(all_labs, all_preds_maj)
             maj_accs.append(maj_acc)
             print('Majority Voting Test Accuracy:', maj_acc)
@@ -134,5 +135,5 @@ if __name__ == '__main__':
     # Save experiment data in .csv file
     data = np.array([subs, accs, sessions, maj_accs]).T
     df = pd.DataFrame(data=data, columns=['Subjects', 'Sessions', 'Accuracy', 'MV Accuracy'])
-    df.to_csv('./baseline.csv')
+    df.to_csv('./bandstop.csv')
         
