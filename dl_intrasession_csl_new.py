@@ -19,7 +19,7 @@ from skorch import NeuralNetClassifier
 
 import preprocess_functions as preprocess_functions
 from data_loaders import load_tensors, extract_frames_csl, EMGFrameLoader
-from utils import majority_voting_segments, train_model, test_model
+from utils_emg import majority_voting_segments, train_model, test_model
 from networks import CapgMyoNet
 
 # from torch.utils.tensorboard import SummaryWriter
