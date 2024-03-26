@@ -2,6 +2,7 @@ from collections import Counter
 from scipy import signal
 import numpy as np
 import torch
+from time import time
 from torch.utils.tensorboard import SummaryWriter
 writer = SummaryWriter('runs/capgmyo')
 
@@ -64,15 +65,16 @@ def bandpass(data, fs=1000):
     return data
 
 ## TRAINING/TESTING
-def train_model(model, train_loader, optimizer, criterion, num_epochs=2, val_loader=None):
+def train_model(model, train_loader, optimizer, criterion, num_epochs=2, scheduler=None, val_loader=None):
     '''Training loop for given experiment.'''
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
     running_loss = 0.0
     running_correct = 0
+    t0 = time() # initial timestamp at start of training
     for epoch in range(num_epochs):
         for i, (signals, labels) in enumerate(train_loader):
             signals = signals.to(device)
-            labels = labels.view(-1).to(device)
+            labels = labels.view(-1).to(device).to(torch.float32)
             # forward pass
             outputs = model(signals).to(device)
             loss = criterion(outputs, labels)
@@ -80,6 +82,7 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, val_loa
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            scheduler.step()
 
             # TENSORBOARD
             running_loss += loss.item()
@@ -89,10 +92,15 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, val_loa
 
             if (i + 1) % 100 == 0:
                 print('Epoch {} / {}, step {} / {}, loss = {:4f}'.format(epoch+1, num_epochs, i+1, len(train_loader), loss.item()))
+                print('Learning Rate:', scheduler.get_last_lr())
                 writer.add_scalar('training loss', running_loss/100, epoch * len(train_loader) + i)
                 writer.add_scalar('training accuracy', running_correct/100, epoch * len(train_loader) + i)
                 running_loss = 0.0
                 running_correct = 0
+        # Calculate time taken after given epoch
+        tf = time()
+        h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
+        print('TOTAL TIME ELAPSED: {}h, {}min'.format(h, m))
 
 def test_model(model, test_loader):
     ''' Takes given PyTorch model and test DataLoader, and returns all labels and corresponding model predictions.'''
