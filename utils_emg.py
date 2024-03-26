@@ -72,7 +72,7 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, val_loa
     for epoch in range(num_epochs):
         for i, (signals, labels) in enumerate(train_loader):
             signals = signals.to(device)
-            labels = labels.view(-1).type(torch.LongTensor).to(device)
+            labels = labels.view(-1).to(device)
             # forward pass
             outputs = model(signals).to(device)
             loss = criterion(outputs, labels)
