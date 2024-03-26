@@ -1,3 +1,0 @@
-# packages in environment at /home/joao/miniconda3/envs/da:
-#
-# Name                    Version                   Build  Channel
