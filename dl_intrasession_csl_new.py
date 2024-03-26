@@ -39,7 +39,7 @@ experiment1 = ['baseline', {'DIR': '../datasets/csl',
         'sessions': list(range(1, 6))
         },
 
-    {'num_epochs': 15,
+    {'num_epochs': 1,
     'lr': 0.01,
     'batch_size': 128,
     'momentum': 0.9,
@@ -109,6 +109,6 @@ if __name__ == '__main__':
                 print('Majority Voting Test Accuracy:', maj_acc)
 
         # Save experiment data in .csv file
-        data = np.array([subs, accs, sessions, maj_accs]).T
+        data = np.array([subs, sessions, accs, maj_accs]).T
         df = pd.DataFrame(data=data, columns=['Subjects', 'Sessions', 'Accuracy', 'MV Accuracy'])
         df.to_csv('./{}.csv'.format(name))
