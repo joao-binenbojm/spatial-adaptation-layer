@@ -1,5 +1,6 @@
 import os
 import sys
+from time import time
 
 import scipy
 import scipy.io as sio
@@ -39,23 +40,25 @@ experiment1 = ['baseline', {'DIR': '../datasets/csl',
         'sessions': list(range(1, 6))
         },
 
-    {'num_epochs': 1,
-    'lr': 0.01,
-    'batch_size': 128,
+    {'num_epochs': 15,
+    'lr': 0.05,
+    'scheduler': torch.optim.lr_scheduler.MultiStepLR,
+    'batch_size': 512,
     'momentum': 0.9,
     'weight_decay': 1e-5,
     'M': 500,
-    'filters': bandpass
+    'filters': both
 }]
 
-experiment2 = deepcopy(experiment1)
-experiment2[0] = 'bandstop'
-experiment2[2]['filters'] = both # both bandstop and bandpass
+# experiment2 = deepcopy(experiment1)
+# experiment2[0] = 'bandstop'
+# experiment2[2]['filters'] = both # both bandstop and bandpass
 
 if __name__ == '__main__':
-    for edx, experiment in enumerate([experiment1, experiment2]):
+    for edx, experiment in enumerate([experiment1]):
         print('EXPERIMENT:', edx)
         name, data, exp = experiment[0], experiment[1], experiment[2]
+        t0 = time()
 
         # Preinitialize metric arrays
         subs, sessions = [], []
@@ -89,9 +92,10 @@ if __name__ == '__main__':
                 num_epochs = exp['num_epochs']
                 criterion = nn.CrossEntropyLoss()
                 optimizer = torch.optim.SGD(model.parameters(), lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
+                scheduler = exp['scheduler'](optimizer, milestones=[10, 15], gamma=0.1)
 
                 # Train the model
-                train_model(model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs']) # run training loop
+                train_model(model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler) # run training loop
 
                 # Testing loop over test loader
                 model.eval()
@@ -112,3 +116,7 @@ if __name__ == '__main__':
         data = np.array([subs, sessions, accs, maj_accs]).T
         df = pd.DataFrame(data=data, columns=['Subjects', 'Sessions', 'Accuracy', 'MV Accuracy'])
         df.to_csv('./{}.csv'.format(name))
+
+        tf = time()
+        h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
+        print('TOTAL TIME ELAPSED: {}h, {}min'.format(h, m))

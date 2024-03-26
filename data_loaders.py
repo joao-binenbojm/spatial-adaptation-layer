@@ -160,6 +160,16 @@ class EMGFrameLoader(Dataset):
                 self.min = stats['min']
             self.stats = {'max': self.max, 'min': self.min}
             self.X = (self.X - self.min)/(self.max - self.min)*2 - 1
+        
+        elif norm == 2: # scale between [0, 255]
+            if train:
+                self.max = self.X.amax(keepdim=True)
+                self.min = self.X.amin(keepdim=True)
+            else:
+                self.max = stats['max']
+                self.min = stats['min']
+            self.stats = {'max': self.max, 'min': self.min}
+            self.X = (255*(self.X - self.min)/(self.max - self.min))
 
         if transform:
             self.X = transform(self.X)
