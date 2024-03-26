@@ -30,7 +30,7 @@ from networks import CapgMyoNet
 # Prepare data specific and hyperparameter settings for experiment
 both = lambda x,fs : bandstop(bandpass(x, fs=fs), fs=fs)
 
-experiment1 = ['baseline', {'DIR': '../datasets/csl',
+experiment1 = ['new', {'DIR': '../datasets/csl',
         'num_gestures': 26,
         'num_repetitions': 10,
         'input_shape': (7, 24),
