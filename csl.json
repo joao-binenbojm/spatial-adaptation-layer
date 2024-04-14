@@ -1,0 +1,10 @@
+{
+    "DIR": "../datasets/csl",
+    "num_gestures": 26,
+    "num_repetitions": 10,
+    "input_shape": [7, 24],
+    "dataset_name": "csl",
+    "fs": 2048,
+    "subs": [1,2,3,4,5],
+    "sessions": [1,2,3,4,5]
+}

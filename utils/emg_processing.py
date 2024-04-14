@@ -1,10 +1,15 @@
 from collections import Counter
 from scipy import signal
 import numpy as np
-import torch
-from time import time
-from torch.utils.tensorboard import SummaryWriter
-writer = SummaryWriter('runs/capgmyo')
+
+
+def get_rms_signal(emg, M=32, s=1):
+    '''Computes the instantaneous estimate of RMS from a window of L samples. Returns a signal of the same length.'''
+    emg_square = np.square(emg)
+    ma_filter = np.ones((2*M + 1, 1)) / (2*M+1) # computes the average within the given window
+    ms_signal = signal.convolve(emg_square, ma_filter, mode='same')
+    rms_signal = np.sqrt(ms_signal)
+    return rms_signal
 
 ## Majority Voting
 def majority_voting(predictions, M=32):
@@ -49,7 +54,6 @@ def majority_voting_segments(predictions, M=32, n_samples=1000):
     return voted_predictions
 
 ## FILTERING
-
 identity = lambda x, fs: x
 
 def bandstop(data, fs=1000):
@@ -63,53 +67,3 @@ def bandpass(data, fs=1000):
     sos = signal.butter(2, (20, 380), btype='bandpass', output='sos', fs=fs)
     data = signal.sosfilt(sos, data, axis=0)
     return data
-
-## TRAINING/TESTING
-def train_model(model, train_loader, optimizer, criterion, num_epochs=2, scheduler=None, val_loader=None):
-    '''Training loop for given experiment.'''
-    device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
-    running_loss = 0.0
-    running_correct = 0
-    t0 = time() # initial timestamp at start of training
-    for epoch in range(num_epochs):
-        for i, (signals, labels) in enumerate(train_loader):
-            signals = signals.to(device)
-            labels = labels.view(-1).to(device).to(torch.float32)
-            # forward pass
-            outputs = model(signals).to(device)
-            loss = criterion(outputs, labels)
-            # backward pass
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            scheduler.step()
-
-            # TENSORBOARD
-            running_loss += loss.item()
-
-            _, predicted = torch.max(outputs.data, 1)
-            running_correct += (predicted.squeeze() == labels.view(-1)).sum().item()
-
-            if (i + 1) % 100 == 0:
-                print('Epoch {} / {}, step {} / {}, loss = {:4f}'.format(epoch+1, num_epochs, i+1, len(train_loader), loss.item()))
-                print('Learning Rate:', scheduler.get_last_lr())
-                writer.add_scalar('training loss', running_loss/100, epoch * len(train_loader) + i)
-                writer.add_scalar('training accuracy', running_correct/100, epoch * len(train_loader) + i)
-                running_loss = 0.0
-                running_correct = 0
-        # Calculate time taken after given epoch
-        tf = time()
-        h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
-        print('TOTAL TIME ELAPSED: {}h, {}min'.format(h, m))
-
-def test_model(model, test_loader):
-    ''' Takes given PyTorch model and test DataLoader, and returns all labels and corresponding model predictions.'''
-    device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
-    all_labs, all_preds = [], []
-    for i, (signals, labels) in enumerate(test_loader):
-        signals, labels = signals.to(device), labels.view(-1).to(device)
-        outputs = model(signals).to(device)
-        _,predictions = torch.max(outputs, 1) # get class labels
-        all_labs.extend(labels.cpu().tolist())
-        all_preds.extend(predictions.cpu().tolist())
-    return all_labs, all_preds
