@@ -1,0 +1,18 @@
+{
+    "num_epochs": 15,
+    "norm": -1,
+    "lr": 5e-5,
+    "scheduler": {
+        "def": "torch.optim.lr_scheduler.MultiStepLR",
+        "params": {
+            "milestones": [6,11],
+            "gamma": 0.1
+        }
+    },
+    "network": "CapgMyoNetInterpolate",
+    "batch_size": 128,
+    "momentum": 0.9,
+    "weight_decay": 1e-3,
+    "M": 200,
+    "median_filt": true
+}
