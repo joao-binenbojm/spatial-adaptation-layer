@@ -57,7 +57,7 @@ class EMGData:
         self.X = torch.tensor(self.X)
         self.Y = torch.tensor(self.Y)
     
-    def get_tensors(self, test_idx):
+    def get_tensors(self, train_session=None, test_session=None, rep_idx=None):
         ''' Return data in desired format of surface images, with a leave-one-out approach for testing.
         '''
         # Apply normalization prior to dataloader
@@ -65,23 +65,33 @@ class EMGData:
 
         if self.intrasession:
             idxs = list(range(self.num_repetitions))
-            test_idx = idxs.pop(test_idx)
-            X_train = torch.flatten(self.X[:, :, idxs, :, :, :, :], end_dim=3) # get all but one repetition
-            Y_train = torch.flatten(self.Y[:, :, idxs, :], end_dim=3) # get all but one repetition
-            X_test = torch.flatten(self.X[:, :, [test_idx], :, :, :, :], end_dim=3) # get one repetition
-            Y_test = torch.flatten(self.Y[:, :, [test_idx], :],end_dim=3) # get one repetition
+            test_idx = idxs.pop(rep_idx)
+            X_train = torch.flatten(self.X[[test_session], :, idxs, :, :, :, :], end_dim=3) # get all but one repetition
+            Y_train = torch.flatten(self.Y[[test_session], :, idxs, :], end_dim=3) # get all but one repetition
+            X_test = torch.flatten(self.X[[test_session], :, [test_idx], :, :, :, :], end_dim=3) # get one repetition
+            Y_test = torch.flatten(self.Y[[test_session], :, [test_idx], :],end_dim=3) # get one repetition
+            
+            # Convert to torch tensors of type float32
+            X_train, X_test = X_train.to(torch.float32), X_test.to(torch.float32)
+            return X_train, Y_train, X_test, Y_test
+        
         else:
             idxs = list(range(self.num_sessions))
-            test_idx = idxs.pop(test_idx)
-            X_train = torch.flatten(self.X[idxs, :, :, :, :, :, :], end_dim=3) # get all sessions but one
-            Y_train = torch.flatten(self.Y[idxs, :, :, :], end_dim=3) # get all sessions but one
-            X_test = torch.flatten(self.X[[test_idx], :, :, :, :, :, :], end_dim=3) # get other session
-            Y_test = torch.flatten(self.Y[[test_idx], :, :, :], end_dim=3) # get other session
+            # If fine-tuning on a single repetition
+            if rep_idx is not None:
+                adapt_idx = idxs.pop(rep_idx)
+            else: # else, fine-tune on all available test data
+                adapt_idx = idxs
+            X_train = torch.flatten(self.X[[train_session], :, :, :, :, :, :], end_dim=3) # get train session labels
+            Y_train = torch.flatten(self.Y[[train_session], :, :, :], end_dim=3) # get train session labels
+            X_adapt = torch.flatten(self.X[[test_session], :, [adapt_idx], :, :, :, :], end_dim=3) # get all sessions but one
+            Y_adapt = torch.flatten(self.Y[[train_session], :, [adapt_idx], :], end_dim=3) # get train session labels
+            X_test = torch.flatten(self.X[[test_idx], :, idxs, :, :, :, :], end_dim=3) # get other session
+            Y_test = torch.flatten(self.Y[[test_idx], :, idxs, :], end_dim=3) # get other session
 
-        # Convert to torch tensors
-        X_train, X_test = X_train.to(torch.float32), X_test.to(torch.float32)
-
-        return X_train, Y_train, X_test, Y_test
+            # Convert to torch tensors of type float32
+            X_train, X_adapt, X_test = X_train.to(torch.float32), X_adapt.to(torch.float32), X_test.to(torch.float32)
+            return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test
     
     def oversample_repetitions(self, X, Y, cur_label, reps, missing):
         ''' Used when there is a non-uniform number of repetitions across gestures for a given uer.
