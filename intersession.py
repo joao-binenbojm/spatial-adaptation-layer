@@ -45,7 +45,7 @@ if __name__ == '__main__':
     session_ids = ['session'+str(ses) for ses in data['sessions']]
     subs, sessions, runs = [], [], []
     xshifts, yshifts = [], []
-    accs, maj_accs = [], [] # different metrics to be saved in csv from experiment
+    accs, tuned_accs = [], [] # different metrics to be saved in csv from experiment
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
     print('INTERSESSION:', data['dataset_name'])
@@ -104,13 +104,23 @@ if __name__ == '__main__':
                 train_model(model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                             warmup_scheduler=warmup_scheduler) # run training loop
                 
+                # Testing loop over test loader (Zero-shot)
+                print('TESTING...')
+                model.eval()
+                with torch.no_grad():
+                    all_labs, all_preds = test_model(model, test_loader)
+
+                acc = accuracy_score(all_labs, all_preds)
+                accs.append(acc)
+                print('Test Accuracy:', acc)
+
                 # Fine-tune to update model's shifting position
                 print('FINE-TUNING...')
                 for param in model.parameters():
                     param.requires_grad = False
                 model.eval()
-                model.resample.xshift.requires_grad = True
-                model.resample.yshift.requires_grad = True
+                model.shift.xshift.requires_grad = True
+                model.shift.yshift.requires_grad = True
                 model.baseline.requires_grad = True
                 for g in optimizer.param_groups:
                     g['lr'] = exp['lr']
@@ -120,31 +130,31 @@ if __name__ == '__main__':
                             warmup_scheduler=warmup_scheduler) # run training loop
 
 
-                xshift = model.resample.xshift.cpu().detach().numpy()[0]
-                yshift = model.resample.yshift.cpu().detach().numpy()[0]
+                xshift = model.shift.xshift.cpu().detach().numpy()[0]
+                yshift = model.shift.yshift.cpu().detach().numpy()[0]
 
                 xshifts.append(xshift)
                 yshifts.append(yshift)
 
-                # Testing loop over test loader
+                # Testing loop over test loader (K-shot)
                 print('TESTING...')
                 model.eval()
                 with torch.no_grad():
                     print('LEARNED SHIFTS: x: {} , y: {}'.format(xshift, yshift))
                     all_labs, all_preds = test_model(model, test_loader)
 
-                acc = accuracy_score(all_labs, all_preds)
-                accs.append(acc)
-                print('Test Accuracy:', acc)
+                tuned_acc = accuracy_score(all_labs, all_preds)
+                tuned_accs.append(tuned_acc)
+                print('Tuned Test Accuracy:', tuned_acc)
 
                 # SAVE RESULTS
-                arr = np.array([subs, sessions, accs, xshifts, yshifts]).T
-                df = pd.DataFrame(data=arr, columns=['Subjects', 'Test Session', 'Accuracy', 'xshift', 'yshift'])
+                arr = np.array([subs, train_sessions, test_sessions, accs, tuned_accs, xshifts, yshifts]).T
+                df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Session', 'Accuracy', 'Tuned Accuracy', 'xshift', 'yshift'])
                 df.to_csv(name + '.csv')
 
     # Save experiment data in .csv file
-    arr = np.array([subs, sessions, accs, xshifts, yshifts]).T
-    df = pd.DataFrame(data=arr, columns=['Subjects', 'Test Session', 'Accuracy', 'xshift', 'yshift'])
+    arr = np.array([subs, train_sessions, test_sessions, accs, tuned_accs, xshifts, yshifts]).T
+    df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Accuracy', 'Tuned Accuracy', 'xshift', 'yshift'])
     df.to_csv(name + '.csv')
 
     tf = time()
