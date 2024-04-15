@@ -43,16 +43,14 @@ if __name__ == '__main__':
 
     # Preinitialize metric arrays
     session_ids = ['session'+str(ses) for ses in data['sessions']]
-    subs, sessions, runs = [], [], []
-    xshifts, yshifts = [], []
+    subs, test_reps = [], []
     accs, maj_accs = [], [] # different metrics to be saved in csv from experiment
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
-    print('INTERSESSION:', data['dataset_name'])
+    print('INTRASESSION:', data['dataset_name'])
     for idx, sub in tqdm(enumerate(data['subs'])):
-        dg = data['dgs'][idx]
         # Load data for given subject/session
-        print('\n SUBJECT #{}'.format(sub))
+        dg = data['dgs'][idx]
         sub_id = 'subject{}'.format(sub)
 
         # Load EMG data in uniform format
@@ -62,12 +60,11 @@ if __name__ == '__main__':
         emg_tensorizer.load_tensors()
 
         for test_ses in tqdm(data['sessions']):
-            for run in range(5):
+            for test_idx in range(10):
                 subs.append(sub)
-                sessions.append(test_ses)
-                runs.append(run)
-                print('TEST SESSION #{}, dg: {}'.format(test_ses, dg))
-                print('RUN #{}'.format(run))
+                test_reps.append(test_idx)
+                print('\n SUBJECT #{}'.format(sub))
+                print('TEST REPETITION #{}, dg: {}'.format(test_idx, dg))
 
                 X_train, Y_train, X_test, Y_test = emg_tensorizer.get_tensors(test_idx=test_ses-1, dg=dg)
 
@@ -98,39 +95,17 @@ if __name__ == '__main__':
                 warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=3*len(train_loader))
 
                 # Train the model
-                model.shift.xshift.requires_grad = False
-                model.shift.yshift.requires_grad = False
-                model.baseline.requires_grad = False
+                if exp['adaptation'] == 'shift-adaptation':
+                    model.shift.xshift.requires_grad = False
+                    model.shift.yshift.requires_grad = False
+                    model.baseline.requires_grad = False
                 train_model(model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                             warmup_scheduler=warmup_scheduler) # run training loop
                 
-                # Fine-tune to update model's shifting position
-                print('FINE-TUNING...')
-                for param in model.parameters():
-                    param.requires_grad = False
-                model.eval()
-                model.resample.xshift.requires_grad = True
-                model.resample.yshift.requires_grad = True
-                model.baseline.requires_grad = True
-                for g in optimizer.param_groups:
-                    g['lr'] = exp['lr']
-                scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
-                warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=3*len(test_loader))
-                train_model(model, test_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
-                            warmup_scheduler=warmup_scheduler) # run training loop
-
-
-                xshift = model.resample.xshift.cpu().detach().numpy()[0]
-                yshift = model.resample.yshift.cpu().detach().numpy()[0]
-
-                xshifts.append(xshift)
-                yshifts.append(yshift)
-
                 # Testing loop over test loader
                 print('TESTING...')
                 model.eval()
                 with torch.no_grad():
-                    print('LEARNED SHIFTS: x: {} , y: {}'.format(xshift, yshift))
                     all_labs, all_preds = test_model(model, test_loader)
 
                 acc = accuracy_score(all_labs, all_preds)
@@ -138,13 +113,13 @@ if __name__ == '__main__':
                 print('Test Accuracy:', acc)
 
                 # SAVE RESULTS
-                arr = np.array([subs, sessions, accs, xshifts, yshifts]).T
-                df = pd.DataFrame(data=arr, columns=['Subjects', 'Test Session', 'Accuracy', 'xshift', 'yshift'])
+                arr = np.array([subs, test_reps, accs]).T
+                df = pd.DataFrame(data=arr, columns=['Subjects', 'Test Repetitions', 'Accuracy'])
                 df.to_csv(name + '.csv')
 
     # Save experiment data in .csv file
-    arr = np.array([subs, sessions, accs, xshifts, yshifts]).T
-    df = pd.DataFrame(data=arr, columns=['Subjects', 'Test Session', 'Accuracy', 'xshift', 'yshift'])
+    arr = np.array([subs, test_reps, accs]).T
+    df = pd.DataFrame(data=arr, columns=['Subjects', 'Test Repetitions', 'Accuracy'])
     df.to_csv(name + '.csv')
 
     tf = time()

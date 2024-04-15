@@ -160,7 +160,7 @@ class CapgMyoNet(nn.Module):
     
 
 
-class Regrid(torch.nn.Module):
+class Shift(torch.nn.Module):
     def __init__(self, input_shape):
         super().__init__()
         self.Nv, self.Nh = input_shape
@@ -198,7 +198,7 @@ class RMSNet(nn.Module):
         else:
             self.register_buffer('baseline', torch.zeros(1, 1, input_shape[0], input_shape[1])) # original coordinates
 
-        self.regrid = Regrid(input_shape)
+        self.shift = Shift(input_shape)
         self.fc = nn.Linear(self.channels, self.num_classes)
         # self.sm = nn.Softmax(dim=1)
 
@@ -206,7 +206,7 @@ class RMSNet(nn.Module):
     def forward(self, x):
         x = median_pool_2d(x) # perform median filtering step
         x = x - self.baseline # subtract baseline for baseline normalization
-        x = self.regrid(x) # perform image resampling step
+        x = self.shift(x) # perform image resampling step
         x = x.view(x.shape[0],-1) # flatten for determining classification
         x = self.fc(x)
         # x = self.sm(x)
@@ -223,7 +223,7 @@ class CapgMyoNetInterpolate(nn.Module):
         self.input_shape = input_shape
         self.num_classes = num_classes
 
-        self.resample = Regrid(input_shape)
+        self.shift = Shift(input_shape)
 
         if baseline:
             self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
@@ -287,7 +287,7 @@ class CapgMyoNetInterpolate(nn.Module):
         # x = x.view(batch_size, self.input_shape[1], self.input_shape[0]) # convert from channels into grid
         # x = torch.transpose(x, 1, 2) # tranpose required as reshape is not the default ordering
 
-        x = self.regrid(x) # perform image resampling step
+        x = self.shift(x) # perform image resampling step
         x = x - self.baseline # perform baseline normalization
         x = self.batchnorm0(x)
         x = self.relu1(self.batchnorm1(self.conv1(x)))
