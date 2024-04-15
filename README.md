@@ -25,6 +25,9 @@ The two primary scripts to be used in this investigation are the intrasession/in
 ___{dataset}_.json__: which contains information regarding the dataset that will be employed (e.g. input shape or number of gestures).
 __exp.json__: this contains information regarding the experimental conditions, and includes things such as optimizer hyperparameters, preprocessing choices, or even fine-tuning choices.
 
+## Changing Capgmyo data format
+There is a file in utils that is used to convert Capgmyo file naming/folder conventions into the CSL conventions (excluding the MVC recordings) to make the data loading procedure between the two datasets more uniform. Check out the EMG tensorizers to understand how to structure your directories!
+
 ## References
 1. https://dl.acm.org/doi/10.1145/2702123.2702501
 2. https://www.mdpi.com/1424-8220/17/3/458
