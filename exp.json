@@ -1,5 +1,5 @@
 {
-    "num_epochs": 1,
+    "num_epochs": 15,
     "norm": -1,
     "lr": 5e-5,
     "scheduler": {
@@ -12,7 +12,7 @@
     "batch_size": 128,
     "momentum": 0.9,
     "weight_decay": 1e-3,
-    "intrasession": true,
+    "intrasession": false,
     "network": "CapgMyoNetInterpolate",
     "emg_tensorizer": "CapgmyoDataRMS",
     "M": 200,

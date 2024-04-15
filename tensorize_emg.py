@@ -76,18 +76,18 @@ class EMGData:
             return X_train, Y_train, X_test, Y_test
         
         else:
-            idxs = list(range(self.num_sessions))
+            idxs = list(range(self.num_repetitions))
             # If fine-tuning on a single repetition
             if rep_idx is not None:
-                adapt_idx = idxs.pop(rep_idx)
+                adapt_idx = [idxs.pop(rep_idx)]
             else: # else, fine-tune on all available test data
                 adapt_idx = idxs
-            X_train = torch.flatten(self.X[[train_session], :, :, :, :, :, :], end_dim=3) # get train session labels
-            Y_train = torch.flatten(self.Y[[train_session], :, :, :], end_dim=3) # get train session labels
-            X_adapt = torch.flatten(self.X[[test_session], :, [adapt_idx], :, :, :, :], end_dim=3) # get all sessions but one
-            Y_adapt = torch.flatten(self.Y[[train_session], :, [adapt_idx], :], end_dim=3) # get train session labels
-            X_test = torch.flatten(self.X[[test_idx], :, idxs, :, :, :, :], end_dim=3) # get other session
-            Y_test = torch.flatten(self.Y[[test_idx], :, idxs, :], end_dim=3) # get other session
+            X_train = torch.flatten(self.X[[train_session], :, :, :, :, :, :], end_dim=-4) # get train session labels
+            Y_train = torch.flatten(self.Y[[train_session], :, :, :], end_dim=-1) # get train session labels
+            X_adapt = torch.flatten(self.X[[test_session], :, adapt_idx, :, :, :, :], end_dim=-4) # get all sessions but one
+            Y_adapt = torch.flatten(self.Y[[test_session], :, adapt_idx, :], end_dim=-1) # get train session labels
+            X_test = torch.flatten(self.X[[test_session], :, idxs, :, :, :, :], end_dim=-4) # get other session
+            Y_test = torch.flatten(self.Y[[test_session], :, idxs, :], end_dim=-1) # get other session
 
             # Convert to torch tensors of type float32
             X_train, X_adapt, X_test = X_train.to(torch.float32), X_adapt.to(torch.float32), X_test.to(torch.float32)
@@ -301,21 +301,36 @@ class CapgmyoDataRMS(EMGData):
         ynew = np.arange(Nv)*10 + init_gap_v
         return x, y, xnew, ynew
     
-    def get_tensors(self, test_idx, dg=27.5):
+    def get_tensors(self, train_session=None, test_session=None, rep_idx=None, dg=27.5):
         ''' Keeps parent method, but adds intermediary interpolation step.
         '''
         # Original parent class method
-        X_train, Y_train, X_test, Y_test = super().get_tensors(test_idx)
+        if self.intrasession:
+            X_train, Y_train, X_test, Y_test = super().get_tensors(train_session=train_session,
+                                                                test_session=test_session,
+                                                                rep_idx=rep_idx)
+            # 2D regridding!
+            print('2D REGRIDDING EMG IMAGE...')
+            X_train, X_test = X_train.numpy(), X_test.numpy()
+            X_train = self.uniform_grid(X_train, dg=dg)
+            X_test = self.uniform_grid(X_test, dg=dg)
 
-        # 2D regridding!
-        print('2D REGRIDDING EMG IMAGE...')
-        X_train, X_test = X_train.numpy(), X_test.numpy()
-        X_train = self.uniform_grid(X_train, dg=dg)
-        X_test = self.uniform_grid(X_test, dg=dg)
+            X_train, X_test = torch.tensor(X_train).to(torch.float32), torch.tensor(X_test).to(torch.float32)
+            return X_train, Y_train, X_test, Y_test
+        
+        else:
+            X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test = super().get_tensors(train_session=train_session,
+                                                                test_session=test_session,
+                                                                rep_idx=rep_idx)
+            # 2D regridding!
+            print('2D REGRIDDING EMG IMAGE...')
+            X_train, X_adapt, X_test = X_train.numpy(), X_adapt.numpy(), X_test.numpy()
+            X_train = self.uniform_grid(X_train, dg=dg)
+            X_test = self.uniform_grid(X_test, dg=dg)
+            X_adapt = self.uniform_grid(X_adapt, dg=dg)
 
-        X_train, X_test = torch.tensor(X_train).to(torch.float32), torch.tensor(X_test).to(torch.float32)
-
-        return X_train, Y_train, X_test, Y_test
+            X_train, X_adapt, X_test = torch.tensor(X_train).to(torch.float32), torch.tensor(X_adapt).to(torch.float32), torch.tensor(X_test).to(torch.float32)
+            return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test
 
 
 # class CSLFrameLoader(Dataset):

@@ -42,17 +42,18 @@ if __name__ == '__main__':
     t0 = time()
 
     # Preinitialize metric arrays
-    session_ids = ['session'+str(ses+1) for ses in data['sessions']]
-    subs, test_sessions, train_sessions= [], [], []
+    session_ids = ['session'+str(ses) for ses in data['sessions']]
+    subs, sessions, runs = [], [], []
     xshifts, yshifts = [], []
     accs, tuned_accs = [], [] # different metrics to be saved in csv from experiment
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
     print('INTERSESSION:', data['dataset_name'])
     for idx, sub in tqdm(enumerate(data['subs'])):
-        # Load data for given subject/session
         dg = data['dgs'][idx]
-        sub_id = 'subject{}'.format(sub+1)
+        # Load data for given subject/session
+        print('\n SUBJECT #{}'.format(sub))
+        sub_id = 'subject{}'.format(sub)
 
         # Load EMG data in uniform format
         emg_tensorizer = emg_tensorizer_def(path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
@@ -60,23 +61,15 @@ if __name__ == '__main__':
                                             median_filt=exp['median_filt'], intrasession=exp['intrasession'])
         emg_tensorizer.load_tensors()
 
-        # Run code 5 times for every train/test session pair, except where same session is used for train and test
-        for train_session in tqdm(data['sessions']):
-            for test_session in tqdm(data['sessions']):
-
-                # Only run if train/test session aren't the same
-                if test_session == train_session:
-                    continue
+        for test_ses in tqdm(data['sessions']):
+            for run in range(5):
                 subs.append(sub)
-                train_sessions.append(train_session)
-                test_sessions.append(test_session)
-                print('\n SUBJECT #{}'.format(sub+1))
-                print('TEST SESSION #{}, TRAIN SESSION #{}, dg: {}'.format(test_session+1, train_session+1, dg))
+                sessions.append(test_ses)
+                runs.append(run)
+                print('TEST SESSION #{}, dg: {}'.format(test_ses, dg))
+                print('RUN #{}'.format(run))
 
-                X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test = emg_tensorizer.get_tensors(
-                                                                                test_session=test_session,
-                                                                                train_session=train_session,
-                                                                                dg=dg)
+                X_train, Y_train, X_test, Y_test = emg_tensorizer.get_tensors(test_idx=test_ses-1, dg=dg)
 
                 # # COMPUTE THE AVERAGE EMG IMAGE FOR EACH GESTURE
                 # fullX = data_extractor.X[0]
@@ -90,10 +83,8 @@ if __name__ == '__main__':
                 
                 # Get PyTorch DataLoaders
                 train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=exp['norm'])
-                adapt_data = EMGFrameLoader(X=X_adapt, Y=Y_adapt, norm=exp['norm'])
                 test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
                 train_loader = DataLoader(train_data, batch_size=exp['batch_size'], shuffle=True)
-                adapt_loader = DataLoader(adapt_data, batch_size=exp['batch_size'], shuffle=True)
                 test_loader = DataLoader(test_data, batch_size=exp['batch_size'], shuffle=True)
 
                 # Model/training set-up
@@ -135,7 +126,7 @@ if __name__ == '__main__':
                     g['lr'] = exp['lr']
                 scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
                 warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=3*len(test_loader))
-                train_model(model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
+                train_model(model, test_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                             warmup_scheduler=warmup_scheduler) # run training loop
 
 
@@ -158,7 +149,7 @@ if __name__ == '__main__':
 
                 # SAVE RESULTS
                 arr = np.array([subs, train_sessions, test_sessions, accs, tuned_accs, xshifts, yshifts]).T
-                df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Accuracy', 'Tuned Accuracy', 'xshift', 'yshift'])
+                df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Session', 'Accuracy', 'Tuned Accuracy', 'xshift', 'yshift'])
                 df.to_csv(name + '.csv')
 
     # Save experiment data in .csv file
