@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 
 
 # from data_loaders import load_tensors, extract_frames_csl, extract_frames_capgmyo, EMGFrameLoader
-from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS
+from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS
 from torch_loaders import EMGFrameLoader
 from utils.deep_learning import train_model, test_model
 from networks import CapgMyoNet, CapgMyoNetInterpolate, RMSNet
@@ -33,24 +33,24 @@ if __name__ == '__main__':
     name = exp[:-5] # keep experiment name
     print('#'*40 + '\n\n' + 'EXPERIMENT:'+ name + '\n\n' + '#'*40)
 
-    with open('capgmyo.json') as f:
-        data = json.load(f)
     with open(exp) as f:
         exp = json.load(f)
+    with open('{}.json'.format(exp['dataset'])) as f:
+        data = json.load(f)
     emg_tensorizer_def = eval(exp['emg_tensorizer'])
 
     t0 = time()
 
     # Preinitialize metric arrays
     session_ids = ['session'+str(ses+1) for ses in data['sessions']]
-    subs, test_reps = [], []
+    subs, sessions, test_reps = [], [], []
     accs, maj_accs = [], [] # different metrics to be saved in csv from experiment
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
     print('INTRASESSION:', data['dataset_name'])
     for idx, sub in tqdm(enumerate(data['subs'])):
         # Load data for given subject/session
-        dg = data['dgs'][idx]
+        # dg = data['dgs'][idx]
         sub_id = 'subject{}'.format(sub+1)
 
         # Load EMG data in uniform format
@@ -61,12 +61,21 @@ if __name__ == '__main__':
 
         for session in tqdm(data['sessions']):
             for test_idx in range(10):
+                print(sub, session, test_idx)
+                if sub == 0:
+                    if session < 2:
+                            continue
+                    else:
+                        if test_idx <= 5:
+                            continue # start from where we left off
+
                 subs.append(sub)
+                sessions.append(session)
                 test_reps.append(test_idx)
                 print('\n SUBJECT #{}, SESSION #{}'.format(sub + 1, session + 1))
-                print('TEST REPETITION #{}, dg: {}'.format(test_idx, dg))
+                print('TEST REPETITION #{}'.format(test_idx + 1))
 
-                X_train, Y_train, X_test, Y_test = emg_tensorizer.get_tensors(test_session=session, rep_idx=test_idx, dg=dg)
+                X_train, Y_train, X_test, Y_test = emg_tensorizer.get_tensors(test_session=session, rep_idx=test_idx)
 
                 # # COMPUTE THE AVERAGE EMG IMAGE FOR EACH GESTURE
                 # fullX = data_extractor.X[0]
@@ -85,7 +94,7 @@ if __name__ == '__main__':
                 test_loader = DataLoader(test_data, batch_size=exp['batch_size'], shuffle=True)
 
                 # Model/training set-up
-                Nv, Nh = emg_tensorizer.Nv, emg_tensorizer.Nh
+                Nv, Nh = emg_tensorizer.input_shape[0], emg_tensorizer.input_shape[1]
                 model = eval(exp['network'])(channels=np.prod((Nv, Nh)), input_shape=(Nv, Nh), num_classes=data['num_gestures']).to(device)
                 num_epochs = exp['num_epochs']
                 criterion = nn.CrossEntropyLoss(reduction='sum')
@@ -113,8 +122,8 @@ if __name__ == '__main__':
                 print('Test Accuracy:', acc)
 
                 # SAVE RESULTS
-                arr = np.array([subs, test_reps, accs]).T
-                df = pd.DataFrame(data=arr, columns=['Subjects', 'Test Repetitions', 'Accuracy'])
+                arr = np.array([subs, sessions, test_reps, accs]).T
+                df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy'])
                 df.to_csv(name + '.csv')
 
     # Save experiment data in .csv file

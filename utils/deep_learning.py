@@ -22,7 +22,7 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
     running_loss = 0.0
     running_correct = 0
     # xshift, yshift, baseline = [], [], []
-    # weights = []
+    weights = []
 
     t0 = time() # initial timestamp at start of training
     for epoch in range(num_epochs):
@@ -42,7 +42,7 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
             # TENSORBOARD
             running_loss += loss.item()
 
-            # weights.append(model.fc.weight.cpu().detach().numpy().ravel())
+            weights.append(model.fc.weight.cpu().detach().numpy().ravel())
 
             _, predicted = torch.max(outputs.data, 1)
             running_correct += (predicted.squeeze() == labels.view(-1)).sum().item()
@@ -71,10 +71,10 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
     # plt.title('Learned baseline')
     # plt.savefig('baseline{}.jpg'.format(optimizer.param_groups[0]['lr']))
     
-    # plt.figure()
-    # plt.plot(weights)
-    # plt.title('Learned weights')
-    # plt.savefig('weights{}.jpg'.format(optimizer.param_groups[0]['lr']))
+    plt.figure()
+    plt.plot(weights)
+    plt.title('Learned weights')
+    plt.savefig('weights{}.jpg'.format(optimizer.param_groups[0]['lr']))
 
 def test_model(model, test_loader):
     ''' Takes given PyTorch model and test DataLoader, and returns all labels and corresponding model predictions.'''
