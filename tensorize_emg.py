@@ -66,10 +66,10 @@ class EMGData:
         if self.intrasession:
             idxs = list(range(self.num_repetitions))
             test_idx = idxs.pop(rep_idx)
-            X_train = torch.flatten(self.X[[test_session], :, idxs, :, :, :, :], end_dim=3) # get all but one repetition
-            Y_train = torch.flatten(self.Y[[test_session], :, idxs, :], end_dim=3) # get all but one repetition
-            X_test = torch.flatten(self.X[[test_session], :, [test_idx], :, :, :, :], end_dim=3) # get one repetition
-            Y_test = torch.flatten(self.Y[[test_session], :, [test_idx], :],end_dim=3) # get one repetition
+            X_train = torch.flatten(self.X[[test_session], :, idxs, :, :, :, :], end_dim=-4) # get all but one repetition
+            Y_train = torch.flatten(self.Y[[test_session], :, idxs, :], end_dim=-1) # get all but one repetition
+            X_test = torch.flatten(self.X[[test_session], :, [test_idx], :, :, :, :], end_dim=-4) # get one repetition
+            Y_test = torch.flatten(self.Y[[test_session], :, [test_idx], :], end_dim=-1) # get one repetition
             
             # Convert to torch tensors of type float32
             X_train, X_test = X_train.to(torch.float32), X_test.to(torch.float32)
@@ -305,15 +305,16 @@ class CapgmyoDataRMS(EMGData):
         ''' Keeps parent method, but adds intermediary interpolation step.
         '''
         # Original parent class method
+        self.Nv, self.Nh = 8, 16
         if self.intrasession:
             X_train, Y_train, X_test, Y_test = super().get_tensors(train_session=train_session,
                                                                 test_session=test_session,
                                                                 rep_idx=rep_idx)
-            # 2D regridding!
-            print('2D REGRIDDING EMG IMAGE...')
-            X_train, X_test = X_train.numpy(), X_test.numpy()
-            X_train = self.uniform_grid(X_train, dg=dg)
-            X_test = self.uniform_grid(X_test, dg=dg)
+            # # 2D regridding!
+            # print('2D REGRIDDING EMG IMAGE...')
+            # X_train, X_test = X_train.numpy(), X_test.numpy()
+            # X_train = self.uniform_grid(X_train, dg=dg)
+            # X_test = self.uniform_grid(X_test, dg=dg)
 
             X_train, X_test = torch.tensor(X_train).to(torch.float32), torch.tensor(X_test).to(torch.float32)
             return X_train, Y_train, X_test, Y_test
@@ -322,12 +323,12 @@ class CapgmyoDataRMS(EMGData):
             X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test = super().get_tensors(train_session=train_session,
                                                                 test_session=test_session,
                                                                 rep_idx=rep_idx)
-            # 2D regridding!
-            print('2D REGRIDDING EMG IMAGE...')
-            X_train, X_adapt, X_test = X_train.numpy(), X_adapt.numpy(), X_test.numpy()
-            X_train = self.uniform_grid(X_train, dg=dg)
-            X_test = self.uniform_grid(X_test, dg=dg)
-            X_adapt = self.uniform_grid(X_adapt, dg=dg)
+            # # 2D regridding!
+            # print('2D REGRIDDING EMG IMAGE...')
+            # X_train, X_adapt, X_test = X_train.numpy(), X_adapt.numpy(), X_test.numpy()
+            # X_train = self.uniform_grid(X_train, dg=dg)
+            # X_test = self.uniform_grid(X_test, dg=dg)
+            # X_adapt = self.uniform_grid(X_adapt, dg=dg)
 
             X_train, X_adapt, X_test = torch.tensor(X_train).to(torch.float32), torch.tensor(X_adapt).to(torch.float32), torch.tensor(X_test).to(torch.float32)
             return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test

@@ -1,5 +1,6 @@
 import torch
 from time import time
+import matplotlib.pyplot as plt
 
 
 def init_adabn(model):
@@ -40,6 +41,8 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
 
             # TENSORBOARD
             running_loss += loss.item()
+
+            # weights.append(model.fc.weight.cpu().detach().numpy().ravel())
 
             _, predicted = torch.max(outputs.data, 1)
             running_correct += (predicted.squeeze() == labels.view(-1)).sum().item()

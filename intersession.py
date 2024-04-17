@@ -52,12 +52,13 @@ if __name__ == '__main__':
     for idx, sub in tqdm(enumerate(data['subs'])):
         # Load data for given subject/session
         dg = data['dgs'][idx]
+        # dg = 39.5
         sub_id = 'subject{}'.format(sub+1)
 
         # Load EMG data in uniform format
         emg_tensorizer = emg_tensorizer_def(path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
                                             input_shape=data['input_shape'], fs=data['fs'], sessions=session_ids, 
-                                            median_filt=exp['median_filt'], intrasession=exp['intrasession'])
+                                            median_filt=exp['median_filt'], intrasession=False)
         emg_tensorizer.load_tensors()
 
         # Run code 5 times for every train/test session pair, except where same session is used for train and test
@@ -90,7 +91,7 @@ if __name__ == '__main__':
                 
                 # Get PyTorch DataLoaders
                 train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=exp['norm'])
-                adapt_data = EMGFrameLoader(X=X_adapt, Y=Y_adapt, norm=exp['norm'])
+                adapt_data = EMGFrameLoader(X=X_adapt, Y=Y_adapt, train=False, norm=exp['norm'], stats=train_data.stats)
                 test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
                 train_loader = DataLoader(train_data, batch_size=exp['batch_size'], shuffle=True)
                 adapt_loader = DataLoader(adapt_data, batch_size=exp['batch_size'], shuffle=True)
@@ -125,12 +126,14 @@ if __name__ == '__main__':
 
                 # Fine-tune to update model's shifting position
                 print('FINE-TUNING...')
-                for param in model.parameters():
-                    param.requires_grad = False
-                model.eval()
-                model.shift.xshift.requires_grad = True
-                model.shift.yshift.requires_grad = True
-                model.baseline.requires_grad = True
+                if exp['adaptation'] == 'shift-adaptation':
+                    for param in model.parameters():
+                        param.requires_grad = False
+                    model.eval()
+                    model.shift.xshift.requires_grad = True
+                    model.shift.yshift.requires_grad = True
+                    model.baseline.requires_grad = True
+            
                 for g in optimizer.param_groups:
                     g['lr'] = exp['lr']
                 scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
