@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 
 
 # from data_loaders import load_tensors, extract_frames_csl, extract_frames_capgmyo, EMGFrameLoader
-from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS
+from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS
 from torch_loaders import EMGFrameLoader
 from utils.deep_learning import train_model, test_model
 from networks import CapgMyoNet, CapgMyoNetInterpolate, RMSNet
@@ -33,7 +33,7 @@ if __name__ == '__main__':
     name = exp[:-5] # keep experiment name
     print('#'*40 + '\n\n' + 'EXPERIMENT:'+ name + '\n\n' + '#'*40)
 
-    with open('capgmyo.json') as f:
+    with open('{}.json'.format(exp['dataset'])) as f:
         data = json.load(f)
     with open(exp) as f:
         exp = json.load(f)
@@ -51,7 +51,7 @@ if __name__ == '__main__':
     print('INTERSESSION:', data['dataset_name'])
     for idx, sub in tqdm(enumerate(data['subs'])):
         # Load data for given subject/session
-        dg = data['dgs'][idx]
+        # dg = data['dgs'][idx]
         # dg = 39.5
         sub_id = 'subject{}'.format(sub+1)
 

@@ -159,6 +159,7 @@ class CapgmyoData(EMGData):
 
         return X, Y
 
+
 class CSLData(EMGData):
     
     def __init__(self, **kwargs):
@@ -197,7 +198,6 @@ class CSLData(EMGData):
         
             # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
             X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
-
             return X, Y
         
 
@@ -333,6 +333,50 @@ class CapgmyoDataRMS(EMGData):
             X_train, X_adapt, X_test = torch.tensor(X_train).to(torch.float32), torch.tensor(X_adapt).to(torch.float32), torch.tensor(X_test).to(torch.float32)
             return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test
 
+
+class CSLDataRMS(EMGData):
+    
+    def __init__(self, M=150, median_filt=False, **kwargs):
+        super().__init__(**kwargs)
+        self.median_filt = median_filt
+        self.M = M         
+
+    def extract_frames(self, DIR):
+        ''' Extract frames for the given subject/session for CSL dataset.'''
+
+        # Initialize data container for given session
+        filenames = os.listdir(DIR)
+        X = np.zeros((self.num_gestures, self.num_repetitions, self.fs, 1, self.input_shape[0], self.input_shape[1]))
+        Y = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples))
+
+        for gdx, name in enumerate(filenames):
+            mat = sio.loadmat(os.path.join(DIR, name))
+            cur_label = int(name.replace('gest', '').replace('.mat', '')) # get the label for the given gesture
+            if cur_label == 0: continue # exclude rest
+            else: cur_label -= 1
+
+            # Account for exception case of missing repetitions
+            reps = mat['gestures'].shape[0]
+            missing = self.num_repetitions - reps # number of missing repetitions from the protocol
+
+            # For each repetition available 
+            for idx in range(reps):
+                emg = mat['gestures'][idx, 0].T
+                emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+                emg = get_rms_signal(emg, M=self.M)
+                center = len(emg) // 2 # get the central index of the given repetition
+                images = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
+                images = np.flip(images.reshape(self.num_samples, 1, 8, 24, order='F'), axis=0)
+                images = images[:, :, 1:, :] # drop first row given bipolar nature of data and create list
+
+                # Add data extracted from given repetition to our data matrix            
+                X[cur_label, idx, :, :, :, :] = images # add EMG surface images onto our data matrix
+                Y[cur_label, idx, :] = np.array([cur_label]*self.num_samples)  # add labels onto our label matrix
+        
+            # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
+            X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
+
+            return X, Y
 
 # class CSLFrameLoader(Dataset):
 #     def __init__(self, path='../datasets/csl', sub='subject1', transform=None, target_transform=None,

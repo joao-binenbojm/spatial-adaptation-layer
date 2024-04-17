@@ -13,7 +13,8 @@
     "momentum": 0.9,
     "weight_decay": 1e-3,
     "network": "RMSNet",
-    "emg_tensorizer": "CapgmyoDataRMS",
+    "dataset": "csl",
+    "emg_tensorizer": "CSLDataRMS",
     "M": 200,
     "median_filt": true,
     "adaptation": "fine-tuning"
