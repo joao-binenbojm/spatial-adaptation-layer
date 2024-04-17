@@ -42,7 +42,7 @@ if __name__ == '__main__':
     t0 = time()
 
     # Preinitialize metric arrays
-    session_ids = ['session'+str(ses) for ses in data['sessions']]
+    session_ids = ['session'+str(ses+1) for ses in data['sessions']]
     subs, test_reps = [], []
     accs, maj_accs = [], [] # different metrics to be saved in csv from experiment
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
@@ -51,22 +51,22 @@ if __name__ == '__main__':
     for idx, sub in tqdm(enumerate(data['subs'])):
         # Load data for given subject/session
         dg = data['dgs'][idx]
-        sub_id = 'subject{}'.format(sub)
+        sub_id = 'subject{}'.format(sub+1)
 
         # Load EMG data in uniform format
         emg_tensorizer = emg_tensorizer_def(path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
                                             input_shape=data['input_shape'], fs=data['fs'], sessions=session_ids, 
-                                            median_filt=exp['median_filt'], intrasession=exp['intrasession'])
+                                            median_filt=exp['median_filt'], intrasession=True)
         emg_tensorizer.load_tensors()
 
-        for test_ses in tqdm(data['sessions']):
+        for session in tqdm(data['sessions']):
             for test_idx in range(10):
                 subs.append(sub)
                 test_reps.append(test_idx)
-                print('\n SUBJECT #{}'.format(sub))
+                print('\n SUBJECT #{}, SESSION #{}'.format(sub + 1, session + 1))
                 print('TEST REPETITION #{}, dg: {}'.format(test_idx, dg))
 
-                X_train, Y_train, X_test, Y_test = emg_tensorizer.get_tensors(test_idx=test_ses-1, dg=dg)
+                X_train, Y_train, X_test, Y_test = emg_tensorizer.get_tensors(test_session=session, rep_idx=test_idx, dg=dg)
 
                 # # COMPUTE THE AVERAGE EMG IMAGE FOR EACH GESTURE
                 # fullX = data_extractor.X[0]

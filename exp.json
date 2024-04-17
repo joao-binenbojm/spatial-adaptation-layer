@@ -5,17 +5,16 @@
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
         "params": {
-            "milestones": [6,11],
+            "milestones": [],
             "gamma": 0.1
         }
     },
-    "batch_size": 128,
+    "batch_size": 1024,
     "momentum": 0.9,
     "weight_decay": 1e-3,
-    "intrasession": false,
-    "network": "CapgMyoNetInterpolate",
+    "network": "RMSNet",
     "emg_tensorizer": "CapgmyoDataRMS",
     "M": 200,
     "median_filt": true,
-    "adaptation": "shift-adaptation"
+    "adaptation": "fine-tuning"
 }
