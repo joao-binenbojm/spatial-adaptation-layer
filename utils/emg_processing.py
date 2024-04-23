@@ -58,12 +58,12 @@ identity = lambda x, fs: x
 
 def bandstop(data, fs=1000):
     '''Used to remove powerline interference and its multiples.'''
-    sos = signal.butter(2, (45, 55), btype='bandstop', output='sos', fs=fs)
+    sos = signal.butter(4, (45, 55), btype='bandstop', output='sos', fs=fs)
     data = signal.sosfilt(sos, data, axis=0)
     return data
 
 def bandpass(data, fs=1000):
     '''Used to maintain only information in relevant anatomical range of sEMG activity.'''
-    sos = signal.butter(2, (20, 380), btype='bandpass', output='sos', fs=fs)
+    sos = signal.butter(4, (20, 380), btype='bandpass', output='sos', fs=fs)
     data = signal.sosfilt(sos, data, axis=0)
     return data

@@ -1,6 +1,6 @@
 {
-    "num_epochs": 15,
-    "norm": -1,
+    "num_epochs": 40,
+    "norm": 0,
     "lr": 5e-5,
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
@@ -11,11 +11,11 @@
     },
     "batch_size": 1024,
     "momentum": 0.9,
-    "weight_decay": 1e-3,
+    "weight_decay": 1e-5,
     "network": "RMSNet",
     "dataset": "csl",
     "emg_tensorizer": "CSLDataRMS",
-    "M": 200,
+    "M": 400,
     "median_filt": true,
-    "adaptation": "fine-tuning"
+    "adaptation": "shift-adaptation"
 }
