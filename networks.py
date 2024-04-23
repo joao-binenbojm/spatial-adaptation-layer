@@ -193,10 +193,10 @@ class RMSNet(nn.Module):
         self.input_shape = input_shape
         self.num_classes = num_classes
         
-        # if baseline:
-            # self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
-        # else:
-            # self.register_buffer('baseline', torch.zeros(1, 1, input_shape[0], input_shape[1])) # original coordinates
+        if baseline:
+            self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
+        else:
+            self.register_buffer('baseline', torch.zeros(1, 1, input_shape[0], input_shape[1])) # original coordinates
 
         self.bn = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
         self.shift = Shift(input_shape)
@@ -207,7 +207,7 @@ class RMSNet(nn.Module):
     def forward(self, x):
         x = median_pool_2d(x) # perform median filtering step
         x = self.bn(x) # applies normalization procedure after usual filtering operations
-        # x = x - self.baseline # subtract baseline for baseline normalization
+        x = x - self.baseline # subtract baseline for baseline normalization
         x = self.shift(x) # perform image resampling step
         x = x.view(x.shape[0],-1) # flatten for determining classification
         x = self.fc(x)
