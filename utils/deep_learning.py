@@ -19,14 +19,15 @@ def init_adabn(model):
 def train_model(model, train_loader, optimizer, criterion, num_epochs=2, scheduler=None, warmup_scheduler=None, val_loader=None):
     '''Training loop for given experiment.'''
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
-    running_loss = 0.0
     running_correct = 0
     # xshift, yshift, baseline = [], [], []
     weights = []
+    running_losses = []
 
     t0 = time() # initial timestamp at start of training
     for epoch in range(num_epochs):
         print('Learning Rate:', scheduler.get_last_lr())
+        running_loss = 0.0
         for i, (signals, labels) in enumerate(train_loader):
             signals = signals.to(device)
             labels = labels.view(-1).type(torch.LongTensor).to(device)
@@ -51,6 +52,7 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
                 print('Epoch {} / {}, step {} / {}, loss = {:4f}'.format(epoch+1, num_epochs, i+1, len(train_loader), loss.item()))
                 # writer.add_scalar('training loss', running_loss/100, epoch * len(train_loader) + i)
                 # writer.add_scalar('training accuracy', running_correct/100, epoch * len(train_loader) + i)
+                running_losses.append(running_loss)
                 running_loss = 0.0
                 running_correct = 0
         # Update scheduler and calculate time taken after given epoch
@@ -71,10 +73,15 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
     # plt.title('Learned baseline')
     # plt.savefig('baseline{}.jpg'.format(optimizer.param_groups[0]['lr']))
     
-    plt.figure()
-    plt.plot(weights)
-    plt.title('Learned weights')
-    plt.savefig('weights{}.jpg'.format(optimizer.param_groups[0]['lr']))
+    # plt.figure()
+    # plt.plot(weights)
+    # plt.title('Learned weights')
+    # plt.savefig('weights{}.jpg'.format(optimizer.param_groups[0]['lr']))
+
+    # plt.figure()
+    # plt.plot(running_losses)
+    # plt.title('TRAINING LOSS')
+    # plt.savefig('loss.jpg')
 
 def test_model(model, test_loader):
     ''' Takes given PyTorch model and test DataLoader, and returns all labels and corresponding model predictions.'''
