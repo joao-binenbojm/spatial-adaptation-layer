@@ -1,5 +1,5 @@
 {
-    "num_epochs": 40,
+    "num_epochs": 5,
     "norm": 0,
     "lr": 5e-5,
     "scheduler": {
@@ -9,13 +9,12 @@
             "gamma": 0.1
         }
     },
-    "batch_size": 1024,
+    "batch_size": 128,
     "momentum": 0.9,
-    "weight_decay": 1e-5,
-    "network": "RMSNet",
+    "weight_decay": 0.00128,
+    "network": "CapgMyoNet",
     "dataset": "csl",
-    "emg_tensorizer": "CSLDataRMS",
-    "M": 400,
-    "median_filt": true,
-    "adaptation": "shift-adaptation"
+    "emg_tensorizer": "CSLData",
+    "M": 128,
+    "adaptation": "bla"
 }

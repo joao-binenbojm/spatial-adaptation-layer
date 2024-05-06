@@ -33,10 +33,10 @@ if __name__ == '__main__':
     name = exp[:-5] # keep experiment name
     print('#'*40 + '\n\n' + 'EXPERIMENT:'+ name + '\n\n' + '#'*40)
 
-    with open('{}.json'.format(exp['dataset'])) as f:
-        data = json.load(f)
     with open(exp) as f:
         exp = json.load(f)
+    with open('{}.json'.format(exp['dataset'])) as f:
+        data = json.load(f)
     emg_tensorizer_def = eval(exp['emg_tensorizer'])
 
     t0 = time()
@@ -51,8 +51,6 @@ if __name__ == '__main__':
     print('INTERSESSION:', data['dataset_name'])
     for idx, sub in tqdm(enumerate(data['subs'])):
         # Load data for given subject/session
-        # dg = data['dgs'][idx]
-        # dg = 39.5
         sub_id = 'subject{}'.format(sub+1)
 
         # Load EMG data in uniform format
@@ -72,12 +70,12 @@ if __name__ == '__main__':
                 train_sessions.append(train_session)
                 test_sessions.append(test_session)
                 print('\n SUBJECT #{}'.format(sub+1))
-                print('TEST SESSION #{}, TRAIN SESSION #{}, dg: {}'.format(test_session+1, train_session+1, dg))
+                print('TEST SESSION #{}, TRAIN SESSION #{}'.format(test_session+1, train_session+1))
 
                 X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test = emg_tensorizer.get_tensors(
                                                                                 test_session=test_session,
                                                                                 train_session=train_session,
-                                                                                dg=dg)
+                                                                                rep_idx=9)
 
                 # # COMPUTE THE AVERAGE EMG IMAGE FOR EACH GESTURE
                 # fullX = data_extractor.X[0]
@@ -105,7 +103,7 @@ if __name__ == '__main__':
                 optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
                                             lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
                 scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
-                warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=3*len(train_loader))
+                warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
                 # Train the model
                 model.shift.xshift.requires_grad = False
@@ -137,8 +135,8 @@ if __name__ == '__main__':
                 for g in optimizer.param_groups:
                     g['lr'] = exp['lr']
                 scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
-                warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=3*len(test_loader))
-                train_model(model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
+                warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(test_loader))
+                train_model(model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
                             warmup_scheduler=warmup_scheduler) # run training loop
 
 

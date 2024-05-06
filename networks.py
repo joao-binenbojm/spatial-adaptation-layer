@@ -159,7 +159,6 @@ class CapgMyoNet(nn.Module):
         return x.reshape(x.shape[0], self.num_classes)
     
 
-
 class Shift(torch.nn.Module):
     def __init__(self, input_shape):
         super().__init__()
@@ -208,7 +207,7 @@ class RMSNet(nn.Module):
         x = median_pool_2d(x) # perform median filtering step
         x = self.bn(x) # applies normalization procedure after usual filtering operations
         x = x - self.baseline # subtract baseline for baseline normalization
-        x = self.shift(x) # perform image resampling step
+        # x = self.shift(x) # perform image resampling step
         x = x.view(x.shape[0],-1) # flatten for determining classification
         x = self.fc(x)
         # x = self.sm(x)
@@ -288,10 +287,11 @@ class CapgMyoNetInterpolate(nn.Module):
         # x = x.squeeze() # remove any redundant dimensions
         # x = x.view(batch_size, self.input_shape[1], self.input_shape[0]) # convert from channels into grid
         # x = torch.transpose(x, 1, 2) # tranpose required as reshape is not the default ordering
-
-        x = self.shift(x) # perform image resampling step
-        x = x - self.baseline # perform baseline normalization
+        x = median_pool_2d(x) # perform median filtering step
         x = self.batchnorm0(x)
+        x = x - self.baseline # perform baseline normalization
+        # x = self.shift(x) # perform image resampling step
+        # x = self.batchnorm0(x)
         x = self.relu1(self.batchnorm1(self.conv1(x)))
         x = self.relu2(self.batchnorm2(self.conv2(x)))
 
