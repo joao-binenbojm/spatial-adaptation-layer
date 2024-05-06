@@ -5,6 +5,7 @@ from copy import deepcopy
 import numpy as np
 import scipy.io as sio
 from scipy.interpolate import RegularGridInterpolator
+from scipy.ndimage import median_filter
 import torch
 
 from utils.emg_processing import bandpass, bandstop, identity, get_rms_signal
@@ -196,9 +197,9 @@ class CSLData(EMGData):
                 X[cur_label, idx, :, :, :, :] = images # add EMG surface images onto our data matrix
                 Y[cur_label, idx, :] = np.array([cur_label]*self.num_samples)  # add labels onto our label matrix
         
-            # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
-            X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
-            return X, Y
+        # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
+        X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
+        return X, Y
         
 
 class CapgmyoDataRMS(EMGData):
@@ -354,7 +355,7 @@ class CSLDataRMS(EMGData):
         for gdx, name in enumerate(filenames):
             mat = sio.loadmat(os.path.join(DIR, name))
             cur_label = int(name.replace('gest', '').replace('.mat', '')) # get the label for the given gesture
-            if cur_label == 0: continue # exclude rest
+            if cur_label == 0: continue
             else: cur_label -= 1
 
             # Account for exception case of missing repetitions
@@ -365,6 +366,7 @@ class CSLDataRMS(EMGData):
             for idx in range(reps):
                 emg = mat['gestures'][idx, 0].T
                 emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+                # emg = bandpass(emg, fs=self.fs)
                 emg = get_rms_signal(emg, M=self.M)
                 center = len(emg) // 2 # get the central index of the given repetition
                 images = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
@@ -376,20 +378,20 @@ class CSLDataRMS(EMGData):
                 Y[cur_label, idx, :] = np.array([cur_label]*self.num_samples)  # add labels onto our label matrix
         
         # # Get baseline activity
-        # mat = sio.loadmat(os.path.join(DIR, 'gest0.mat'))
-        # reps = mat['gestures'].shape[0]
-        # baseline = np.zeros((1,1,1,1,7,24))
-        # for idx in range(reps):
-        #     emg = mat['gestures'][idx, 0].T
-        #     emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
-        #     emg = get_rms_signal(emg, M=self.M)
-        #     center = len(emg) // 2 # get the central index of the given repetition
-        #     images = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
-        #     images = np.flip(images.reshape(1, 1, self.num_samples, 1, 8, 24, order='F'), axis=4)
-        #     images = images[:, :, :, :, 1:, :] # drop first row given bipolar nature of data and create list
-        #     baseline += images.mean(axis=2, keepdims=True)
-        # # Remove baseline activity
-        # X = X - baseline/reps
+        mat = sio.loadmat(os.path.join(DIR, 'gest0.mat'))
+        reps = mat['gestures'].shape[0]
+        baseline = np.zeros((1,1,1,1,7,24))
+        for idx in range(reps):
+            emg = mat['gestures'][idx, 0].T
+            emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+            emg = get_rms_signal(emg, M=self.M)
+            center = len(emg) // 2 # get the central index of the given repetition
+            images = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
+            images = np.flip(images.reshape(1, 1, self.num_samples, 1, 8, 24, order='F'), axis=4)
+            images = images[:, :, :, :, 1:, :] # drop first row given bipolar nature of data and create list
+            baseline += images.mean(axis=2, keepdims=True)
+        # Remove baseline activity
+        X = X - baseline/reps
 
         # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
         X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
