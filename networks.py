@@ -165,14 +165,14 @@ class Shift(torch.nn.Module):
         self.Nv, self.Nh = input_shape
         self.xshift = torch.nn.parameter.Parameter(torch.tensor([0.0]))
         self.yshift = torch.nn.parameter.Parameter(torch.tensor([0.0]))
-        self.register_buffer('yreg', torch.arange(self.Nv)*10) # original coordinates
-        self.register_buffer('xreg', torch.arange(self.Nh)*10) # original coordinates
+        self.register_buffer('yreg', torch.arange(self.Nv)) # original coordinates
+        self.register_buffer('xreg', torch.arange(self.Nh)) # original coordinates
 
     def forward(self, x):
         '''Regrids input image based on shift parameters.'''
-        yreg = self.yreg - self.yshift*10
-        xreg = self.xreg - self.xshift*10
-        H, W = self.Nv*10, self.Nh*10
+        yreg = self.yreg - self.yshift
+        xreg = self.xreg - self.xshift
+        H, W = self.Nv, self.Nh
         xreg, yreg = 2*xreg/(W) - 1, 2*yreg/(H) - 1 # scale between -1 and 1
         grid_y, grid_x = torch.meshgrid(yreg, xreg, indexing='ij')
         grid = torch.stack([grid_x, grid_y], dim=-1).view(1, self.Nv, self.Nh, 2)
@@ -204,10 +204,10 @@ class RMSNet(nn.Module):
 
 
     def forward(self, x):
-        x = median_pool_2d(x) # perform median filtering step
+        # x = median_pool_2d(x, kernel_size=(3,1), padding=(1,0)) # perform median filtering step
         x = self.bn(x) # applies normalization procedure after usual filtering operations
         x = x - self.baseline # subtract baseline for baseline normalization
-        # x = self.shift(x) # perform image resampling step
+        x = self.shift(x) # perform image resampling step
         x = x.view(x.shape[0],-1) # flatten for determining classification
         x = self.fc(x)
         # x = self.sm(x)
@@ -216,6 +216,8 @@ class RMSNet(nn.Module):
     
 class CapgMyoNetInterpolate(nn.Module):
     def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, track_running_stats=True):
+        ''' Essentially the original CapgmyoNet, but with the added learnable baseline subtraction and shift layer.
+        '''
         super(CapgMyoNetInterpolate, self).__init__()
 
         self.channels = channels
@@ -290,7 +292,7 @@ class CapgMyoNetInterpolate(nn.Module):
         x = median_pool_2d(x) # perform median filtering step
         x = self.batchnorm0(x)
         x = x - self.baseline # perform baseline normalization
-        # x = self.shift(x) # perform image resampling step
+        x = self.shift(x) # perform image resampling step
         # x = self.batchnorm0(x)
         x = self.relu1(self.batchnorm1(self.conv1(x)))
         x = self.relu2(self.batchnorm2(self.conv2(x)))

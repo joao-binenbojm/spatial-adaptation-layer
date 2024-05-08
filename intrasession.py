@@ -20,7 +20,7 @@ import psutil
 
 
 # from data_loaders import load_tensors, extract_frames_csl, extract_frames_capgmyo, EMGFrameLoader
-from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS
+from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CSLDataSegmentRMS, CapgmyoDataSegmentRMS
 from torch_loaders import EMGFrameLoader
 from utils.deep_learning import train_model, test_model
 from utils.emg_processing import majority_voting_segments, majority_voting_capgmyo
@@ -49,6 +49,7 @@ if __name__ == '__main__':
 
     # Preinitialize metric arrays
     session_ids = ['session'+str(ses+1) for ses in data['sessions']]
+    # session_ids = ['session1']
     subs, sessions, test_reps = [], [], []
     accs, maj_accs, maj_accs_capgmyo = [], [], [] # different metrics to be saved in csv from experiment
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
@@ -60,7 +61,7 @@ if __name__ == '__main__':
         sub_id = 'subject{}'.format(sub+1)
 
         # Load EMG data in uniform format
-        emg_tensorizer = emg_tensorizer_def(path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
+        emg_tensorizer = emg_tensorizer_def(dataset=exp['dataset'], path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
                                             input_shape=data['input_shape'], fs=data['fs'], sessions=session_ids, intrasession=True)
         emg_tensorizer.load_tensors()
 
@@ -72,30 +73,32 @@ if __name__ == '__main__':
                 print('\n SUBJECT #{}, SESSION #{}'.format(sub + 1, session + 1))
                 print('TEST REPETITION #{}'.format(test_idx + 1))
 
-                X_train, Y_train, X_test, Y_test = emg_tensorizer.get_tensors(test_session=session, rep_idx=test_idx)
+                X_train, Y_train, X_test, Y_test, test_durations = emg_tensorizer.get_tensors(test_session=session, rep_idx=test_idx)
 
                 # COMPUTE THE AVERAGE EMG IMAGE FOR EACH GESTURE
                 X_train_plot = median_pool_2d(X_train)
-                fig, axs = plt.subplots(5, 5, figsize=(100, 100))
-                for idx in range(5):
-                    for jdx in range(5):
-                        cur_label = idx*5 + jdx
-                        Xmean = X_train_plot[Y_train == cur_label, 0, :, :].mean(axis=0)
-                        im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
-                        axs[idx, jdx].set_title(str(idx*5 + jdx))
-                        plt.colorbar(im_plot, ax=axs[idx, jdx])
-                plt.savefig('avg_image.jpg')
-                plt.close()
-
-                # # plt.figure()
-                # # plt.imshow(meanX[25, :, :], cmap='gray')
-                # # plt.title('25')
-                # # plt.savefig('25.jpg')
-                
-                # # plt.figure()
-                # # plt.imshow(meanX[26, :, :], cmap='gray')
-                # # plt.title('26')
-                # # plt.savefig('26.jpg')
+                if exp['dataset'] == 'csl':
+                    fig, axs = plt.subplots(5, 5, figsize=(100, 100))
+                    for idx in range(5):
+                        for jdx in range(5):
+                            cur_label = idx*5 + jdx
+                            Xmean = X_train_plot[Y_train == cur_label, 0, :, :].mean(axis=0)
+                            im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
+                            axs[idx, jdx].set_title(str(idx*5 + jdx))
+                            plt.colorbar(im_plot, ax=axs[idx, jdx])
+                    plt.savefig('avg_image.jpg')
+                    plt.close()
+                elif exp['dataset'] == 'capgmyo':
+                    fig, axs = plt.subplots(2, 4, figsize=(100, 100))
+                    for idx in range(2):
+                        for jdx in range(4):
+                            cur_label = idx*4 + jdx
+                            Xmean = X_train_plot[Y_train == cur_label, 0, :, :].mean(axis=0)
+                            im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
+                            axs[idx, jdx].set_title(str(idx*4 + jdx))
+                            plt.colorbar(im_plot, ax=axs[idx, jdx])
+                    plt.savefig('avg_image.jpg')
+                    plt.close()
                 
                 # Get PyTorch DataLoaders
                 train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=exp['norm'])
@@ -132,34 +135,34 @@ if __name__ == '__main__':
                 accs.append(acc)
                 print('Test Accuracy:', acc)
 
-                # Majority Voting Accuracy
-                maj_all_preds = majority_voting_segments(all_preds, M=1000, n_samples=2048)
-                maj_acc = accuracy_score(all_labs, maj_all_preds)
-                maj_accs.append(maj_acc)
-                print('Majority Voting Accuracy:', maj_acc)
+                # # Majority Voting Accuracy
+                # maj_all_preds = majority_voting_segments(all_preds, M=1000, n_samples=2048)
+                # # maj_acc = accuracy_score(all_labs, maj_all_preds)
+                # maj_accs.append(maj_acc)
+                # print('Majority Voting Accuracy:', maj_acc)
 
                 # Majority Voting Capgmyo Style
-                maj_all_preds2, maj_all_labs = majority_voting_capgmyo(all_preds, n_samples=2048), majority_voting_capgmyo(all_labs, n_samples=2048)
-                maj_acc_capgmyo = accuracy_score(maj_all_labs, maj_all_preds2)
+                maj_all_preds, maj_all_labs = majority_voting_capgmyo(all_preds, test_durations), majority_voting_capgmyo(all_labs, test_durations)
+                maj_acc_capgmyo = accuracy_score(maj_all_labs, maj_all_preds)
                 maj_accs_capgmyo.append(maj_acc_capgmyo)
                 print('Majority Voting Accuracy (A la Capgmyo):', maj_acc_capgmyo)
 
-
                 # Plotting confusion matrix to understand what's going on
-                labs = np.arange(1, 27)
-                cf = confusion_matrix(maj_all_labs, maj_all_preds2, labels=labs)
+                # labs = np.arange(1, 27)
+                labs = np.arange(1, data['num_gestures']+1)
+                cf = confusion_matrix(maj_all_labs, maj_all_preds, labels=labs)
                 disp = ConfusionMatrixDisplay(confusion_matrix=cf, display_labels=labs)
                 disp.plot()
                 plt.savefig('cfm.jpg')
                 plt.close()
 
-                # Plotting a prediction-label stream
-                plt.figure()
-                plt.plot(all_labs)
-                plt.plot(maj_all_preds)
-                plt.legend(['Labels', 'Predictions'])
-                plt.savefig('stream_maj.jpg')
-                plt.close()
+                # # Plotting a prediction-label stream
+                # plt.figure()
+                # plt.plot(all_labs)
+                # plt.plot(maj_all_preds)
+                # plt.legend(['Labels', 'Predictions'])
+                # plt.savefig('stream_maj.jpg')
+                # plt.close()
 
                 plt.figure()
                 plt.plot(all_labs)
@@ -169,13 +172,13 @@ if __name__ == '__main__':
                 plt.close()
 
                 # SAVE RESULTS
-                arr = np.array([subs, sessions, test_reps, accs, maj_accs, maj_accs_capgmyo]).T
-                df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy', 'Majority Voting Accuracy (Capgmyo)'])
+                arr = np.array([subs, sessions, test_reps, accs, maj_accs_capgmyo]).T
+                df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy (Capgmyo)'])
                 df.to_csv(name + '.csv')
 
     # Save experiment data in .csv file
-    arr = np.array([subs, sessions, test_reps, accs, maj_accs, maj_accs_capgmyo]).T
-    df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy', 'Majority Voting Accuracy (Capgmyo)'])
+    arr = np.array([subs, sessions, test_reps, accs, maj_accs_capgmyo]).T
+    df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy (Capgmyo)'])
     df.to_csv(name + '.csv')
 
     tf = time()

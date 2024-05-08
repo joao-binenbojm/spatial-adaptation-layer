@@ -9,13 +9,15 @@ from scipy.ndimage import median_filter
 import torch
 
 from utils.emg_processing import bandpass, bandstop, identity, get_rms_signal
+from networks import median_pool_2d
 
 
 class EMGData:
     
-    def __init__(self, path='../datasets/csl', sub='subject1', transform=None, target_transform=None, norm=0,
-                  num_gestures=8, num_repetitions=10, input_shape=(8, 16), fs=1000, sessions='session1', intrasession=False):
+    def __init__(self, dataset='csl', path='../datasets/capgmyo/dbb_csl', sub='subject1', transform=None, target_transform=None, norm=0,
+                  num_gestures=26, num_repetitions=10, input_shape=(8, 24), fs=2048, sessions='session1', intrasession=False):
         # Store all appropriate data parameters
+        self.dataset = dataset
         self.path = path
         self.fs = fs
         self.intrasession = intrasession
@@ -37,6 +39,51 @@ class EMGData:
         self.transform = transform
         self.target_transform = target_transform
 
+    def get_images(self, emg_segment):
+        ''' Takes in either raw sEMG or RMS activity and returns it in the appropriate shape given the dataset being used.'''
+        if self.dataset == 'csl':
+            images = np.flip(np.array(emg_segment).reshape(emg_segment.shape[0], 1, 8, 24, order='F'), axis=0)
+            images = images[:, :, 1:, :] # drop first row given bipolar nature of data and create list
+        elif self.dataset == 'capgmyo':
+            images = np.array(emg_segment).reshape(emg_segment.shape[0], 1, self.input_shape[0], self.input_shape[1], order='F')
+        else:
+            raise Exception("No dataset specified.")
+        return images 
+        
+    def get_baseline(self, DIR):
+        '''Given the subject/session directory, computes the baseline activity for every channel, depending on the given dataset.'''
+        if self.dataset == 'csl':
+            mat = sio.loadmat(os.path.join(DIR, 'gest0.mat'))
+            reps = mat['gestures'].shape[0]
+            baseline = np.zeros((1,1,1,1,7,24))
+            for idx in range(reps):
+                emg = mat['gestures'][idx, 0].T
+                emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+                emg = get_rms_signal(emg, Mrms=self.Mrms)
+                images = self.get_images(emg)
+                images = images.reshape(1, 1, *images.shape)
+                baseline += images.mean(axis=2, keepdims=True)
+            baseline = baseline/reps
+
+        elif self.dataset == 'capgmyo':
+            filenames = os.listdir(DIR)
+            baseline = np.zeros((1, 1, 1, 1, self.input_shape[0], self.input_shape[1]))
+            ngests = len(filenames)
+            for gdx, name in enumerate(filenames):
+                mat = sio.loadmat(os.path.join(DIR, name))
+                emg, labels = mat['data'], mat['gesture'].ravel()
+                emg = emg - emg.mean(axis=0, keepdims=True)
+                emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+                rms = get_rms_signal(emg, Mrms=self.Mrms)
+                images = self.get_images(rms)
+                images = images.reshape(1, 1, *images.shape)
+                baseline += images[:,:, labels==0, :, :, :].mean(axis=2, keepdims=True)
+            baseline / ngests
+
+        else:
+            raise Exception("No dataset specified.")
+        return baseline
+
     def extract_frames(self, DIR=None):
         ''' Placeholder function to be overriden by child classes.'''
         X = np.zeros((self.num_gestures, self.num_repetitions, self.fs, 1, self.input_shape[0], self.input_shape[1]))
@@ -45,8 +92,6 @@ class EMGData:
 
     def load_tensors(self):
         ''' Takes in data files and cretes complete data tensor for either intrasession or intersession case.'''
-        intrasession = not isinstance(self.sessions, list) # if a session selected, only load that given session for intrasession performance
-
         for idx, session in enumerate(self.sessions):
             self.current_session = idx+1
             DIR = os.path.join(self.path, self.sub, session)
@@ -61,9 +106,6 @@ class EMGData:
     def get_tensors(self, train_session=None, test_session=None, rep_idx=None):
         ''' Return data in desired format of surface images, with a leave-one-out approach for testing.
         '''
-        # Apply normalization prior to dataloader
-        self.normalize_images()
-
         if self.intrasession:
             idxs = list(range(self.num_repetitions))
             test_idx = idxs.pop(rep_idx)
@@ -104,12 +146,109 @@ class EMGData:
             X[cur_label, idx, :, :, :, :] = Xsample
             Ysample = Y[cur_label, rep_idx, :]
             Y[cur_label, idx, :] = Ysample
-        
         return X, Y
 
-    def normalize_images(self):
-        '''Placeholder to be overridden by child classes'''
-        pass
+
+class EMGSegmentData(EMGData):
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def segment(self, emg, baseline):
+        ''' Segments a given EMG repetition based on CSL segmentation algorithm.'''
+        ksize, stride = int(0.0732*self.fs), int(0.0732*self.fs) # getting samples from fixed number of seconds
+
+        # Get RMS
+        emg = emg.T
+        emg_tensor = torch.tensor(emg).view(emg.shape[0], 1, emg.shape[1]) # convert to PyTorch for strided convolution functionality
+        weight = torch.ones(1, 1, ksize, dtype=torch.float64) / ksize # moving average filter
+        ms = torch.nn.functional.conv1d(emg_tensor**2, weight, stride=stride)
+        rms = torch.sqrt(ms).view(emg.shape[0], -1).T # convert to original shape (but of different length after conv.)
+
+        # Remove baseline and apply median filter
+        images = self.get_images(rms)
+        baseline = baseline[0,0,:,:,:,:] # remove first two singleton dimensions for easier baseline subtraction
+        bs_imgs = images - baseline # remove baseline activity from the images
+        bs_imgs = median_pool_2d(torch.tensor(bs_imgs), kernel_size=(3, 1), padding=(1, 0)) # vertical median pooling, along muscle fiber direction
+        
+        # Compute threshold and threshold images
+        sum_rms = bs_imgs.sum(dim=(1, 2, 3)) # sum of RMS values of all channels for each given window
+        thrs = sum_rms.mean() # average summed RMS across windows
+        active = np.array(sum_rms > thrs) # get windows that are active
+        active = median_filter(active, size=3, mode='nearest') # doesn't remove the first and last active sub-segment
+ 
+        # Remove all segments found but the longest, and return the start and end in terms of original sampling rate
+        changes = np.diff(active, prepend=0)
+        start_indices, end_indices = np.where(changes > 0)[0], np.where(changes < 0)[0]
+
+        # If segment begins or ends active
+        if len(start_indices) == 0: start_indices = np.array([0])
+        if len(end_indices) == 0: end_indices = np.array([len(active) - 1])
+
+        min_len = min(len(start_indices), len(end_indices))
+        start_indices, end_indices = start_indices[:min_len], end_indices[:min_len]
+        max_idx = np.argmax(end_indices - start_indices)
+        start, end = start_indices[max_idx], end_indices[max_idx]
+
+        # Obtain start and end in samples in terms of original sampling rate
+        start, end = start*stride, end*stride
+
+        return start, end
+
+    def get_tensors(self, train_session=None, test_session=None, rep_idx=None):
+        ''' Return data in desired format of surface images, with a leave-one-out approach for testing.
+        '''
+        if self.intrasession:
+            idxs = list(range(self.num_repetitions))
+            test_idx = idxs.pop(rep_idx)
+
+            # Get appropriate train/test/adapt split
+            X_train = self.X[[test_session], :, idxs, :, :, :, :]
+            Y_train = self.Y[[test_session], :, idxs, :]
+            train_active = self.active[[test_session], :, idxs, :]
+            X_test = self.X[[test_session], :, [test_idx], :, :, :, :]
+            Y_test = self.Y[[test_session], :, [test_idx], :]
+            test_active = self.active[[test_session], :, [test_idx], :]
+
+            # Get only detected active segments of activity
+            X_train, Y_train = X_train[train_active], Y_train[train_active]
+            X_test, Y_test = X_test[test_active], Y_test[test_active]
+            test_durations = self.durations[test_session, :, test_idx]         
+            
+            # Convert to torch tensors of type float32
+            X_train, X_test = X_train.to(torch.float32), X_test.to(torch.float32)
+            return X_train, Y_train, X_test, Y_test, test_durations
+        
+        else:
+            idxs = list(range(self.num_repetitions))
+            # If fine-tuning on a single repetition
+            if rep_idx is not None:
+                adapt_idx = [idxs.pop(rep_idx)]
+            else: # else, fine-tune on all available test data
+                adapt_idx = idxs
+
+            # Get appropriate train/test/adapt split
+            X_train = self.X[[train_session], :, :, :, :, :, :]
+            Y_train = self.Y[[train_session], :, :, :]
+            train_active = self.active[[train_session], :, :, :]
+            X_adapt = self.X[[test_session], :, adapt_idx, :, :, :, :]
+            Y_adapt = self.Y[[test_session], :, adapt_idx, :]
+            adapt_active = self.active[[test_session], :, adapt_idx, :]
+            X_test = self.X[[test_session], :, idxs, :, :, :, :]
+            Y_test = self.Y[[test_session], :, idxs, :]
+            test_active = self.active[[test_session], :, idxs, :]
+
+            # Get only detected active segments of activity
+            X_train, X_adapt, X_test = X_train[train_active], X_adapt[adapt_active], X_test[test_active]
+            Y_train, Y_adapt, Y_test = Y_train[train_active], Y_adapt[adapt_active], Y_test[test_active]
+            test_durations = self.durations[test_session, :, idxs]
+
+            # Convert to torch tensors of type float32
+            X_train, X_adapt, X_test = X_train.to(torch.float32), X_adapt.to(torch.float32), X_test.to(torch.float32)
+            return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations
+
+
+############################################################## CAPGMYO EMG TENSORIZERS #####################################################################
 
 
 class CapgmyoData(EMGData):
@@ -132,7 +271,6 @@ class CapgmyoData(EMGData):
             cur_label = int(name.replace('gest', '').replace('.mat', '')) # get the label for the given gesture
             if cur_label == 0: continue # exclude rest
             else: cur_label -= 1
-            # cur_label = int(name[4:7].lstrip('0')) - 1 # get the label for the given gesture
 
             # Account for exception case of missing repetitions
             labels = mat['gesture'].ravel()
@@ -148,8 +286,8 @@ class CapgmyoData(EMGData):
             for idx in range(0, len(indices), 2):
                 start, end = indices[idx], indices[idx+1]
                 center = (start + end) // 2 # get the central index of the given repetition
-                images = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
-                images = images.reshape(self.num_samples, 1, self.input_shape[0], self.input_shape[1], order='F')
+                emg_segment = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
+                images = self.get_images(emg_segment)
 
                 # Add data extracted from given repetition to our data matrix            
                 X[cur_label, idx//2, :, :, :, :] = images # add EMG surface images onto our data matrix
@@ -159,6 +297,218 @@ class CapgmyoData(EMGData):
             X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
 
         return X, Y
+        
+
+class CapgmyoDataRMS(EMGData):
+    
+    def __init__(self, Trms=150, **kwargs):
+        super().__init__(**kwargs)
+        self.Mrms = int(self.fs*(Trms / 1000))        
+
+    def extract_frames(self, DIR):
+        ''' Extract frames for the given subject/session from capgmyo.'''
+
+        # Initialize data container for given session
+        filenames = os.listdir(DIR)
+        X = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
+        Y = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples))
+        baseline = self.baseline(DIR)
+
+        for gdx, name in enumerate(filenames):
+            mat = sio.loadmat(os.path.join(DIR, name))
+            emg = mat['data']
+            emg = emg - emg.mean(axis=0, keepdims=True)
+            emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+            emg = get_rms_signal(emg, Mrms=self.Mrms)
+            cur_label = int(name.replace('gest', '').replace('.mat', '')) # get the label for the given gesture
+            if cur_label == 0: continue # exclude rest
+            else: cur_label -= 1
+
+            # Account for exception case of missing repetitions
+            labels = mat['gesture'].ravel()
+            labels_rolled = np.roll(np.copy(labels), 1)
+            delta = (labels - labels_rolled)
+            indices = np.where(delta != 0)[0]
+            if len(indices) > 20:
+                indices = indices[:20]
+            reps = len(indices) // 2 # number of repetitions is equivalent to half of the number of changepoints
+            missing = self.num_repetitions - reps # number of missing repetitions from the protocol
+
+            # For each repetition available
+            for idx in range(0, len(indices), 2):
+                start, end = indices[idx], indices[idx+1]
+                center = (start + end) // 2 # get the central index of the given repetition                
+                emg_segment = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
+                images = self.get_images(emg_segment)
+
+                # Add data extracted from given repetition to our data matrix            
+                X[cur_label, idx//2, :, :, :, :] = images # add EMG surface images onto our data matrix
+                Y[cur_label, idx//2, :] = np.array([cur_label]*self.num_samples)  # add labels onto our label matrix
+            
+
+            # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
+            X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
+        
+        # Remove baseline activity
+        X = X - baseline
+
+        return X, Y
+
+    # def uniform_grid(self, images, dg=27.5):
+    #     ''' Takes in given images and interpolates as to estimate evenly spaced electrodes.'''
+
+    #     # Get initial coordinates from capgmyo and symmetric grid
+    #     IED = 10
+    #     dv, dh = 8.5, 8.0
+    #     H, W = 8*dv, 7*dg + 8*dh
+    #     self.Nv, self.Nh = int(H // IED) + 1, int(W // IED) + 1
+    #     x, y, xnew, ynew = self.capgmyo_coords(dg)
+    #     yv, xv = np.meshgrid(ynew, xnew, indexing='ij')
+    #     points = np.vstack([yv.reshape(-1, order='F'), xv.reshape(-1, order='F')]) # where to sample points for each grid system
+    #     images_reg = np.zeros((images.shape[0], 1, self.Nv, self.Nh))
+
+    #     # For every surface image, apply interpolation
+    #     for n in range(images.shape[0]):
+    #         cpg2reg = RegularGridInterpolator((y,x), images[n,0,:,:], bounds_error=False, fill_value=0.0, method='linear')
+    #         images_reg[n,0,:,:] = cpg2reg(points.T).reshape(self.Nv, self.Nh, order='F')
+    #     return images_reg
+
+    # def capgmyo_coords(self, dg):
+    #     ''' Get the coordinates of Capgmyo, given distance between grids (dg), normalized
+    #         by circumference/grid height in respective dimensions.
+    #     '''
+    #     dh, dv = 8.0, 8.5 # grid electrode distances
+    #     W, H = 8*(dh + dg) - dg, 8*dv # total surface width and height
+
+    #     # Horizontal coordinates
+    #     Nh = W // 10 + 1 # How many electrodes we can get evenly spaced with 1mm spacing
+    #     init_gap_h = (W % 10)/2 # divided by two since we want same spacing between beginning and end
+
+    #     x = np.zeros(16)
+    #     w = 0
+    #     for idx in range(16):
+    #         x[idx] = w
+    #         if (idx % 2) == 0:
+    #             w += dh
+    #         else:
+    #             w += dg
+
+    #     # Vertical coordinates
+    #     Nv = H // 10 + 1
+    #     init_gap_v = (H % 10)/2
+    #     y = np.linspace(0, H, num=8)*dv
+
+    #     # Get new coordinates
+    #     xnew = np.arange(Nh)*10 + init_gap_h
+    #     ynew = np.arange(Nv)*10 + init_gap_v
+    #     return x, y, xnew, ynew
+    
+    # def get_tensors(self, train_session=None, test_session=None, rep_idx=None, dg=27.5):
+    #     ''' Keeps parent method, but adds intermediary interpolation step.
+    #     '''
+    #     # Original parent class method
+    #     self.Nv, self.Nh = 8, 16
+    #     if self.intrasession:
+    #         X_train, Y_train, X_test, Y_test = super().get_tensors(train_session=train_session,
+    #                                                             test_session=test_session,
+    #                                                             rep_idx=rep_idx)
+    #         # # 2D regridding!
+    #         # print('2D REGRIDDING EMG IMAGE...')
+    #         # X_train, X_test = X_train.numpy(), X_test.numpy()
+    #         # X_train = self.uniform_grid(X_train, dg=dg)
+    #         # X_test = self.uniform_grid(X_test, dg=dg)
+
+    #         X_train, X_test = torch.tensor(X_train).to(torch.float32), torch.tensor(X_test).to(torch.float32)
+    #         return X_train, Y_train, X_test, Y_test
+        
+    #     else:
+    #         X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test = super().get_tensors(train_session=train_session,
+    #                                                             test_session=test_session,
+    #                                                             rep_idx=rep_idx)
+    #         # # 2D regridding!
+    #         # print('2D REGRIDDING EMG IMAGE...')
+    #         # X_train, X_adapt, X_test = X_train.numpy(), X_adapt.numpy(), X_test.numpy()
+    #         # X_train = self.uniform_grid(X_train, dg=dg)
+    #         # X_test = self.uniform_grid(X_test, dg=dg)
+    #         # X_adapt = self.uniform_grid(X_adapt, dg=dg)
+
+    #         X_train, X_adapt, X_test = torch.tensor(X_train).to(torch.float32), torch.tensor(X_adapt).to(torch.float32), torch.tensor(X_test).to(torch.float32)
+    #         return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test
+    
+
+class CapgmyoDataSegmentRMS(EMGSegmentData):
+    
+    def __init__(self, Trms=150, **kwargs):
+        super().__init__(**kwargs)
+        self.Mrms = int(self.fs*(Trms / 1000))        
+
+        # Preinitialize Data tensors
+        self.num_samples = 6349 # largest number of samples found in the dataset for a given movement
+        self.X = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
+        self.Y = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples))
+
+        # Mask that determines which EMG segments are active
+        self.active = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples), dtype=np.bool_)
+        self.durations = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions)) # durations of gesture segments
+    
+    def extract_frames(self, DIR):
+        ''' Extract frames for the given subject/session for CSL dataset.'''
+
+        # Initialize data container for given session
+        filenames = os.listdir(DIR)
+        X = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
+        Y = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples))
+        baseline = self.get_baseline(DIR) # get baseline for this given session
+
+        # Get EMG activity
+        for gdx, name in enumerate(filenames):
+            mat = sio.loadmat(os.path.join(DIR, name))
+            emg = mat['data']
+            emg = emg - emg.mean(axis=0, keepdims=True)
+            emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+
+            rms = get_rms_signal(emg, Mrms=self.Mrms)
+            cur_label = int(name.replace('gest', '').replace('.mat', '')) # get the label for the given gesture
+            if cur_label == 0: continue # exclude rest
+            else: cur_label -= 1
+
+            # Account for exception case of missing repetitions
+            labels = mat['gesture'].ravel()
+            labels_rolled = np.roll(np.copy(labels), 1)
+            delta = (labels - labels_rolled)
+            indices = np.where(delta != 0)[0]
+            if len(indices) > 20:
+                indices = indices[:20]
+            reps = len(indices) // 2 # number of repetitions is equivalent to half of the number of changepoints
+            missing = self.num_repetitions - reps # number of missing repetitions from the protocol
+        
+            # For each repetition available
+            for idx in range(0, len(indices), 2):
+                start, end = indices[idx], indices[idx+1] # start and end of provided label
+                # Get segmentation outcome
+                emg_segment = emg[start:end]
+                sdx = int(DIR[-1]) - 1 # get the session number
+                active_start, active_end = self.segment(emg_segment, baseline)
+                self.active[sdx, cur_label, idx//2, active_start:active_end] = True # set signals to active within that timeframe
+                self.durations[sdx, cur_label, idx//2] = active_end - active_start # store segment duration in samples
+
+                # Add data extracted from given repetition to our data matrix
+                rms_segment = rms[start:end, :]
+                images = self.get_images(rms_segment)
+
+                X[cur_label, idx//2, active_start:active_end, :, :, :] = images[active_start:active_end] # add EMG surface images onto our data matrix
+                Y[cur_label, idx//2, active_start:active_end] = np.array([cur_label]*(active_end-active_start))  # add labels onto our label matrix
+
+            # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
+            X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
+
+        # Remove baseline activity
+        # X = X - baseline
+
+        return X, Y
+    
+
+############################################################## CSL EMG TENSORIZERS #####################################################################
 
 
 class CSLData(EMGData):
@@ -189,159 +539,25 @@ class CSLData(EMGData):
                 emg = mat['gestures'][idx, 0].T
                 emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
                 center = len(emg) // 2 # get the central index of the given repetition
-                images = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
-                images = np.flip(images.reshape(self.num_samples, 1, 8, 24, order='F'), axis=0)
-                images = images[:, :, 1:, :] # drop first row given bipolar nature of data and create list
+                emg_segment = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
+                images = self.get_images(emg_segment)
+                # images = np.flip(images.reshape(self.num_samples, 1, 8, 24, order='F'), axis=0)
+                # images = images[:, :, 1:, :] # drop first row given bipolar nature of data and create list
 
                 # Add data extracted from given repetition to our data matrix            
                 X[cur_label, idx, :, :, :, :] = images # add EMG surface images onto our data matrix
                 Y[cur_label, idx, :] = np.array([cur_label]*self.num_samples)  # add labels onto our label matrix
         
-        # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
-        X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
-        return X, Y
-        
-
-class CapgmyoDataRMS(EMGData):
-    
-    def __init__(self, M=150, median_filt=False, **kwargs):
-        super().__init__(**kwargs)
-        self.median_filt = median_filt
-        self.M = M         
-
-    def extract_frames(self, DIR):
-        ''' Extract frames for the given subject/session from capgmyo.'''
-
-        # Initialize data container for given session
-        filenames = os.listdir(DIR)
-        X = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
-        Y = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples))
-
-        for gdx, name in enumerate(filenames):
-            mat = sio.loadmat(os.path.join(DIR, name))
-            emg = mat['data']
-            emg = emg - emg.mean(axis=0, keepdims=True)
-            emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
-            emg = get_rms_signal(emg, M=self.M)
-            cur_label = int(name.replace('gest', '').replace('.mat', '')) # get the label for the given gesture
-            if cur_label == 0: continue # exclude rest
-            else: cur_label -= 1
-
-            # Account for exception case of missing repetitions
-            labels = mat['gesture'].ravel()
-            labels_rolled = np.roll(np.copy(labels), 1)
-            delta = (labels - labels_rolled)
-            indices = np.where(delta != 0)[0]
-            if len(indices) > 20:
-                indices = indices[:20]
-            reps = len(indices) // 2 # number of repetitions is equivalent to half of the number of changepoints
-            missing = self.num_repetitions - reps # number of missing repetitions from the protocol
-
-            # For each repetition available
-            for idx in range(0, len(indices), 2):
-                start, end = indices[idx], indices[idx+1]
-                center = (start + end) // 2 # get the central index of the given repetition                
-                images = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
-                images = images.reshape(self.num_samples, 1, self.input_shape[0], self.input_shape[1], order='F')
-
-                # Add data extracted from given repetition to our data matrix            
-                X[cur_label, idx//2, :, :, :, :] = images # add EMG surface images onto our data matrix
-                Y[cur_label, idx//2, :] = np.array([cur_label]*self.num_samples)  # add labels onto our label matrix
-            
             # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
             X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
-
         return X, Y
-
-    def uniform_grid(self, images, dg=27.5):
-        ''' Takes in given images and interpolates as to estimate evenly spaced electrodes.'''
-
-        # Get initial coordinates from capgmyo and symmetric grid
-        IED = 10
-        dv, dh = 8.5, 8.0
-        H, W = 8*dv, 7*dg + 8*dh
-        self.Nv, self.Nh = int(H // IED) + 1, int(W // IED) + 1
-        x, y, xnew, ynew = self.capgmyo_coords(dg)
-        yv, xv = np.meshgrid(ynew, xnew, indexing='ij')
-        points = np.vstack([yv.reshape(-1, order='F'), xv.reshape(-1, order='F')]) # where to sample points for each grid system
-        images_reg = np.zeros((images.shape[0], 1, self.Nv, self.Nh))
-
-        # For every surface image, apply interpolation
-        for n in range(images.shape[0]):
-            cpg2reg = RegularGridInterpolator((y,x), images[n,0,:,:], bounds_error=False, fill_value=0.0, method='linear')
-            images_reg[n,0,:,:] = cpg2reg(points.T).reshape(self.Nv, self.Nh, order='F')
-        return images_reg
-
-    def capgmyo_coords(self, dg):
-        ''' Get the coordinates of Capgmyo, given distance between grids (dg), normalized
-            by circumference/grid height in respective dimensions.
-        '''
-        dh, dv = 8.0, 8.5 # grid electrode distances
-        W, H = 8*(dh + dg) - dg, 8*dv # total surface width and height
-
-        # Horizontal coordinates
-        Nh = W // 10 + 1 # How many electrodes we can get evenly spaced with 1mm spacing
-        init_gap_h = (W % 10)/2 # divided by two since we want same spacing between beginning and end
-
-        x = np.zeros(16)
-        w = 0
-        for idx in range(16):
-            x[idx] = w
-            if (idx % 2) == 0:
-                w += dh
-            else:
-                w += dg
-
-        # Vertical coordinates
-        Nv = H // 10 + 1
-        init_gap_v = (H % 10)/2
-        y = np.linspace(0, H, num=8)*dv
-
-        # Get new coordinates
-        xnew = np.arange(Nh)*10 + init_gap_h
-        ynew = np.arange(Nv)*10 + init_gap_v
-        return x, y, xnew, ynew
     
-    def get_tensors(self, train_session=None, test_session=None, rep_idx=None, dg=27.5):
-        ''' Keeps parent method, but adds intermediary interpolation step.
-        '''
-        # Original parent class method
-        self.Nv, self.Nh = 8, 16
-        if self.intrasession:
-            X_train, Y_train, X_test, Y_test = super().get_tensors(train_session=train_session,
-                                                                test_session=test_session,
-                                                                rep_idx=rep_idx)
-            # # 2D regridding!
-            # print('2D REGRIDDING EMG IMAGE...')
-            # X_train, X_test = X_train.numpy(), X_test.numpy()
-            # X_train = self.uniform_grid(X_train, dg=dg)
-            # X_test = self.uniform_grid(X_test, dg=dg)
-
-            X_train, X_test = torch.tensor(X_train).to(torch.float32), torch.tensor(X_test).to(torch.float32)
-            return X_train, Y_train, X_test, Y_test
-        
-        else:
-            X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test = super().get_tensors(train_session=train_session,
-                                                                test_session=test_session,
-                                                                rep_idx=rep_idx)
-            # # 2D regridding!
-            # print('2D REGRIDDING EMG IMAGE...')
-            # X_train, X_adapt, X_test = X_train.numpy(), X_adapt.numpy(), X_test.numpy()
-            # X_train = self.uniform_grid(X_train, dg=dg)
-            # X_test = self.uniform_grid(X_test, dg=dg)
-            # X_adapt = self.uniform_grid(X_adapt, dg=dg)
-
-            X_train, X_adapt, X_test = torch.tensor(X_train).to(torch.float32), torch.tensor(X_adapt).to(torch.float32), torch.tensor(X_test).to(torch.float32)
-            return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test
-
 
 class CSLDataRMS(EMGData):
     
-    def __init__(self, M=150, median_filt=False, **kwargs):
+    def __init__(self, Trms=150, **kwargs):
         super().__init__(**kwargs)
-        self.median_filt = median_filt
-        self.M = M
-        # self.baseline = np.zeros((self.num_sessions, 1, 1, 1, 1, self.input_shape[0], self.input_shape[1]))
+        self.Mrms = int(self.fs*(Trms / 1000))        
 
 
     def extract_frames(self, DIR):
@@ -351,6 +567,7 @@ class CSLDataRMS(EMGData):
         filenames = os.listdir(DIR)
         X = np.zeros((self.num_gestures, self.num_repetitions, self.fs, 1, self.input_shape[0], self.input_shape[1]))
         Y = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples))
+        baseline = self.get_baseline(DIR)
 
         for gdx, name in enumerate(filenames):
             mat = sio.loadmat(os.path.join(DIR, name))
@@ -367,146 +584,82 @@ class CSLDataRMS(EMGData):
                 emg = mat['gestures'][idx, 0].T
                 emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
                 # emg = bandpass(emg, fs=self.fs)
-                emg = get_rms_signal(emg, M=self.M)
+                emg = get_rms_signal(emg, Mrms=self.Mrms)
                 center = len(emg) // 2 # get the central index of the given repetition
-                images = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
-                images = np.flip(images.reshape(self.num_samples, 1, 8, 24, order='F'), axis=2)
-                images = images[:, :, 1:, :] # drop first row given bipolar nature of data and create list
+                emg_segment = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
+                images = self.get_images(emg_segment)
+
+                # Add data extracted from given repetition to our data matrix            
+                X[cur_label, idx, :, :, :, :] = images # add EMG surface images onto our data matrix
+                Y[cur_label, idx, :] = np.array([cur_label]*self.num_samples)  # add labels onto our label matrix
+
+            # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
+            X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
+        
+        # Remove baseline activity
+        X = X - baseline
+
+        return X, Y
+
+
+class CSLDataSegmentRMS(EMGSegmentData):
+    
+    def __init__(self, Trms=150, **kwargs):
+        super().__init__(**kwargs) 
+        self.Mrms = int(self.fs*(Trms / 1000))        
+
+        # Preinitialize Data tensors
+        self.num_samples = 3*self.fs
+        self.X = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
+        self.Y = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples))
+
+        # Mask that determines which EMG segments are active
+        self.active = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples), dtype=np.bool_)
+        self.durations = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions)) # durations of gesture segments
+
+    def extract_frames(self, DIR):
+        ''' Extract frames for the given subject/session for CSL dataset.'''
+
+        # Initialize data container for given session
+        filenames = os.listdir(DIR)
+        X = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
+        Y = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples))
+        baseline = self.get_baseline(DIR)
+        
+        # Extract gestures with segmentation algorithm
+        for gdx, name in enumerate(filenames):
+            mat = sio.loadmat(os.path.join(DIR, name))
+            cur_label = int(name.replace('gest', '').replace('.mat', '')) # get the label for the given gesture
+            if cur_label == 0: continue
+            else: cur_label -= 1
+
+            # Account for exception case of missing repetitions
+            reps = mat['gestures'].shape[0]
+            missing = self.num_repetitions - reps # number of missing repetitions from the protocol
+
+            # For each repetition available 
+            for idx in range(reps):
+                emg = mat['gestures'][idx, 0].T
+                emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+
+                # Get segmentation outcome
+                sdx = int(DIR[-1]) - 1 # get the session number
+                start, end = self.segment(emg, baseline)
+                self.active[sdx, cur_label, idx, start:end] = True # set signals to active within that timeframe
+                self.durations[sdx, cur_label, idx] = end - start # store segment duration in samples
+
+                emg = get_rms_signal(emg, Mrms=self.Mrms)
+                images = self.get_images(emg)
 
                 # Add data extracted from given repetition to our data matrix            
                 X[cur_label, idx, :, :, :, :] = images # add EMG surface images onto our data matrix
                 Y[cur_label, idx, :] = np.array([cur_label]*self.num_samples)  # add labels onto our label matrix
         
-        # # Get baseline activity
-        mat = sio.loadmat(os.path.join(DIR, 'gest0.mat'))
-        reps = mat['gestures'].shape[0]
-        baseline = np.zeros((1,1,1,1,7,24))
-        for idx in range(reps):
-            emg = mat['gestures'][idx, 0].T
-            emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
-            emg = get_rms_signal(emg, M=self.M)
-            center = len(emg) // 2 # get the central index of the given repetition
-            images = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
-            images = np.flip(images.reshape(1, 1, self.num_samples, 1, 8, 24, order='F'), axis=4)
-            images = images[:, :, :, :, 1:, :] # drop first row given bipolar nature of data and create list
-            baseline += images.mean(axis=2, keepdims=True)
+            # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
+            X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
+        
         # Remove baseline activity
-        X = X - baseline/reps
-
-        # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
-        X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
+        X = X - baseline
 
         return X, Y
 
-# class CSLFrameLoader(Dataset):
-#     def __init__(self, path='../datasets/csl', sub='subject1', transform=None, target_transform=None,
-#                   norm=0, num_gestures=8, num_repetitions=10, intrasession=False, session=False, test_rep=None):
-#         super(CSLFrameLoader, self).__init__()
-
-#         self.num_gestures = num_gestures
-#         self.num_repetitions = num_repetitions - int(intrasession)
-#         self.fs = 2048
-#         self.n_samples = self.fs
-#         self.channels = 168
-
-#         self.path = os.path.join(path, sub)
-#         self.transform = transform
-#         self.target_transform = target_transform
-#         self.intrasession = intrasession
-#         self.test_rep = test_rep
-
-#         # Initialize variables
-#         self.X_test, self.Y_test = [], []
-#         self.X, self.Y = [], []
-
-#         # If intrasession, store information for only a given session
-#         if intrasession:
-#             DIR = os.path.join(path, sub, session)
-#             X, Y = self.extract_frames(DIR)
-#             self.X.extend(X)
-#             self.Y.extend(Y)
-
-#         else:
-#             sessions = ['session{}'.format(idx) for idx in range(1, 6)]
-#             for idx, session in enumerate(sessions):
-#                 DIR = os.path.join(path, sub, session)
-#                 X, Y = self.extract_frames(DIR)
-#                 if test_rep == (idx+1):
-#                     self.X_test.extend(X)
-#                     self.Y_test.extend(Y)
-#                 else:
-#                     self.X.extend(X)
-#                     self.Y.extend(Y)
-
-#         # Convert data to tensor
-#         self.X = torch.tensor(np.array(self.X)).to(torch.float32)
-#         self.Y = torch.tensor(np.array(self.Y)).to(torch.float32)
-#         if intrasession:
-#             self.X_test = torch.tensor(np.array(self.X_test)).to(torch.float32)
-#             self.Y_test = torch.tensor(np.array(self.Y_test)).to(torch.float32)
-
-#         if norm  == 1: # standardization
-#             self.mean = self.X.mean()
-#             self.std = self.X.std()
-#             self.X = (self.X - self.mean)/(self.std + 1.e-12)
-#             if intrasession: self.X_test = (self.X_test - self.mean)/(self.std + 1.e-12)
-
-#         elif norm == -1: # scale between [-1, 1]
-#             self.max = self.X.amax(keepdim=True)
-#             self.min = self.X.amin(keepdim=True)
-#             self.X = (self.X - self.min)/(self.max - self.min)*2 - 1
-#             if intrasession: self.X_test = (self.X_test - self.min)/(self.max - self.min)*2 - 1
-
-#         if transform:
-#             self.X = transform(self.X)
-
-#         self.len = self.n_samples * self.num_repetitions * self.num_gestures
-
-#     def __len__(self):
-#         return self.len
-    
-#     def extract_frames(self, DIR):
-#         ''' Extract frames for the given subject/session.'''
-#         filenames = os.listdir(DIR)
-#         X, Y = [], []
-#         for gdx, name in enumerate(filenames):
-#             mat = sio.loadmat(os.path.join(DIR, name))
-#             reps = mat['gestures'].shape[0] # number of repetitions stored
-#             cur_label = int(name.replace('gest', '').replace('.mat', '')) # get the label for the given gesture
-#             if cur_label == 0: continue # exclude rest
-#             else: cur_label -= 1 
-
-#             # For each repetition
-#             for idx in range(reps):
-#                 emg = mat['gestures'][idx, 0].T
-#                 emg = bandpass(emg, self.fs)
-#                 emg = bandstop(emg, self.fs) 
-#                 center = len(emg) // 2 # get the central index of the given repetition
-#                 images = emg[center - self.fs//2 : center + self.fs//2, :]
-#                 images = np.flip(images.reshape(self.n_samples, 1, 8, 24, order='F'), axis=0)
-#                 images = list(images[:, :, 1:, :]) # drop first row given bipolar nature of data and create list
-                
-#                 # If intrasession, use given repetition for testing
-#                 if self.intrasession and (idx+1)==self.test_rep:
-#                     self.X_test.extend(images)
-#                     self.Y_test.extend( [cur_label]*self.n_samples )
-#                 else:
-#                     X.extend(images) # add EMG surface images onto our data matrix
-#                     Y.extend( [cur_label]*self.n_samples ) # add labels onto our label matrix
-#         return X, Y
-    
-#     def train_test_split(self):
-#         '''Gets a deepcopy of the current loader with test data set as training data.'''
-#         test_loader = deepcopy(self) # make a copy of current loader
-#         test_loader.X, test_loader.Y = deepcopy(test_loader.X_test), deepcopy(test_loader.Y_test)
-#         del test_loader.X_test, test_loader.Y_test, self.X_test, self.Y_test
-#         test_loader.num_repetitions = 1 # only a single repetition in the given test set
-#         if self.intrasession:
-#             test_loader.len = len(self) // self.num_repetitions
-#         else:
-#             test_loader.len = self.n_samples * self.num_repetitions * self.num_gestures
-#         return test_loader # returns test loader
-
-#     def __getitem__(self, idx):
-#         X, Y = self.X[idx], self.Y[idx]
-#         return X, Y

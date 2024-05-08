@@ -1,7 +1,7 @@
 {
-    "num_epochs": 5,
+    "num_epochs": 2,
     "norm": 0,
-    "lr": 5e-5,
+    "lr": 5e-2,
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
         "params": {
@@ -11,10 +11,11 @@
     },
     "batch_size": 128,
     "momentum": 0.9,
-    "weight_decay": 0.00128,
-    "network": "CapgMyoNet",
-    "dataset": "csl",
-    "emg_tensorizer": "CSLData",
-    "M": 128,
-    "adaptation": "bla"
+    "weight_decay": 0.01024,
+    "network": "CapgMyoNetInterpolate",
+    "dataset": "capgmyo",
+    "emg_tensorizer": "CapgmyoDataSegmentRMS",
+    "Mrms": 32,
+    "Mmj": 32,
+    "adaptation": "shift-adaptation"
 }
