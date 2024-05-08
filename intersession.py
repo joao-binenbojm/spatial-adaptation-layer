@@ -16,10 +16,11 @@ import matplotlib.pyplot as plt
 
 
 # from data_loaders import load_tensors, extract_frames_csl, extract_frames_capgmyo, EMGFrameLoader
-from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS
+from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CapgmyoDataSegmentRMS, CSLDataSegmentRMS
 from torch_loaders import EMGFrameLoader
 from utils.deep_learning import train_model, test_model
-from networks import CapgMyoNet, CapgMyoNetInterpolate, RMSNet
+from networks import CapgMyoNet, CapgMyoNetInterpolate, RMSNet, median_pool_2d
+from utils.emg_processing import majority_voting_capgmyo
 
 # from torch.utils.tensorboard import SummaryWriter
 # writer = SummaryWriter('runs/capgmyo')
@@ -46,6 +47,7 @@ if __name__ == '__main__':
     subs, test_sessions, train_sessions= [], [], []
     xshifts, yshifts = [], []
     accs, tuned_accs = [], [] # different metrics to be saved in csv from experiment
+    maj_accs, maj_tuned_accs = [], [] 
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
     print('INTERSESSION:', data['dataset_name'])
@@ -54,9 +56,8 @@ if __name__ == '__main__':
         sub_id = 'subject{}'.format(sub+1)
 
         # Load EMG data in uniform format
-        emg_tensorizer = emg_tensorizer_def(path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
-                                            input_shape=data['input_shape'], fs=data['fs'], sessions=session_ids, 
-                                            median_filt=exp['median_filt'], intrasession=False)
+        emg_tensorizer = emg_tensorizer_def(dataset=exp['dataset'], path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
+                                            input_shape=data['input_shape'], fs=data['fs'], sessions=session_ids, intrasession=False)
         emg_tensorizer.load_tensors()
 
         # Run code 5 times for every train/test session pair, except where same session is used for train and test
@@ -72,20 +73,36 @@ if __name__ == '__main__':
                 print('\n SUBJECT #{}'.format(sub+1))
                 print('TEST SESSION #{}, TRAIN SESSION #{}'.format(test_session+1, train_session+1))
 
-                X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test = emg_tensorizer.get_tensors(
+                X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations = emg_tensorizer.get_tensors(
                                                                                 test_session=test_session,
                                                                                 train_session=train_session,
                                                                                 rep_idx=9)
 
-                # # COMPUTE THE AVERAGE EMG IMAGE FOR EACH GESTURE
-                # fullX = data_extractor.X[0]
-                # meanX = fullX.mean(dim=(1,2,3))
-                # fig, axs = plt.subplots(2, 4)
-                # for idx in range(2):
-                #     for jdx in range(4):
-                #         axs[idx, jdx].imshow(meanX[idx*4 + jdx,:,:], cmap='gray')
-                #         axs[idx, jdx].set_title(str(idx*4 + jdx))
-                # plt.show()
+                # COMPUTE THE AVERAGE EMG IMAGE FOR EACH GESTURE
+                # X_train_plot = median_pool_2d(X_train, kernel_size=(3,1), padding=(1,0))
+                X_train_plot = X_train
+                if exp['dataset'] == 'csl':
+                    fig, axs = plt.subplots(5, 5, figsize=(100, 100))
+                    for idx in range(5):
+                        for jdx in range(5):
+                            cur_label = idx*5 + jdx
+                            Xmean = X_train_plot[Y_train == cur_label, 0, :, :].mean(axis=0)
+                            im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
+                            axs[idx, jdx].set_title(str(idx*5 + jdx))
+                            plt.colorbar(im_plot, ax=axs[idx, jdx])
+                    plt.savefig('avg_image.jpg')
+                    plt.close()
+                elif exp['dataset'] == 'capgmyo':
+                    fig, axs = plt.subplots(2, 4, figsize=(100, 100))
+                    for idx in range(2):
+                        for jdx in range(4):
+                            cur_label = idx*4 + jdx
+                            Xmean = X_train_plot[Y_train == cur_label, 0, :, :].mean(axis=0)
+                            im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
+                            axs[idx, jdx].set_title(str(idx*4 + jdx))
+                            plt.colorbar(im_plot, ax=axs[idx, jdx])
+                    plt.savefig('avg_image.jpg')
+                    plt.close()
                 
                 # Get PyTorch DataLoaders
                 train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=exp['norm'])
@@ -93,15 +110,16 @@ if __name__ == '__main__':
                 test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
                 train_loader = DataLoader(train_data, batch_size=exp['batch_size'], shuffle=True)
                 adapt_loader = DataLoader(adapt_data, batch_size=exp['batch_size'], shuffle=True)
-                test_loader = DataLoader(test_data, batch_size=exp['batch_size'], shuffle=True)
+                test_loader = DataLoader(test_data, batch_size=exp['batch_size'], shuffle=False)
 
                 # Model/training set-up
-                Nv, Nh = emg_tensorizer.Nv, emg_tensorizer.Nh
-                model = eval(exp['network'])(channels=np.prod((Nv, Nh)), input_shape=(Nv, Nh), num_classes=data['num_gestures']).to(device)
+                model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_gestures']).to(device)
                 num_epochs = exp['num_epochs']
                 criterion = nn.CrossEntropyLoss(reduction='sum')
-                optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
-                                            lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
+                # optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
+                #                             lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
+                optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
+                                             lr=exp['lr'], weight_decay=exp['weight_decay'])
                 scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
                 warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
@@ -122,6 +140,12 @@ if __name__ == '__main__':
                 accs.append(acc)
                 print('Test Accuracy:', acc)
 
+                # Majority Voting Capgmyo Style
+                maj_all_preds, maj_all_labs = majority_voting_capgmyo(all_preds, test_durations), majority_voting_capgmyo(all_labs, test_durations)
+                maj_acc = accuracy_score(maj_all_labs, maj_all_preds)
+                maj_accs.append(maj_acc)
+                print('Majority Voting Accuracy (A la Capgmyo):', maj_acc)
+
                 # Fine-tune to update model's shifting position
                 print('FINE-TUNING...')
                 if exp['adaptation'] == 'shift-adaptation':
@@ -138,7 +162,6 @@ if __name__ == '__main__':
                 warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(test_loader))
                 train_model(model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
                             warmup_scheduler=warmup_scheduler) # run training loop
-
 
                 xshift = model.shift.xshift.cpu().detach().numpy()[0]
                 yshift = model.shift.yshift.cpu().detach().numpy()[0]
@@ -157,14 +180,20 @@ if __name__ == '__main__':
                 tuned_accs.append(tuned_acc)
                 print('Tuned Test Accuracy:', tuned_acc)
 
+                # Majority Voting Capgmyo Style
+                maj_all_preds, maj_all_labs = majority_voting_capgmyo(all_preds, test_durations), majority_voting_capgmyo(all_labs, test_durations)
+                maj_tuned_acc = accuracy_score(maj_all_labs, maj_all_preds)
+                maj_tuned_accs.append(maj_tuned_acc)
+                print('Majority Voting Tuned Accuracy (A la Capgmyo):', maj_tuned_acc)
+
                 # SAVE RESULTS
-                arr = np.array([subs, train_sessions, test_sessions, accs, tuned_accs, xshifts, yshifts]).T
-                df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Accuracy', 'Tuned Accuracy', 'xshift', 'yshift'])
+                arr = np.array([subs, train_sessions, test_sessions, accs, tuned_accs, maj_accs, maj_tuned_accs, xshifts, yshifts]).T
+                df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy', 'xshift', 'yshift'])
                 df.to_csv(name + '.csv')
 
     # Save experiment data in .csv file
-    arr = np.array([subs, train_sessions, test_sessions, accs, tuned_accs, xshifts, yshifts]).T
-    df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Accuracy', 'Tuned Accuracy', 'xshift', 'yshift'])
+    arr = np.array([subs, train_sessions, test_sessions, accs, tuned_accs, maj_accs, maj_tuned_accs, xshifts, yshifts]).T
+    df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy','xshift', 'yshift'])
     df.to_csv(name + '.csv')
 
     tf = time()

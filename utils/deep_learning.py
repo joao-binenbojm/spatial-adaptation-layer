@@ -45,6 +45,10 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
 
             # weights.append(model.fc.weight.cpu().detach().numpy().ravel())
 #            baseline.append(model.baseline.cpu().detach().numpy().ravel())
+            # if 'model.shift' in locals():
+            xshift.append(model.shift.xshift.cpu().detach().numpy())
+            yshift.append(model.shift.yshift.cpu().detach().numpy())
+            baseline.append(model.baseline.cpu().detach().numpy().ravel())
 
             _, predicted = torch.max(outputs.data, 1)
             running_correct += (predicted.squeeze() == labels.view(-1)).sum().item()
@@ -62,20 +66,22 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
         h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
         print('TOTAL TIME ELAPSED: {}h, {}min'.format(h, m))
     
-    # # Plot learnable shifts
-    # plt.figure()
-    # plt.plot(xshift)
-    # plt.plot(yshift)
-    # plt.legend(['xshift', 'yshift'])
-    # plt.savefig('shifts{}.jpg'.format(optimizer.param_groups[0]['lr']))
-    # plt.close()
+    # Plot learnable shifts and baseline
+    # if 'model.shift' in locals():
+    plt.figure()
+    plt.plot(xshift)
+    plt.plot(yshift)
+    plt.legend(['xshift', 'yshift'])
+    plt.savefig('shifts.jpg')
+    plt.close()
 
- #   plt.figure()
-  #  plt.plot(baseline)
-   # plt.title('Learned baseline')
-    #plt.savefig('baseline.jpg')
-   # plt.close()
-    
+    # if 'model.baseline' in locals():
+    plt.figure()
+    plt.plot(baseline)
+    plt.title('Learned baseline')
+    plt.savefig('baseline.jpg')
+    plt.close()
+
     # plt.figure()
     # plt.plot(weights)
     # plt.title('Learned weights')

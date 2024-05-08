@@ -4,23 +4,13 @@ from scipy.ndimage import median_filter
 import numpy as np
 
 
-def get_rms_signal(emg, M=32, s=1):
+def get_rms_signal(emg, Mrms=32, s=1):
     '''Computes the instantaneous estimate of RMS from a window of L samples. Returns a signal of the same length.'''
     emg_square = np.square(emg)
-    ma_filter = np.ones((2*M + 1, 1)) / (2*M+1) # computes the average within the given window
+    ma_filter = np.ones((2*Mrms + 1, 1)) / (2*Mrms+1) # computes the average within the given window
     ms_signal = signal.convolve(emg_square, ma_filter, mode='same')
     rms_signal = np.sqrt(ms_signal)
     return rms_signal
-
-# def get_medact_signal(emg, M=32, s=1):
-#     '''Computes the instantaneous estimate of RMS from a window of L samples. Returns a signal of the same length.'''
-#     emg_square = np.square(emg)
-#     # ma_filter = np.ones((2*M + 1, 1)) / (2*M+1) # computes the average within the given window
-#     # ms_signal = signal.convolve(emg_square, ma_filter, mode='same')
-#     # medact_signal = signal.medfilt2d(emg_square, kernel_size=(2*M+1, 1))
-#     medact_signal = median_filter(emg_square, size=2*M+1, mode='nearest', axes=(0))
-#     medact_signal = np.sqrt(medact_signal)
-#     return medact_signal
 
 ## Majority Voting
 def majority_voting(predictions, M=32):
@@ -64,11 +54,22 @@ def majority_voting_segments(predictions, M=32, n_samples=1000):
         voted_predictions.extend(voted_predictions_segment) # add majority voted to final segment
     return voted_predictions
 
-def majority_voting_capgmyo(predictions, n_samples=1000):
+# def majority_voting_capgmyo(predictions, n_samples=1000):
+#     ''' Majority voting as done by the capgmyo paper, which uses entire trial for majority voting, getting a single prediction per trial.'''
+#     voted_predictions = []
+#     for idx in range(len(predictions) // n_samples):
+#         preds = predictions[idx*n_samples : (idx+1)*n_samples]
+#         counts = Counter(preds)  # Count occurrences in the first W-1 elements
+#         voted_predictions.append(max(counts, key=counts.get))  # Calculate the mode for the current window and add to mj voted window
+#     return voted_predictions
+
+def majority_voting_capgmyo(predictions, durations):
     ''' Majority voting as done by the capgmyo paper, which uses entire trial for majority voting, getting a single prediction per trial.'''
     voted_predictions = []
-    for idx in range(len(predictions) // n_samples):
-        preds = predictions[idx*n_samples : (idx+1)*n_samples]
+    durations = np.cumsum(durations).astype(int) # turns durations into accessible indices
+    prev_durations = np.r_[[0], durations[:-1]].astype(int)
+    for start, end in zip(prev_durations, durations):
+        preds = predictions[start : end]
         counts = Counter(preds)  # Count occurrences in the first W-1 elements
         voted_predictions.append(max(counts, key=counts.get))  # Calculate the mode for the current window and add to mj voted window
     return voted_predictions
