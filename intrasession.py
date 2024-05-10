@@ -23,7 +23,7 @@ import psutil
 from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CSLDataSegmentRMS, CapgmyoDataSegmentRMS
 from torch_loaders import EMGFrameLoader
 from utils.deep_learning import train_model, test_model
-from utils.emg_processing import majority_voting_segments, majority_voting_capgmyo
+from utils.emg_processing import majority_voting_segments, majority_voting_full_segment
 from networks import CapgMyoNet, CapgMyoNetInterpolate, RMSNet
 from networks import median_pool_2d
 
@@ -49,9 +49,8 @@ if __name__ == '__main__':
 
     # Preinitialize metric arrays
     session_ids = ['session'+str(ses+1) for ses in data['sessions']]
-    # session_ids = ['session1']
     subs, sessions, test_reps = [], [], []
-    accs, maj_accs, maj_accs_capgmyo = [], [], [] # different metrics to be saved in csv from experiment
+    accs, maj_accs = [], [] # different metrics to be saved in csv from experiment
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
     print('INTRASESSION:', data['dataset_name'])
@@ -111,8 +110,10 @@ if __name__ == '__main__':
                 model = eval(exp['network'])(channels=np.prod((Nv, Nh)), input_shape=(Nv, Nh), num_classes=data['num_gestures']).to(device)
                 num_epochs = exp['num_epochs']
                 criterion = nn.CrossEntropyLoss(reduction='sum')
-                optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
-                                            lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
+                # optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
+                #                             lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
+                optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
+                                             lr=exp['lr'], weight_decay=exp['weight_decay'])
                 scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
                 warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
@@ -124,7 +125,6 @@ if __name__ == '__main__':
                 train_model(model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                             warmup_scheduler=warmup_scheduler) # run training loop
         
-                
                 # Testing loop over test loader
                 print('TESTING...')
                 model.eval()
@@ -135,22 +135,23 @@ if __name__ == '__main__':
                 accs.append(acc)
                 print('Test Accuracy:', acc)
 
-                # # Majority Voting Accuracy
-                # maj_all_preds = majority_voting_segments(all_preds, M=1000, n_samples=2048)
-                # # maj_acc = accuracy_score(all_labs, maj_all_preds)
-                # maj_accs.append(maj_acc)
-                # print('Majority Voting Accuracy:', maj_acc)
-
-                # Majority Voting Capgmyo Style
-                maj_all_preds, maj_all_labs = majority_voting_capgmyo(all_preds, test_durations), majority_voting_capgmyo(all_labs, test_durations)
-                maj_acc_capgmyo = accuracy_score(maj_all_labs, maj_all_preds)
-                maj_accs_capgmyo.append(maj_acc_capgmyo)
-                print('Majority Voting Accuracy (A la Capgmyo):', maj_acc_capgmyo)
+                # Majority voting, with number of frames depending on dataset used
+                if exp['dataset'] == 'capgmyo':
+                    maj_all_preds = majority_voting_segments(all_preds, Mmj=75, durations=test_durations)
+                    maj_acc = accuracy_score(all_labs, maj_all_preds)
+                    maj_accs.append(maj_acc)
+                    print('Majority Voting Accuracy:', maj_acc)
+                
+                else: # if csl, compute one MJV predition for each test segment
+                    maj_all_preds, maj_all_labs = majority_voting_full_segment(all_preds, test_durations), majority_voting_full_segment(all_labs, test_durations)
+                    maj_acc = accuracy_score(maj_all_labs, maj_all_preds)
+                    maj_accs.append(maj_acc)
+                    print('Majority Voting Accuracy:', maj_acc)
 
                 # Plotting confusion matrix to understand what's going on
                 # labs = np.arange(1, 27)
-                labs = np.arange(1, data['num_gestures']+1)
-                cf = confusion_matrix(maj_all_labs, maj_all_preds, labels=labs)
+                labs = np.arange(data['num_gestures'])
+                cf = confusion_matrix(all_labs, all_preds, labels=labs)
                 disp = ConfusionMatrixDisplay(confusion_matrix=cf, display_labels=labs)
                 disp.plot()
                 plt.savefig('cfm.jpg')
@@ -172,13 +173,13 @@ if __name__ == '__main__':
                 plt.close()
 
                 # SAVE RESULTS
-                arr = np.array([subs, sessions, test_reps, accs, maj_accs_capgmyo]).T
-                df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy (Capgmyo)'])
+                arr = np.array([subs, sessions, test_reps, accs, maj_accs]).T
+                df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy'])
                 df.to_csv(name + '.csv')
 
     # Save experiment data in .csv file
-    arr = np.array([subs, sessions, test_reps, accs, maj_accs_capgmyo]).T
-    df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy (Capgmyo)'])
+    arr = np.array([subs, sessions, test_reps, accs, maj_accs]).T
+    df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy'])
     df.to_csv(name + '.csv')
 
     tf = time()
