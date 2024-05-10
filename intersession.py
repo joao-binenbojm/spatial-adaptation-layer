@@ -150,7 +150,7 @@ if __name__ == '__main__':
                         print('Majority Voting Accuracy:', maj_acc)
                     
                     else: # if csl, compute one MJV predition for each test segment
-                        maj_all_preds, maj_all_labs = (all_preds, test_durations), majority_voting_full_segment(all_labs, test_durations)
+                        maj_all_preds, maj_all_labs = majority_voting_full_segment(all_preds, test_durations), majority_voting_full_segment(all_labs, test_durations)
                         maj_acc = accuracy_score(maj_all_labs, maj_all_preds)
                         maj_accs.append(maj_acc)
                         print('Majority Voting Accuracy:', maj_acc)
@@ -180,7 +180,6 @@ if __name__ == '__main__':
 
                     # Testing loop over test loader (K-shot)
                     print('TESTING...')
-                    model.eval()
                     with torch.no_grad():
                         print('LEARNED SHIFTS: x: {} , y: {}'.format(xshift, yshift))
                         all_labs, all_preds = test_model(model, test_loader)

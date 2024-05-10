@@ -13,9 +13,9 @@
     "momentum": 0.9,
     "weight_decay": 0,
     "network": "RMSNet",
-    "dataset": "capgmyo",
-    "emg_tensorizer": "CapgmyoDataRMS",
+    "dataset": "csl",
+    "emg_tensorizer": "CSLDataSegmentRMS",
     "Trms": 75,
     "Mmj": 32,
-    "adaptation": "fine-tune"
+    "adaptation": "shift-adaptation"
 }
