@@ -1,7 +1,7 @@
 {
-    "num_epochs": 2,
+    "num_epochs": 25,
     "norm": 0,
-    "lr": 5e-2,
+    "lr": 5e-3,
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
         "params": {
@@ -9,13 +9,13 @@
             "gamma": 0.1
         }
     },
-    "batch_size": 128,
+    "batch_size": 1024,
     "momentum": 0.9,
-    "weight_decay": 0.01024,
-    "network": "CapgMyoNetInterpolate",
+    "weight_decay": 0,
+    "network": "RMSNet",
     "dataset": "capgmyo",
-    "emg_tensorizer": "CapgmyoDataSegmentRMS",
-    "Mrms": 32,
+    "emg_tensorizer": "CapgmyoDataRMS",
+    "Trms": 75,
     "Mmj": 32,
-    "adaptation": "shift-adaptation"
+    "adaptation": "fine-tune"
 }
