@@ -197,7 +197,7 @@ if __name__ == '__main__':
                         print('Majority Voting Tuned Accuracy:', maj_tuned_acc)
                     
                     else: # if csl, compute one MJV predition for each test segment
-                        maj_all_preds, maj_all_labs = (all_preds, test_durations), majority_voting_full_segment(all_labs, test_durations)
+                        maj_all_preds, maj_all_labs = majority_voting_full_segment(all_preds, test_durations), majority_voting_full_segment(all_labs, test_durations)
                         maj_tuned_acc = accuracy_score(maj_all_labs, maj_all_preds)
                         maj_tuned_accs.append(maj_tuned_acc)
                         print('Majority Voting Tuned Accuracy:', maj_tuned_acc)
