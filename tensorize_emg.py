@@ -103,7 +103,7 @@ class EMGData:
         self.X = torch.tensor(self.X)
         self.Y = torch.tensor(self.Y)
     
-    def get_tensors(self, train_session=None, test_session=None, rep_idx=None):
+    def get_tensors(self, train_session=None, test_session=None, rep_idx=None, gest_idxs=None):
         ''' Return data in desired format of surface images, with a leave-one-out approach for testing.
         '''
         if self.intrasession:
@@ -114,9 +114,12 @@ class EMGData:
             X_test = torch.flatten(self.X[[test_session], :, [test_idx], :, :, :, :], end_dim=-4) # get one repetition
             Y_test = torch.flatten(self.Y[[test_session], :, [test_idx], :], end_dim=-1) # get one repetition
             
+            # Return duration of each segment in test set, which are all 1s unless specified
+            test_durations = self.num_samples*np.ones(self.Y.shape[1])
+
             # Convert to torch tensors of type float32
             X_train, X_test = X_train.to(torch.float32), X_test.to(torch.float32)
-            return X_train, Y_train, X_test, Y_test
+            return X_train, Y_train, X_test, Y_test, test_durations
         
         else:
             idxs = list(range(self.num_repetitions))
@@ -125,16 +128,26 @@ class EMGData:
                 adapt_idx = [idxs.pop(rep_idx)]
             else: # else, fine-tune on all available test data
                 adapt_idx = idxs
+
+            # If fine-tuning on a single repetition of one or few gestures
+            if gest_idxs is not None:
+                if isinstance(gest_idxs, int): gest_idxs = [gest_idxs] # if single gesture for calibration selected
+            else:
+                gest_idxs = np.arange(self.num_gestures)
+
             X_train = torch.flatten(self.X[[train_session], :, :, :, :, :, :], end_dim=-4) # get train session labels
             Y_train = torch.flatten(self.Y[[train_session], :, :, :], end_dim=-1) # get train session labels
-            X_adapt = torch.flatten(self.X[[test_session], :, adapt_idx, :, :, :, :], end_dim=-4) # get all sessions but one
-            Y_adapt = torch.flatten(self.Y[[test_session], :, adapt_idx, :], end_dim=-1) # get train session labels
+            X_adapt = torch.flatten(self.X[[test_session], gest_idxs, adapt_idx, :, :, :, :], end_dim=-4) # get all sessions but one
+            Y_adapt = torch.flatten(self.Y[[test_session], gest_idxs, adapt_idx, :], end_dim=-1) # get train session labels
             X_test = torch.flatten(self.X[[test_session], :, idxs, :, :, :, :], end_dim=-4) # get other session
             Y_test = torch.flatten(self.Y[[test_session], :, idxs, :], end_dim=-1) # get other session
 
+             # Return duration of each segment in test set, which are all 1s unless specified
+            test_durations = self.num_samples*np.ones(self.Y.shape[1]*(self.Y.shape[2] - 1))
+
             # Convert to torch tensors of type float32
             X_train, X_adapt, X_test = X_train.to(torch.float32), X_adapt.to(torch.float32), X_test.to(torch.float32)
-            return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test
+            return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations
     
     def oversample_repetitions(self, X, Y, cur_label, reps, missing):
         ''' Used when there is a non-uniform number of repetitions across gestures for a given uer.
@@ -195,7 +208,7 @@ class EMGSegmentData(EMGData):
 
         return start, end
 
-    def get_tensors(self, train_session=None, test_session=None, rep_idx=None):
+    def get_tensors(self, train_session=None, test_session=None, rep_idx=None, gest_idxs=None):
         ''' Return data in desired format of surface images, with a leave-one-out approach for testing.
         '''
         if self.intrasession:
@@ -237,6 +250,13 @@ class EMGSegmentData(EMGData):
             X_test = self.X[[test_session], :, idxs, :, :, :, :]
             Y_test = self.Y[[test_session], :, idxs, :]
             test_active = self.active[[test_session], :, idxs, :]
+
+            # If fine-tuning on a single repetition of one or few gestures
+            if gest_idxs is not None:
+                if isinstance(gest_idxs, int): gest_idxs = [gest_idxs] # if single gesture for calibration selected
+                X_adapt = X_adapt[:, gest_idxs, :, :, :, :] # only keep the gestures for calibration
+                Y_adapt = Y_adapt[:, gest_idxs, :]
+                adapt_active = adapt_active[:, gest_idxs, :]
 
             # Get only detected active segments of activity
             X_train, X_adapt, X_test = X_train[train_active], X_adapt[adapt_active], X_test[test_active]
@@ -303,7 +323,8 @@ class CapgmyoDataRMS(EMGData):
     
     def __init__(self, Trms=150, **kwargs):
         super().__init__(**kwargs)
-        self.Mrms = int(self.fs*(Trms / 1000))        
+        self.Mrms = int(self.fs*(Trms / 1000))
+        self.durations = np.ones((self.num_sessions, self.num_gestures, self.num_repetitions))*2048
 
     def extract_frames(self, DIR):
         ''' Extract frames for the given subject/session from capgmyo.'''
@@ -312,7 +333,7 @@ class CapgmyoDataRMS(EMGData):
         filenames = os.listdir(DIR)
         X = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
         Y = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples))
-        baseline = self.baseline(DIR)
+        baseline = self.get_baseline(DIR)
 
         for gdx, name in enumerate(filenames):
             mat = sio.loadmat(os.path.join(DIR, name))
@@ -350,7 +371,7 @@ class CapgmyoDataRMS(EMGData):
             X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
         
         # Remove baseline activity
-        X = X - baseline
+        # X = X - baseline
 
         return X, Y
 
@@ -481,7 +502,15 @@ class CapgmyoDataSegmentRMS(EMGSegmentData):
                 indices = indices[:20]
             reps = len(indices) // 2 # number of repetitions is equivalent to half of the number of changepoints
             missing = self.num_repetitions - reps # number of missing repetitions from the protocol
-        
+
+            import matplotlib.pyplot as plt
+            rms_mean = rms.mean(axis=1)
+            rms_norm = (rms_mean - rms_mean.min()) / (rms_mean.max() - rms_mean.min())
+            plt.figure()
+            plt.plot(labels // labels.max())
+            plt.plot(rms_norm)
+            plt.savefig('avg_rms.jpg')
+
             # For each repetition available
             for idx in range(0, len(indices), 2):
                 start, end = indices[idx], indices[idx+1] # start and end of provided label

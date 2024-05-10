@@ -13,7 +13,7 @@ def get_rms_signal(emg, Mrms=32, s=1):
     return rms_signal
 
 ## Majority Voting
-def majority_voting(predictions, M=32):
+def majority_voting(predictions, Mmj=32):
     ''' Go over the length of the segment, and sequentially increase the count of a given symbol.
         This count is then removed when the window moves out of its location. This results in only
         tracking the counts of elements within the given window. Majority voting window is centered around
@@ -27,15 +27,15 @@ def majority_voting(predictions, M=32):
     counts = Counter()  # Count occurrences in the first W-1 elements
     modes = []  # List to store the modes for each window
     L = len(predictions)
-    for i in range(-M, L): # goes up by 1 every time
+    for i in range(-Mmj, L): # goes up by 1 every time
         # Only begin reducing counts one index after a full voting window
-        if i > M:
-            counts[predictions[i - M - 1]] -= 1  # Decrease count of the element leaving the window
-            if counts[predictions[i - M]] == 0:
-                del counts[predictions[i - M]]  # Remove element from counts if count becomes 0
+        if i > Mmj:
+            counts[predictions[i - Mmj - 1]] -= 1  # Decrease count of the element leaving the window
+            if counts[predictions[i - Mmj]] == 0:
+                del counts[predictions[i - Mmj]]  # Remove element from counts if count becomes 0
         # Increase count of (i+M)th element while there is still data left
-        if i + M < L:
-            counts[predictions[i + M]] += 1
+        if i + Mmj < L:
+            counts[predictions[i + Mmj]] += 1
         # Only begin adding modes from 0th index
         if i >= 0:
             mode = max(counts, key=counts.get)  # Calculate the mode for the current window
@@ -43,27 +43,20 @@ def majority_voting(predictions, M=32):
 
     return modes
 
-def majority_voting_segments(predictions, M=32, n_samples=1000):
+def majority_voting_segments(predictions, durations, Mmj=32):
     ''' This function assumes that multiple repetition segments are concatenated together.
         Thus, it applies majority voting to each segment individually.
     '''
     voted_predictions = []
-    for idx in range(len(predictions) // n_samples):
-        preds = predictions[idx*n_samples : (idx+1)*n_samples] # extract segment
-        voted_predictions_segment = majority_voting(preds, M=M) # get majority voting of given segment
+    durations = np.cumsum(durations).astype(int)
+    prev_durations = np.r_[[0], durations[:-1]].astype(int)
+    for start, end in zip(prev_durations, durations):
+        preds = predictions[start : end] # extract segment
+        voted_predictions_segment = majority_voting(preds, Mmj=Mmj) # get majority voting of given segment
         voted_predictions.extend(voted_predictions_segment) # add majority voted to final segment
     return voted_predictions
 
-# def majority_voting_capgmyo(predictions, n_samples=1000):
-#     ''' Majority voting as done by the capgmyo paper, which uses entire trial for majority voting, getting a single prediction per trial.'''
-#     voted_predictions = []
-#     for idx in range(len(predictions) // n_samples):
-#         preds = predictions[idx*n_samples : (idx+1)*n_samples]
-#         counts = Counter(preds)  # Count occurrences in the first W-1 elements
-#         voted_predictions.append(max(counts, key=counts.get))  # Calculate the mode for the current window and add to mj voted window
-#     return voted_predictions
-
-def majority_voting_capgmyo(predictions, durations):
+def majority_voting_full_segment(predictions, durations):
     ''' Majority voting as done by the capgmyo paper, which uses entire trial for majority voting, getting a single prediction per trial.'''
     voted_predictions = []
     durations = np.cumsum(durations).astype(int) # turns durations into accessible indices
