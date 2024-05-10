@@ -198,6 +198,7 @@ class RMSNet(nn.Module):
             self.register_buffer('baseline', torch.zeros(1, 1, input_shape[0], input_shape[1])) # original coordinates
 
         self.bn = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
+        self.bn2 = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
         self.shift = Shift(input_shape)
         self.fc = nn.Linear(self.channels, self.num_classes)
         # self.sm = nn.Softmax(dim=1)
@@ -289,7 +290,7 @@ class CapgMyoNetInterpolate(nn.Module):
         # x = x.squeeze() # remove any redundant dimensions
         # x = x.view(batch_size, self.input_shape[1], self.input_shape[0]) # convert from channels into grid
         # x = torch.transpose(x, 1, 2) # tranpose required as reshape is not the default ordering
-        x = median_pool_2d(x) # perform median filtering step
+        # x = median_pool_2d(x) # perform median filtering step
         x = self.batchnorm0(x)
         x = x - self.baseline # perform baseline normalization
         x = self.shift(x) # perform image resampling step
