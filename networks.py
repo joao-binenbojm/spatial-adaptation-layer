@@ -180,6 +180,38 @@ class Shift(torch.nn.Module):
         xresamp = torch.nn.functional.grid_sample(x, grid)
         return xresamp
 
+class AffineShift(torch.nn.Module):
+    def __init__(self, input_shape):
+        super().__init__()
+        self.Nv, self.Nh = input_shape
+        self.register_buffer('yreg', torch.arange(self.Nv)) # original coordinates
+        self.register_buffer('xreg', torch.arange(self.Nh)) # original coordinates
+        # Note the xshift and yshift here will be returned scaled between -1 and 1 unlike in the original Shift class
+        self.xshift = torch.nn.parameter.Parameter(torch.tensor(0.0)) 
+        self.yshift = torch.nn.parameter.Parameter(torch.tensor(0.0)) 
+        self.rot_theta = torch.nn.parameter.Parameter(torch.tensor(0.0)) # theta in rads.
+        self.xscale = torch.nn.parameter.Parameter(torch.tensor(1.0))
+        self.yscale = torch.nn.parameter.Parameter(torch.tensor(1.0))
+        self.xshear = torch.nn.parameter.Parameter(torch.tensor(0.0))
+        self.yshear = torch.nn.parameter.Parameter(torch.tensor(0.0))
+
+        # define separable transformations that make up affine transformation for interpretability
+        self.T = torch.tensor([[1, 0, self.xshift],[0,1,self.yshift],[0,0,1]], dtype=torch.float)
+        self.R = torch.tensor([[torch.cos(self.rot_theta), -torch.sin(self.rot_theta), 0],[torch.sin(self.rot_theta), torch.cos(self.rot_theta), 0], [0, 0, 1]],dtype=torch.float)
+        self.Sc = torch.tensor([[self.xscale, 0, 0], [0, self.yscale, 0], [0,0,1]],dtype=torch.float)
+        self.Sh = torch.tensor([[1, self.xshear, 0], [self.yshear, 1, 0], [0,0,1]],dtype=torch.float)
+        
+    def forward(self, x):
+        '''Regrids input image based on affine shift parameters.'''
+        N, C, _, _ = x.shape
+        H, W = self.Nv, self.Nh
+        theta = self.Sh @ self.Sc @ self.R @ self.T
+        theta = theta[0:2,:] # slice into submatrix expected by affine_grid
+        theta = theta.repeat(N,1,1)
+        grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W))
+        xresamp = torch.nn.functional.grid_sample(x, grid)
+        
+        return xresamp
 
 class RMSNet(nn.Module):
 
