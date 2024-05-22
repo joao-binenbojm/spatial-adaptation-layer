@@ -94,6 +94,18 @@ if __name__ == '__main__':
                                 plt.colorbar(im_plot, ax=axs[idx, jdx])
                         plt.savefig('avg_image.jpg')
                         plt.close()
+
+                        X_test_plot = median_pool_2d(X_test)
+                        fig, axs = plt.subplots(5, 5, figsize=(100, 100))
+                        for idx in range(5):
+                            for jdx in range(5):
+                                cur_label = idx*5 + jdx
+                                Xmean = X_test_plot[Y_test == cur_label, 0, :, :].mean(axis=0)
+                                im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
+                                axs[idx, jdx].set_title(str(idx*5 + jdx))
+                                plt.colorbar(im_plot, ax=axs[idx, jdx])
+                        plt.savefig('avg_image_test.jpg')
+                        plt.close()
                     elif exp['dataset'] == 'capgmyo':
                         fig, axs = plt.subplots(2, 4, figsize=(100, 100))
                         for idx in range(2):
@@ -118,10 +130,10 @@ if __name__ == '__main__':
                     model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_gestures']).to(device)
                     num_epochs = exp['num_epochs']
                     criterion = nn.CrossEntropyLoss(reduction='sum')
-                    # optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
-                    #                             lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
-                    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
-                                                lr=exp['lr'], weight_decay=exp['weight_decay'])
+                    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
+                                                lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
+                    # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
+                    #                             lr=exp['lr'], weight_decay=exp['weight_decay'])
                     scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
                     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
@@ -161,13 +173,17 @@ if __name__ == '__main__':
                         for param in model.parameters():
                             param.requires_grad = False
                         model.eval()
+                        model.bn.weight.requires_grad = True
+                        model.bn.bias.requires_grad = True
                         model.shift.xshift.requires_grad = True
                         model.shift.yshift.requires_grad = True
                         model.baseline.requires_grad = True
                 
                     for g in optimizer.param_groups:
                         g['lr'] = exp['lr']
-                    scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
+                    scheduler_params = exp['scheduler']['params']
+                    scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
+                    scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
                     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(adapt_loader)*data['num_repetitions'])
                     train_model(model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
                                 warmup_scheduler=warmup_scheduler) # run training loop

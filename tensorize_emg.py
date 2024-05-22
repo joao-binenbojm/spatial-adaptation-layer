@@ -93,11 +93,11 @@ class EMGData:
     def load_tensors(self):
         ''' Takes in data files and cretes complete data tensor for either intrasession or intersession case.'''
         for idx, session in enumerate(self.sessions):
-            self.current_session = idx+1
             DIR = os.path.join(self.path, self.sub, session)
             Xs, Ys = self.extract_frames(DIR)
             self.X[idx, :, :, :, :, :, :] = Xs # add data extracted from given session
             self.Y[idx, :, :, :] = Ys # add labels extracted from given session
+            self.current_session += 1
 
         # Convert data to tensor
         self.X = torch.tensor(self.X)
@@ -265,8 +265,24 @@ class EMGSegmentData(EMGData):
 
             # Convert to torch tensors of type float32
             X_train, X_adapt, X_test = X_train.to(torch.float32), X_adapt.to(torch.float32), X_test.to(torch.float32)
-            return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations
+            return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations.ravel()
 
+    def oversample_repetitions(self, X, Y, cur_label, reps, missing):
+        ''' Used when there is a non-uniform number of repetitions across gestures for a given uer.
+            Here, we oversample previous repetitions.
+        '''
+        for idx in range(reps, reps+missing):
+            rep_idx = np.random.randint(0, reps)
+            Xsample = X[cur_label, rep_idx, :, :, :, :]
+            X[cur_label, idx, :, :, :, :] = Xsample
+            Ysample = Y[cur_label, rep_idx, :]
+            Y[cur_label, idx, :] = Ysample
+            dur_sample = self.durations[self.current_session, cur_label, rep_idx]
+            self.durations[self.current_session, cur_label, idx] = dur_sample
+            active_sample = self.active[self.current_session, cur_label, rep_idx, :]
+            self.active[self.current_session, cur_label, idx, :] = active_sample
+
+        return X, Y
 
 ############################################################## CAPGMYO EMG TENSORIZERS #####################################################################
 
@@ -369,6 +385,10 @@ class CapgmyoDataRMS(EMGData):
 
             # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
             X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
+
+            ## TESTING ##
+            if self.durations[self.current_session, cur_label].min() == 0:
+                print('WAIT')
         
         # Remove baseline activity
         # X = X - baseline
@@ -503,13 +523,13 @@ class CapgmyoDataSegmentRMS(EMGSegmentData):
             reps = len(indices) // 2 # number of repetitions is equivalent to half of the number of changepoints
             missing = self.num_repetitions - reps # number of missing repetitions from the protocol
 
-            import matplotlib.pyplot as plt
-            rms_mean = rms.mean(axis=1)
-            rms_norm = (rms_mean - rms_mean.min()) / (rms_mean.max() - rms_mean.min())
-            plt.figure()
-            plt.plot(labels // labels.max())
-            plt.plot(rms_norm)
-            plt.savefig('avg_rms.jpg')
+            # import matplotlib.pyplot as plt
+            # rms_mean = rms.mean(axis=1)
+            # rms_norm = (rms_mean - rms_mean.min()) / (rms_mean.max() - rms_mean.min())
+            # plt.figure()
+            # plt.plot(labels // labels.max())
+            # plt.plot(rms_norm)
+            # plt.savefig('avg_rms.jpg')
 
             # For each repetition available
             for idx in range(0, len(indices), 2):
@@ -672,10 +692,9 @@ class CSLDataSegmentRMS(EMGSegmentData):
                 emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
 
                 # Get segmentation outcome
-                sdx = int(DIR[-1]) - 1 # get the session number
                 start, end = self.segment(emg, baseline)
-                self.active[sdx, cur_label, idx, start:end] = True # set signals to active within that timeframe
-                self.durations[sdx, cur_label, idx] = end - start # store segment duration in samples
+                self.active[self.current_session, cur_label, idx, start:end] = True # set signals to active within that timeframe
+                self.durations[self.current_session, cur_label, idx] = end - start # store segment duration in samples
 
                 emg = get_rms_signal(emg, Mrms=self.Mrms)
                 images = self.get_images(emg)

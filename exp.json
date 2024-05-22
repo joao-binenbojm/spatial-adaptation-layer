@@ -1,7 +1,7 @@
 {
-    "num_epochs": 25,
+    "num_epochs": 15,
     "norm": 0,
-    "lr": 5e-3,
+    "lr": 5e-5,
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
         "params": {
@@ -10,7 +10,7 @@
         }
     },
     "batch_size": 1024,
-    "momentum": 0.9,
+    "momentum": 0,
     "weight_decay": 0,
     "network": "RMSNet",
     "dataset": "csl",
