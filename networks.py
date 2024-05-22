@@ -197,6 +197,7 @@ class RMSNet(nn.Module):
         else:
             self.register_buffer('baseline', torch.zeros(1, 1, input_shape[0], input_shape[1])) # original coordinates
 
+        self.dropout = nn.Dropout(p=0.5)
         self.bn = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
         self.bn2 = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
         self.shift = Shift(input_shape)
@@ -210,6 +211,7 @@ class RMSNet(nn.Module):
         x = x - self.baseline # subtract baseline for baseline normalization
         x = self.shift(x) # perform image resampling step
         x = x.view(x.shape[0],-1) # flatten for determining classification
+        x = self.dropout(x)
         x = self.fc(x)
         # x = self.sm(x)
         return x.reshape(x.shape[0], self.num_classes)
