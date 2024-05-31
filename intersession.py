@@ -30,7 +30,7 @@ if __name__ == '__main__':
     exp = 'exp.json'
 
     # Experiment condition loading
-    name = exp[:-5] # keep experiment name
+    name = exp['name'] # keep experiment name
     print('#'*40 + '\n\n' + 'EXPERIMENT:'+ name + '\n\n' + '#'*40)
 
     with open(exp) as f:
@@ -228,12 +228,12 @@ if __name__ == '__main__':
                     # SAVE RESULTS
                     arr = np.array([subs, train_sessions, test_sessions, adapt_reps, accs, tuned_accs, maj_accs, maj_tuned_accs, xshifts, yshifts]).T
                     df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy', 'xshift', 'yshift'])
-                    df.to_csv(name + '.csv')
+                    df.to_csv(name)
 
     # Save experiment data in .csv file
     arr = np.array([subs, train_sessions, test_sessions, adapt_reps, accs, tuned_accs, maj_accs, maj_tuned_accs, xshifts, yshifts]).T
     df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy','xshift', 'yshift'])
-    df.to_csv(name + '.csv')
+    df.to_csv(name)
 
     tf = time()
     h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60

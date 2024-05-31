@@ -36,7 +36,7 @@ if __name__ == '__main__':
     exp = 'exp.json'
 
     # Experiment condition loading
-    name = exp[:-5] # keep experiment name
+    name = exp['name']# keep experiment name
     print('#'*40 + '\n\n' + 'EXPERIMENT:'+ name + '\n\n' + '#'*40)
 
     with open(exp) as f:
@@ -175,12 +175,12 @@ if __name__ == '__main__':
                 # SAVE RESULTS
                 arr = np.array([subs, sessions, test_reps, accs, maj_accs]).T
                 df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy'])
-                df.to_csv(name + '.csv')
+                df.to_csv(name)
 
     # Save experiment data in .csv file
     arr = np.array([subs, sessions, test_reps, accs, maj_accs]).T
     df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy'])
-    df.to_csv(name + '.csv')
+    df.to_csv(name)
 
     tf = time()
     h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
