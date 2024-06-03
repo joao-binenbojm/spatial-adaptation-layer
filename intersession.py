@@ -30,7 +30,7 @@ if __name__ == '__main__':
     exp_config = 'exp.json'
 
     # Experiment condition loading
-    print('#'*40 + '\n\n' + 'RUNNING INTERSESSION EXPERIMENT: '+  + '\n\n' + '#'*40)
+    print('#'*40 + '\n\n' + 'RUNNING INTERSESSION EXPERIMENT' + '\n\n' + '#'*40)
 
     with open(exp_config) as f:
         exp = json.load(f)
