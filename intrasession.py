@@ -33,17 +33,17 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'expandable_segments:True'
 
 if __name__ == '__main__':
 
-    exp = 'exp.json'
+    exp_config = 'exp.json'
 
     # Experiment condition loading
-    name = exp['name']# keep experiment name
-    print('#'*40 + '\n\n' + 'EXPERIMENT:'+ name + '\n\n' + '#'*40)
+    print('#'*40 + '\n\n' + 'RUNNING INTRASESSION EXPERIMENT' + '\n\n' + '#'*40)
 
-    with open(exp) as f:
+    with open(exp_config) as f:
         exp = json.load(f)
     with open('{}.json'.format(exp['dataset'])) as f:
         data = json.load(f)
     emg_tensorizer_def = eval(exp['emg_tensorizer'])
+    name = exp['name']# keep experiment name
 
     t0 = time()
 
@@ -103,7 +103,8 @@ if __name__ == '__main__':
                 train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=exp['norm'])
                 test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
                 train_loader = DataLoader(train_data, batch_size=exp['batch_size'], shuffle=True)
-                test_loader = DataLoader(test_data, batch_size=exp['batch_size'], shuffle=False)
+                test_loader = DataLoader(test_data, bat    print('#'*40 + '\n\n' + 'EXPERIMENT: '+  + '\n\n' + '#'*40)
+size=exp['batch_size'], shuffle=False)
 
                 # Model/training set-up
                 Nv, Nh = emg_tensorizer.input_shape[0], emg_tensorizer.input_shape[1]

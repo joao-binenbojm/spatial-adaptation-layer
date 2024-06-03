@@ -27,18 +27,17 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'expandable_segments:True'
 
 if __name__ == '__main__':
 
-    exp = 'exp.json'
+    exp_config = 'exp.json'
 
     # Experiment condition loading
-    name = exp['name'] # keep experiment name
-    print('#'*40 + '\n\n' + 'EXPERIMENT:'+ name + '\n\n' + '#'*40)
+    print('#'*40 + '\n\n' + 'RUNNING INTERSESSION EXPERIMENT: '+  + '\n\n' + '#'*40)
 
-    with open(exp) as f:
+    with open(exp_config) as f:
         exp = json.load(f)
     with open('{}.json'.format(exp['dataset'])) as f:
         data = json.load(f)
     emg_tensorizer_def = eval(exp['emg_tensorizer'])
-
+    name = exp['name'] # keep experiment name
     t0 = time()
 
     # Preinitialize metric arrays
