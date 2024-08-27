@@ -1,10 +1,12 @@
 import os
 from time import time
 import json
+from copy import deepcopy
 
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+import wandb
 
 import torch
 from torch import nn
@@ -18,7 +20,8 @@ import matplotlib.pyplot as plt
 from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CapgmyoDataSegmentRMS, CSLDataSegmentRMS
 from torch_loaders import EMGFrameLoader
 from utils.deep_learning import train_model, test_model
-from networks import CapgMyoNet, CapgMyoNetInterpolate, RMSNet, median_pool_2d
+from networks import CapgMyoNet, LogisticRegressor
+from networks_utils import median_pool_2d
 from utils.emg_processing import majority_voting_full_segment, majority_voting_segments
 
 # from torch.utils.tensorboard import SummaryWriter
@@ -38,6 +41,7 @@ if __name__ == '__main__':
         data = json.load(f)
     emg_tensorizer_def = eval(exp['emg_tensorizer'])
     name = exp['name'] # keep experiment name
+
     t0 = time()
 
     # Preinitialize metric arrays
@@ -46,6 +50,7 @@ if __name__ == '__main__':
     xshifts, yshifts = [], []
     accs, tuned_accs = [], [] # different metrics to be saved in csv from experiment
     maj_accs, maj_tuned_accs = [], [] 
+    is_model_trained = False
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
     print('INTERSESSION:', data['dataset_name'])
@@ -54,8 +59,9 @@ if __name__ == '__main__':
         sub_id = 'subject{}'.format(sub+1)
 
         # Load EMG data in uniform format
+        print('\nLOADING EMG TENSOR...')
         emg_tensorizer = emg_tensorizer_def(dataset=exp['dataset'], path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
-                                            input_shape=data['input_shape'], fs=data['fs'], sessions=session_ids, intrasession=False, Trms=exp['Trms'])
+                                            input_shape=data['input_shape'], fs=data['fs'], sessions=session_ids, intrasession=False, Trms=exp['Trms'], remove_baseline=exp['real_baseline'])
         emg_tensorizer.load_tensors()
 
         # Run code 5 times for every train/test session pair, except where same session is used for train and test
@@ -65,7 +71,8 @@ if __name__ == '__main__':
                 if test_session == train_session:
                     continue
                 
-                for adapt_rep in range(10): # for each possible repetition we can use to adapt
+                sample_reps = list(np.random.choice(list(range(10)), replace=False, size=exp['K'])) # sample repetition numbers, ensuring we don't sample the same rep twice
+                for adapt_rep in sample_reps: # for each possible repetition we can use to adapt
                     subs.append(sub)
                     train_sessions.append(train_session)
                     test_sessions.append(test_session)
@@ -125,33 +132,42 @@ if __name__ == '__main__':
                     adapt_loader = DataLoader(adapt_data, batch_size=exp['batch_size'], shuffle=True)
                     test_loader = DataLoader(test_data, batch_size=exp['batch_size'], shuffle=False)
 
-                    # Model/training set-up
-                    model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_gestures']).to(device)
+                    # Model/training set-up (if it hasn't been trained before)
                     num_epochs = exp['num_epochs']
                     criterion = nn.CrossEntropyLoss(reduction='sum')
-                    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
+                    if not is_model_trained:
+                        base_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_gestures'], 
+                                                          p_input=exp['p_input'], baseline=exp['learnable_baseline']).to(device)
+                        optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, base_model.parameters()),
                                                 lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
-                    # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
-                    #                             lr=exp['lr'], weight_decay=exp['weight_decay'])
-                    scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
-                    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
+                        # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
+                        #                             lr=exp['lr'], weight_decay=exp['weight_decay'])
+                        scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
+                        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
-                    # Train the model
-                    model.shift.xshift.requires_grad = False
-                    model.shift.yshift.requires_grad = False
-                    model.baseline.requires_grad = False
-                    train_model(model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
-                                warmup_scheduler=warmup_scheduler) # run training loop
-                    
-                    # Testing loop over test loader (Zero-shot)
-                    print('TESTING...')
-                    model.eval()
-                    with torch.no_grad():
-                        all_labs, all_preds = test_model(model, test_loader)
+                        # Train the model
+                        base_model.shift.xshift.requires_grad = False
+                        base_model.shift.yshift.requires_grad = False
+                        base_model.baseline.requires_grad = False
+                        train_model(base_model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
+                                    warmup_scheduler=warmup_scheduler) # run training loop
+                        
+                        is_model_trained = True
 
-                    acc = accuracy_score(all_labs, all_preds)
-                    accs.append(acc)
-                    print('Test Accuracy:', acc)
+                        # Testing loop over test loader (Zero-shot)
+                        print('TESTING...')
+                        base_model.eval()
+                        with torch.no_grad():
+                            all_labs, all_preds = test_model(base_model, test_loader)
+
+                        acc = accuracy_score(all_labs, all_preds)
+                        accs.append(acc)
+                        print('Test Accuracy:', acc)
+
+                    else:
+                        print('Using previously trained model (same test accuracy as previously)...')
+                        accs.append(acc)
+                        print('Test Accuracy:', acc)
 
                     # Majority voting, with number of frames depending on dataset used
                     if exp['dataset'] == 'capgmyo':
@@ -167,16 +183,15 @@ if __name__ == '__main__':
                         print('Majority Voting Accuracy:', maj_acc)
 
                     # Fine-tune to update model's shifting position
+                    adapted_model = deepcopy(base_model)
                     print('FINE-TUNING...')
                     if exp['adaptation'] == 'shift-adaptation':
-                        for param in model.parameters():
+                        for param in adapted_model.parameters():
                             param.requires_grad = False
-                        model.eval()
-                        model.bn.weight.requires_grad = True
-                        model.bn.bias.requires_grad = True
-                        model.shift.xshift.requires_grad = True
-                        model.shift.yshift.requires_grad = True
-                        model.baseline.requires_grad = True
+                        adapted_model.eval()
+                        adapted_model.shift.xshift.requires_grad = True
+                        adapted_model.shift.yshift.requires_grad = True
+                        adapted_model.baseline.requires_grad = True
                 
                     for g in optimizer.param_groups:
                         g['lr'] = exp['lr']
@@ -184,11 +199,11 @@ if __name__ == '__main__':
                     scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
                     scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
                     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(adapt_loader)*data['num_repetitions'])
-                    train_model(model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
+                    train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
                                 warmup_scheduler=warmup_scheduler) # run training loop
 
-                    xshift = model.shift.xshift.cpu().detach().numpy()[0]
-                    yshift = model.shift.yshift.cpu().detach().numpy()[0]
+                    xshift = adapted_model.shift.xshift.cpu().detach().numpy()[0]
+                    yshift = adapted_model.shift.yshift.cpu().detach().numpy()[0]
 
                     xshifts.append(xshift)
                     yshifts.append(yshift)
@@ -197,7 +212,7 @@ if __name__ == '__main__':
                     print('TESTING...')
                     with torch.no_grad():
                         print('LEARNED SHIFTS: x: {} , y: {}'.format(xshift, yshift))
-                        all_labs, all_preds = test_model(model, test_loader)
+                        all_labs, all_preds = test_model(adapted_model, test_loader)
 
                     tuned_acc = accuracy_score(all_labs, all_preds)
                     tuned_accs.append(tuned_acc)
@@ -228,11 +243,34 @@ if __name__ == '__main__':
                     arr = np.array([subs, train_sessions, test_sessions, adapt_reps, accs, tuned_accs, maj_accs, maj_tuned_accs, xshifts, yshifts]).T
                     df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy', 'xshift', 'yshift'])
                     df.to_csv(name)
+            
+            is_model_trained = False
 
     # Save experiment data in .csv file
     arr = np.array([subs, train_sessions, test_sessions, adapt_reps, accs, tuned_accs, maj_accs, maj_tuned_accs, xshifts, yshifts]).T
     df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy','xshift', 'yshift'])
     df.to_csv(name)
+
+    # Log wandb conditions
+    config = deepcopy(exp)
+    config['scheduler'] = json.dumps(config['scheduler'])
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project="intersession",
+        config=config
+    )
+
+    table = wandb.Table(dataframe=df)
+    wandb.log({'complete_results': table})
+    # wandb.log({'performance_histogram': wandb.plot.histogram(table, "Majority Voting Tuned Accuracy",
+ 	#   title="Performance Distribution Across Dataset")})
+    wandb.log({'Accuracy': df['Accuracy'].mean()})
+    wandb.log({'Tuned Accuracy': df['Tuned Accuracy'].mean()})
+    wandb.log({'Majority Voting Accuracy': df['Majority Voting Accuracy'].mean()})
+    wandb.log({'Majority Voting Tuned Accuracy': df['Majority Voting Tuned Accuracy'].mean()})
+
+
+    wandb.finish()
 
     tf = time()
     h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
