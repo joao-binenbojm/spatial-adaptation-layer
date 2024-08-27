@@ -1,4 +1,4 @@
 *.csv
 *.jpg
 __pycache__/
-/wandb/*
+wandb/
