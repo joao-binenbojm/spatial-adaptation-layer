@@ -9,13 +9,13 @@ from scipy.ndimage import median_filter
 import torch
 
 from utils.emg_processing import bandpass, bandstop, identity, get_rms_signal
-from networks import median_pool_2d
+from networks_utils import median_pool_2d
 
 
 class EMGData:
     
     def __init__(self, dataset='csl', path='../datasets/capgmyo/dbb_csl', sub='subject1', transform=None, target_transform=None, norm=0,
-                  num_gestures=26, num_repetitions=10, input_shape=(8, 24), fs=2048, sessions='session1', intrasession=False):
+                  num_gestures=26, num_repetitions=10, input_shape=(8, 24), fs=2048, sessions='session1', intrasession=False, remove_baseline=False):
         # Store all appropriate data parameters
         self.dataset = dataset
         self.path = path
@@ -30,6 +30,7 @@ class EMGData:
         self.num_sessions = len(sessions)
         self.sub = sub
         self.current_session = 0 # to keep track of what session we are extracting from
+        self.remove_baseline=False
 
         # Preinitialize Data tensors
         self.X = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
@@ -391,90 +392,10 @@ class CapgmyoDataRMS(EMGData):
                 print('WAIT')
         
         # Remove baseline activity
-        # X = X - baseline
+        if self.remove_baseline:
+            X = X - baseline
 
         return X, Y
-
-    # def uniform_grid(self, images, dg=27.5):
-    #     ''' Takes in given images and interpolates as to estimate evenly spaced electrodes.'''
-
-    #     # Get initial coordinates from capgmyo and symmetric grid
-    #     IED = 10
-    #     dv, dh = 8.5, 8.0
-    #     H, W = 8*dv, 7*dg + 8*dh
-    #     self.Nv, self.Nh = int(H // IED) + 1, int(W // IED) + 1
-    #     x, y, xnew, ynew = self.capgmyo_coords(dg)
-    #     yv, xv = np.meshgrid(ynew, xnew, indexing='ij')
-    #     points = np.vstack([yv.reshape(-1, order='F'), xv.reshape(-1, order='F')]) # where to sample points for each grid system
-    #     images_reg = np.zeros((images.shape[0], 1, self.Nv, self.Nh))
-
-    #     # For every surface image, apply interpolation
-    #     for n in range(images.shape[0]):
-    #         cpg2reg = RegularGridInterpolator((y,x), images[n,0,:,:], bounds_error=False, fill_value=0.0, method='linear')
-    #         images_reg[n,0,:,:] = cpg2reg(points.T).reshape(self.Nv, self.Nh, order='F')
-    #     return images_reg
-
-    # def capgmyo_coords(self, dg):
-    #     ''' Get the coordinates of Capgmyo, given distance between grids (dg), normalized
-    #         by circumference/grid height in respective dimensions.
-    #     '''
-    #     dh, dv = 8.0, 8.5 # grid electrode distances
-    #     W, H = 8*(dh + dg) - dg, 8*dv # total surface width and height
-
-    #     # Horizontal coordinates
-    #     Nh = W // 10 + 1 # How many electrodes we can get evenly spaced with 1mm spacing
-    #     init_gap_h = (W % 10)/2 # divided by two since we want same spacing between beginning and end
-
-    #     x = np.zeros(16)
-    #     w = 0
-    #     for idx in range(16):
-    #         x[idx] = w
-    #         if (idx % 2) == 0:
-    #             w += dh
-    #         else:
-    #             w += dg
-
-    #     # Vertical coordinates
-    #     Nv = H // 10 + 1
-    #     init_gap_v = (H % 10)/2
-    #     y = np.linspace(0, H, num=8)*dv
-
-    #     # Get new coordinates
-    #     xnew = np.arange(Nh)*10 + init_gap_h
-    #     ynew = np.arange(Nv)*10 + init_gap_v
-    #     return x, y, xnew, ynew
-    
-    # def get_tensors(self, train_session=None, test_session=None, rep_idx=None, dg=27.5):
-    #     ''' Keeps parent method, but adds intermediary interpolation step.
-    #     '''
-    #     # Original parent class method
-    #     self.Nv, self.Nh = 8, 16
-    #     if self.intrasession:
-    #         X_train, Y_train, X_test, Y_test = super().get_tensors(train_session=train_session,
-    #                                                             test_session=test_session,
-    #                                                             rep_idx=rep_idx)
-    #         # # 2D regridding!
-    #         # print('2D REGRIDDING EMG IMAGE...')
-    #         # X_train, X_test = X_train.numpy(), X_test.numpy()
-    #         # X_train = self.uniform_grid(X_train, dg=dg)
-    #         # X_test = self.uniform_grid(X_test, dg=dg)
-
-    #         X_train, X_test = torch.tensor(X_train).to(torch.float32), torch.tensor(X_test).to(torch.float32)
-    #         return X_train, Y_train, X_test, Y_test
-        
-    #     else:
-    #         X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test = super().get_tensors(train_session=train_session,
-    #                                                             test_session=test_session,
-    #                                                             rep_idx=rep_idx)
-    #         # # 2D regridding!
-    #         # print('2D REGRIDDING EMG IMAGE...')
-    #         # X_train, X_adapt, X_test = X_train.numpy(), X_adapt.numpy(), X_test.numpy()
-    #         # X_train = self.uniform_grid(X_train, dg=dg)
-    #         # X_test = self.uniform_grid(X_test, dg=dg)
-    #         # X_adapt = self.uniform_grid(X_adapt, dg=dg)
-
-    #         X_train, X_adapt, X_test = torch.tensor(X_train).to(torch.float32), torch.tensor(X_adapt).to(torch.float32), torch.tensor(X_test).to(torch.float32)
-    #         return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test
     
 
 class CapgmyoDataSegmentRMS(EMGSegmentData):
@@ -523,14 +444,6 @@ class CapgmyoDataSegmentRMS(EMGSegmentData):
             reps = len(indices) // 2 # number of repetitions is equivalent to half of the number of changepoints
             missing = self.num_repetitions - reps # number of missing repetitions from the protocol
 
-            # import matplotlib.pyplot as plt
-            # rms_mean = rms.mean(axis=1)
-            # rms_norm = (rms_mean - rms_mean.min()) / (rms_mean.max() - rms_mean.min())
-            # plt.figure()
-            # plt.plot(labels // labels.max())
-            # plt.plot(rms_norm)
-            # plt.savefig('avg_rms.jpg')
-
             # For each repetition available
             for idx in range(0, len(indices), 2):
                 start, end = indices[idx], indices[idx+1] # start and end of provided label
@@ -552,7 +465,8 @@ class CapgmyoDataSegmentRMS(EMGSegmentData):
             X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
 
         # Remove baseline activity
-        # X = X - baseline
+        if self.remove_baseline:
+            X = X - baseline
 
         return X, Y
     
@@ -590,8 +504,6 @@ class CSLData(EMGData):
                 center = len(emg) // 2 # get the central index of the given repetition
                 emg_segment = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
                 images = self.get_images(emg_segment)
-                # images = np.flip(images.reshape(self.num_samples, 1, 8, 24, order='F'), axis=0)
-                # images = images[:, :, 1:, :] # drop first row given bipolar nature of data and create list
 
                 # Add data extracted from given repetition to our data matrix            
                 X[cur_label, idx, :, :, :, :] = images # add EMG surface images onto our data matrix
@@ -606,7 +518,7 @@ class CSLDataRMS(EMGData):
     
     def __init__(self, Trms=150, **kwargs):
         super().__init__(**kwargs)
-        self.Mrms = int(self.fs*(Trms / 1000))        
+        self.Mrms = int(self.fs*(Trms / 1000))
 
 
     def extract_frames(self, DIR):
@@ -646,7 +558,8 @@ class CSLDataRMS(EMGData):
             X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
         
         # Remove baseline activity
-        X = X - baseline
+        if self.remove_baseline:
+            X = X - baseline
 
         return X, Y
 
@@ -655,7 +568,7 @@ class CSLDataSegmentRMS(EMGSegmentData):
     
     def __init__(self, Trms=150, **kwargs):
         super().__init__(**kwargs) 
-        self.Mrms = int(self.fs*(Trms / 1000))        
+        self.Mrms = int(self.fs*(Trms / 1000))    
 
         # Preinitialize Data tensors
         self.num_samples = 3*self.fs
@@ -707,7 +620,8 @@ class CSLDataSegmentRMS(EMGSegmentData):
             X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
         
         # Remove baseline activity
-        X = X - baseline
+        if self.remove_baseline:
+            X = X - baseline
 
         return X, Y
 

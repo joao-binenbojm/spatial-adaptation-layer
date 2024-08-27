@@ -1,0 +1,128 @@
+{
+    "os": "Linux-6.5.0-35-generic-x86_64-with-glibc2.35",
+    "python": "3.11.5",
+    "heartbeatAt": "2024-08-27T16:56:15.238195",
+    "startedAt": "2024-08-27T16:56:13.155471",
+    "docker": null,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "program": "/home/joao/Desktop/shift-layer/load_old.py",
+    "codePathLocal": "load_old.py",
+    "codePath": "load_old.py",
+    "git": {
+        "remote": "https://github.com/joao-binenbojm/shift-layer.git",
+        "commit": "d7dfcec5f9a8df49a9e7ad4d1ca9b2d4ec5743a4"
+    },
+    "email": null,
+    "root": "/home/joao/Desktop/shift-layer",
+    "host": "joao-System-Product-Name",
+    "username": "joao",
+    "executable": "/home/joao/miniconda3/envs/da/bin/python",
+    "cpu_count": 8,
+    "cpu_count_logical": 16,
+    "cpu_freq": {
+        "current": 4.443625,
+        "min": 800.0,
+        "max": 5100.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 4.65,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.698,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.571,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.265,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.245,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.244,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.237,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.21,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.245,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.682,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.332,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.695,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.534,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.627,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.483,
+            "min": 800.0,
+            "max": 5100.0
+        },
+        {
+            "current": 4.38,
+            "min": 800.0,
+            "max": 5100.0
+        }
+    ],
+    "disk": {
+        "/": {
+            "total": 456.8854446411133,
+            "used": 399.6754035949707
+        }
+    },
+    "gpu": "NVIDIA GeForce RTX 3080",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA GeForce RTX 3080",
+            "memory_total": 10737418240
+        }
+    ],
+    "memory": {
+        "total": 62.688541412353516
+    }
+}

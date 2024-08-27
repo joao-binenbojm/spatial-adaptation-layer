@@ -5,6 +5,6 @@
     "input_shape": [7, 24],
     "dataset_name": "csl",
     "fs": 2048,
-    "subs": [0,1,2,3,4],
-    "sessions": [0,1,2,3,4]
+    "subs": [0],
+    "sessions": [0,1,2]
 }

@@ -24,7 +24,7 @@ from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CSLD
 from torch_loaders import EMGFrameLoader
 from utils.deep_learning import train_model, test_model
 from utils.emg_processing import majority_voting_segments, majority_voting_full_segment
-from networks import CapgMyoNet, CapgMyoNetInterpolate, RMSNet
+from networks import CapgMyoNet, LogisticRegressor
 from networks import median_pool_2d
 
 # from torch.utils.tensorboard import SummaryWriter
