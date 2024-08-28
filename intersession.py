@@ -17,12 +17,12 @@ from sklearn.metrics import  accuracy_score, confusion_matrix, ConfusionMatrixDi
 import matplotlib.pyplot as plt
 
 # from data_loaders import load_tensors, extract_frames_csl, extract_frames_capgmyo, EMGFrameLoader
-from utils.tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CapgmyoDataSegmentRMS, CSLDataSegmentRMS
+from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CapgmyoDataSegmentRMS, CSLDataSegmentRMS
 from torch_loaders import EMGFrameLoader
-from utils.deep_learning import train_model, test_model, init_adabn
-from utils.networks import CapgMyoNet, LogisticRegressor
-from utils.networks_utils import median_pool_2d
-from utils.emg_processing import majority_voting_full_segment, majority_voting_segments
+from deep_learning import train_model, test_model, init_adabn
+from networks import CapgMyoNet, LogisticRegressor
+from networks_utils import median_pool_2d
+from emg_processing import majority_voting_full_segment, majority_voting_segments
 
 # from torch.utils.tensorboard import SummaryWriter
 # writer = SummaryWriter('runs/capgmyo')
@@ -96,44 +96,6 @@ if __name__ == '__main__':
                                                                                     train_session=train_session,
                                                                                     rep_idx=adapt_rep)
 
-                    # COMPUTE THE AVERAGE EMG IMAGE FOR EACH GESTURE
-                    # log_average_images(X_train, Y_train, train_session, X_test, Y_test, test_session, exp['dataset'], sub_id)
-                    # X_train_plot = median_pool_2d(X_train, kernel_size=(3,1), padding=(1,0))
-                    # # X_train_plot = X_train
-                    # if exp['dataset'] == 'csl':
-                    #     fig, axs = plt.subplots(5, 5, figsize=(100, 100))
-                    #     for idx in range(5):
-                    #         for jdx in range(5):
-                    #             cur_label = idx*5 + jdx
-                    #             Xmean = X_train_plot[Y_train == cur_label, 0, :, :].mean(axis=0)
-                    #             im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
-                    #             axs[idx, jdx].set_title(str(idx*5 + jdx))
-                    #             plt.colorbar(im_plot, ax=axs[idx, jdx])
-                    #     plt.savefig('avg_image.jpg')
-                    #     plt.close()
-
-                    #     X_test_plot = median_pool_2d(X_test)
-                    #     fig, axs = plt.subplots(5, 5, figsize=(100, 100))
-                    #     for idx in range(5):
-                    #         for jdx in range(5):
-                    #             cur_label = idx*5 + jdx
-                    #             Xmean = X_test_plot[Y_test == cur_label, 0, :, :].mean(axis=0)
-                    #             im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
-                    #             axs[idx, jdx].set_title(str(idx*5 + jdx))
-                    #             plt.colorbar(im_plot, ax=axs[idx, jdx])
-                    #     plt.savefig('avg_image_test.jpg')
-                    #     plt.close()
-                    # elif exp['dataset'] == 'capgmyo':
-                    #     fig, axs = plt.subplots(2, 4, figsize=(100, 100))
-                    #     for idx in range(2):
-                    #         for jdx in range(4):
-                    #             cur_label = idx*4 + jdx
-                    #             Xmean = X_train_plot[Y_train == cur_label, 0, :, :].mean(axis=0)
-                    #             im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
-                    #             axs[idx, jdx].set_title(str(idx*4 + jdx))
-                    #             plt.colorbar(im_plot, ax=axs[idx, jdx])
-                    #     plt.savefig('avg_image.jpg')
-                    #     plt.close()
                     
                     # Get PyTorch DataLoaders
                     train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=exp['norm'])
@@ -160,7 +122,8 @@ if __name__ == '__main__':
                         # Train the model
                         base_model.shift.xshift.requires_grad = False
                         base_model.shift.yshift.requires_grad = False
-                        base_model.baseline.requires_grad = False
+                        if exp['learnable_baseline']:
+                            base_model.baseline.requires_grad = False
                         train_model(base_model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                                     warmup_scheduler=warmup_scheduler) # run training loop
                         
@@ -205,7 +168,8 @@ if __name__ == '__main__':
                         # adapted_model.bn.eval()                            
                         adapted_model.shift.xshift.requires_grad = True
                         adapted_model.shift.yshift.requires_grad = True
-                        adapted_model.baseline.requires_grad = True
+                        if exp['learnable_baseline']:
+                            adapted_model.baseline.requires_grad = True
                     if exp['adabatch']:
                         init_adabn(adapted_model)
 

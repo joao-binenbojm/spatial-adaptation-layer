@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from utils.networks_utils import Shift, SpatialAdaptation, LocallyConnected2d 
+from networks_utils import Shift, SpatialAdaptation, LocallyConnected2d 
 
 
 # Canonical EMG network from original capgmyo paper
