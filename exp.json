@@ -1,6 +1,6 @@
 {
     "name": "exp.csv",
-    "K": 5,
+    "K": 1,
     "num_epochs": 15,
     "norm": 0,
     "lr": 5e-5,

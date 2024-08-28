@@ -17,11 +17,11 @@ from sklearn.metrics import  accuracy_score, confusion_matrix, ConfusionMatrixDi
 import matplotlib.pyplot as plt
 
 # from data_loaders import load_tensors, extract_frames_csl, extract_frames_capgmyo, EMGFrameLoader
-from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CapgmyoDataSegmentRMS, CSLDataSegmentRMS
+from utils.tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CapgmyoDataSegmentRMS, CSLDataSegmentRMS
 from torch_loaders import EMGFrameLoader
-from utils.deep_learning import train_model, test_model
-from networks import CapgMyoNet, LogisticRegressor
-from networks_utils import median_pool_2d
+from utils.deep_learning import train_model, test_model, init_adabn
+from utils.networks import CapgMyoNet, LogisticRegressor
+from utils.networks_utils import median_pool_2d
 from utils.emg_processing import majority_voting_full_segment, majority_voting_segments
 
 # from torch.utils.tensorboard import SummaryWriter
@@ -41,6 +41,16 @@ if __name__ == '__main__':
         data = json.load(f)
     emg_tensorizer_def = eval(exp['emg_tensorizer'])
     name = exp['name'] # keep experiment name
+
+    # Log wandb conditions
+    config = deepcopy(exp)
+    config['scheduler'] = json.dumps(config['scheduler'])
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project="intersession",
+        config=config,
+        # mode='disabled',
+    )
 
     t0 = time()
 
@@ -87,42 +97,43 @@ if __name__ == '__main__':
                                                                                     rep_idx=adapt_rep)
 
                     # COMPUTE THE AVERAGE EMG IMAGE FOR EACH GESTURE
-                    X_train_plot = median_pool_2d(X_train, kernel_size=(3,1), padding=(1,0))
-                    # X_train_plot = X_train
-                    if exp['dataset'] == 'csl':
-                        fig, axs = plt.subplots(5, 5, figsize=(100, 100))
-                        for idx in range(5):
-                            for jdx in range(5):
-                                cur_label = idx*5 + jdx
-                                Xmean = X_train_plot[Y_train == cur_label, 0, :, :].mean(axis=0)
-                                im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
-                                axs[idx, jdx].set_title(str(idx*5 + jdx))
-                                plt.colorbar(im_plot, ax=axs[idx, jdx])
-                        plt.savefig('avg_image.jpg')
-                        plt.close()
+                    # log_average_images(X_train, Y_train, train_session, X_test, Y_test, test_session, exp['dataset'], sub_id)
+                    # X_train_plot = median_pool_2d(X_train, kernel_size=(3,1), padding=(1,0))
+                    # # X_train_plot = X_train
+                    # if exp['dataset'] == 'csl':
+                    #     fig, axs = plt.subplots(5, 5, figsize=(100, 100))
+                    #     for idx in range(5):
+                    #         for jdx in range(5):
+                    #             cur_label = idx*5 + jdx
+                    #             Xmean = X_train_plot[Y_train == cur_label, 0, :, :].mean(axis=0)
+                    #             im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
+                    #             axs[idx, jdx].set_title(str(idx*5 + jdx))
+                    #             plt.colorbar(im_plot, ax=axs[idx, jdx])
+                    #     plt.savefig('avg_image.jpg')
+                    #     plt.close()
 
-                        X_test_plot = median_pool_2d(X_test)
-                        fig, axs = plt.subplots(5, 5, figsize=(100, 100))
-                        for idx in range(5):
-                            for jdx in range(5):
-                                cur_label = idx*5 + jdx
-                                Xmean = X_test_plot[Y_test == cur_label, 0, :, :].mean(axis=0)
-                                im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
-                                axs[idx, jdx].set_title(str(idx*5 + jdx))
-                                plt.colorbar(im_plot, ax=axs[idx, jdx])
-                        plt.savefig('avg_image_test.jpg')
-                        plt.close()
-                    elif exp['dataset'] == 'capgmyo':
-                        fig, axs = plt.subplots(2, 4, figsize=(100, 100))
-                        for idx in range(2):
-                            for jdx in range(4):
-                                cur_label = idx*4 + jdx
-                                Xmean = X_train_plot[Y_train == cur_label, 0, :, :].mean(axis=0)
-                                im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
-                                axs[idx, jdx].set_title(str(idx*4 + jdx))
-                                plt.colorbar(im_plot, ax=axs[idx, jdx])
-                        plt.savefig('avg_image.jpg')
-                        plt.close()
+                    #     X_test_plot = median_pool_2d(X_test)
+                    #     fig, axs = plt.subplots(5, 5, figsize=(100, 100))
+                    #     for idx in range(5):
+                    #         for jdx in range(5):
+                    #             cur_label = idx*5 + jdx
+                    #             Xmean = X_test_plot[Y_test == cur_label, 0, :, :].mean(axis=0)
+                    #             im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
+                    #             axs[idx, jdx].set_title(str(idx*5 + jdx))
+                    #             plt.colorbar(im_plot, ax=axs[idx, jdx])
+                    #     plt.savefig('avg_image_test.jpg')
+                    #     plt.close()
+                    # elif exp['dataset'] == 'capgmyo':
+                    #     fig, axs = plt.subplots(2, 4, figsize=(100, 100))
+                    #     for idx in range(2):
+                    #         for jdx in range(4):
+                    #             cur_label = idx*4 + jdx
+                    #             Xmean = X_train_plot[Y_train == cur_label, 0, :, :].mean(axis=0)
+                    #             im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
+                    #             axs[idx, jdx].set_title(str(idx*4 + jdx))
+                    #             plt.colorbar(im_plot, ax=axs[idx, jdx])
+                    #     plt.savefig('avg_image.jpg')
+                    #     plt.close()
                     
                     # Get PyTorch DataLoaders
                     train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=exp['norm'])
@@ -136,6 +147,7 @@ if __name__ == '__main__':
                     num_epochs = exp['num_epochs']
                     criterion = nn.CrossEntropyLoss(reduction='sum')
                     if not is_model_trained:
+
                         base_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_gestures'], 
                                                           p_input=exp['p_input'], baseline=exp['learnable_baseline']).to(device)
                         optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, base_model.parameters()),
@@ -164,22 +176,24 @@ if __name__ == '__main__':
                         accs.append(acc)
                         print('Test Accuracy:', acc)
 
+                        # Majority voting, with number of frames depending on dataset used
+                        if exp['dataset'] == 'capgmyo':
+                            maj_all_preds = majority_voting_segments(all_preds, Mmj=75, durations=test_durations)
+                            maj_acc = accuracy_score(all_labs, maj_all_preds)
+                            maj_accs.append(maj_acc)
+                            print('Majority Voting Accuracy:', maj_acc)
+                        
+                        else: # if csl, compute one MJV predition for each test segment
+                            maj_all_preds, maj_all_labs = majority_voting_full_segment(all_preds, test_durations), majority_voting_full_segment(all_labs, test_durations)
+                            maj_acc = accuracy_score(maj_all_labs, maj_all_preds)
+                            maj_accs.append(maj_acc)
+                            print('Majority Voting Accuracy:', maj_acc)
+                        
                     else:
                         print('Using previously trained model (same test accuracy as previously)...')
                         accs.append(acc)
+                        maj_accs.append(maj_acc)
                         print('Test Accuracy:', acc)
-
-                    # Majority voting, with number of frames depending on dataset used
-                    if exp['dataset'] == 'capgmyo':
-                        maj_all_preds = majority_voting_segments(all_preds, Mmj=75, durations=test_durations)
-                        maj_acc = accuracy_score(all_labs, maj_all_preds)
-                        maj_accs.append(maj_acc)
-                        print('Majority Voting Accuracy:', maj_acc)
-                    
-                    else: # if csl, compute one MJV predition for each test segment
-                        maj_all_preds, maj_all_labs = majority_voting_full_segment(all_preds, test_durations), majority_voting_full_segment(all_labs, test_durations)
-                        maj_acc = accuracy_score(maj_all_labs, maj_all_preds)
-                        maj_accs.append(maj_acc)
                         print('Majority Voting Accuracy:', maj_acc)
 
                     # Fine-tune to update model's shifting position
@@ -188,19 +202,23 @@ if __name__ == '__main__':
                     if exp['adaptation'] == 'shift-adaptation':
                         for param in adapted_model.parameters():
                             param.requires_grad = False
-                        adapted_model.eval()
+                        # adapted_model.bn.eval()                            
                         adapted_model.shift.xshift.requires_grad = True
                         adapted_model.shift.yshift.requires_grad = True
                         adapted_model.baseline.requires_grad = True
-                
-                    for g in optimizer.param_groups:
-                        g['lr'] = exp['lr']
+                    if exp['adabatch']:
+                        init_adabn(adapted_model)
+
+                    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, adapted_model.parameters()),
+                                                lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
+                    # for g in optimizer.param_groups:
+                        # g['lr'] = exp['lr']
                     scheduler_params = exp['scheduler']['params']
                     scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
                     scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
                     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(adapt_loader)*data['num_repetitions'])
                     train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
-                                warmup_scheduler=warmup_scheduler) # run training loop
+                                warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
 
                     xshift = adapted_model.shift.xshift.cpu().detach().numpy()[0]
                     yshift = adapted_model.shift.yshift.cpu().detach().numpy()[0]
@@ -251,14 +269,15 @@ if __name__ == '__main__':
     df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy','xshift', 'yshift'])
     df.to_csv(name)
 
-    # Log wandb conditions
-    config = deepcopy(exp)
-    config['scheduler'] = json.dumps(config['scheduler'])
-    wandb.init(
-        # set the wandb project where this run will be logged
-        project="intersession",
-        config=config
-    )
+    # # Log wandb conditions
+    # config = deepcopy(exp)
+    # config['scheduler'] = json.dumps(config['scheduler'])
+    # wandb.init(
+    #     # set the wandb project where this run will be logged
+    #     project="intersession",
+    #     config=config,
+    #     mode='disabled',
+    # )
 
     table = wandb.Table(dataframe=df)
     wandb.log({'complete_results': table})
