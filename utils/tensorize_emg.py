@@ -8,7 +8,7 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.ndimage import median_filter
 import torch
 
-from utils.emg_processing import bandpass, bandstop, identity, get_rms_signal
+from emg_processing import bandpass, bandstop, identity, get_rms_signal
 from networks_utils import median_pool_2d
 
 
@@ -225,8 +225,8 @@ class EMGSegmentData(EMGData):
             test_active = self.active[[test_session], :, [test_idx], :]
 
             # Get only detected active segments of activity
-            X_train, Y_train = X_train[train_active], Y_train[train_active]
-            X_test, Y_test = X_test[test_active], Y_test[test_active]
+            X_train, Y_train = X_train[torch.tensor(train_active)], Y_train[torch.tensor(train_active)]
+            X_test, Y_test = X_test[torch.tensor(test_active)], Y_test[torch.tensor(test_active)]
             test_durations = self.durations[test_session, :, test_idx]         
             
             # Convert to torch tensors of type float32
@@ -260,8 +260,8 @@ class EMGSegmentData(EMGData):
                 adapt_active = adapt_active[:, gest_idxs, :]
 
             # Get only detected active segments of activity
-            X_train, X_adapt, X_test = X_train[train_active], X_adapt[adapt_active], X_test[test_active]
-            Y_train, Y_adapt, Y_test = Y_train[train_active], Y_adapt[adapt_active], Y_test[test_active]
+            X_train, X_adapt, X_test = X_train[torch.tensor(train_active)], X_adapt[torch.tensor(adapt_active)], X_test[torch.tensor(test_active)]
+            Y_train, Y_adapt, Y_test = Y_train[torch.tensor(train_active)], Y_adapt[torch.tensor(adapt_active)], Y_test[torch.tensor(test_active)]
             test_durations = self.durations[test_session, :, idxs]
 
             # Convert to torch tensors of type float32

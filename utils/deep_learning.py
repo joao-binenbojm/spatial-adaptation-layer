@@ -1,7 +1,7 @@
 import torch
 from time import time
 import matplotlib.pyplot as plt
-
+import wandb
 
 def init_adabn(model):
     '''Takes a given PyTorch model, sets all modules to evaluation mode, then resets BN statistics
@@ -16,7 +16,7 @@ def init_adabn(model):
             module.momentum = None # keep track of simple cumulative mean
 
 ## TRAINING/TESTING
-def train_model(model, train_loader, optimizer, criterion, num_epochs=2, scheduler=None, warmup_scheduler=None, val_loader=None):
+def train_model(model, train_loader, optimizer, criterion, num_epochs=2, scheduler=None, warmup_scheduler=None, val_loader=None, verbose=True):
     '''Training loop for given experiment.'''
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
     running_correct = 0
@@ -26,7 +26,8 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
 
     t0 = time() # initial timestamp at start of training
     for epoch in range(num_epochs):
-        print('Learning Rate:', scheduler.get_last_lr())
+        if verbose:
+            print('Learning Rate:', scheduler.get_last_lr())
         running_loss = 0.0
         for i, (signals, labels) in enumerate(train_loader):
             signals = signals.to(device)
@@ -44,7 +45,7 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
             running_loss += loss.item()
 
             # weights.append(model.fc.weight.cpu().detach().numpy().ravel())
-#            baseline.append(model.baseline.cpu().detach().numpy().ravel())
+            # baseline.append(model.baseline.cpu().detach().numpy().ravel())
             # if 'model.shift' in locals():
             xshift.append(model.shift.xshift.cpu().detach().numpy())
             yshift.append(model.shift.yshift.cpu().detach().numpy())
@@ -54,45 +55,49 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
             running_correct += (predicted.squeeze() == labels.view(-1)).sum().item()
 
             if (i + 1) % 20 == 0:
-                print('Epoch {} / {}, step {} / {}, loss = {:4f}'.format(epoch+1, num_epochs, i+1, len(train_loader), loss.item()))
+                if verbose:
+                    print('Epoch {} / {}, step {} / {}, loss = {:4f}'.format(epoch+1, num_epochs, i+1, len(train_loader), loss.item()))
                 # writer.add_scalar('training loss', running_loss/100, epoch * len(train_loader) + i)
                 # writer.add_scalar('training accuracy', running_correct/100, epoch * len(train_loader) + i)
                 running_losses.append(running_loss)
+                # if train: wandb.log({'Training Loss': running_loss})
+                # else: wandb.log({'Fine-tuning Loss': running_loss})
                 running_loss = 0.0
                 running_correct = 0
         # Update scheduler and calculate time taken after given epoch
         scheduler.step()
         tf = time()
         h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
-        print('TOTAL TIME ELAPSED: {}h, {}min'.format(h, m))
+        if verbose:
+            print('TOTAL TIME ELAPSED: {}h, {}min'.format(h, m))
     
-    # Plot learnable shifts and baseline
-    # if 'model.shift' in locals():
-    plt.figure()
-    plt.plot(xshift)
-    plt.plot(yshift)
-    plt.legend(['xshift', 'yshift'])
-    plt.savefig('shifts.jpg')
-    plt.close()
-
-    # if 'model.baseline' in locals():
-    plt.figure()
-    plt.plot(baseline)
-    plt.title('Learned baseline')
-    plt.savefig('baseline.jpg')
-    plt.close()
-
+    # # Plot learnable shifts and baseline
+    # # if 'model.shift' in locals():
     # plt.figure()
-    # plt.plot(weights)
-    # plt.title('Learned weights')
-    # plt.savefig('weights{}.jpg'.format(optimizer.param_groups[0]['lr']))
+    # plt.plot(xshift)
+    # plt.plot(yshift)
+    # plt.legend(['xshift', 'yshift'])
+    # plt.savefig('shifts.jpg')
     # plt.close()
 
-    plt.figure()
-    plt.plot(running_losses)
-    plt.title('TRAINING LOSS')
-    plt.savefig('loss.jpg')
-    plt.close()
+    # # if 'model.baseline' in locals():
+    # plt.figure()
+    # plt.plot(baseline)
+    # plt.title('Learned baseline')
+    # plt.savefig('baseline.jpg')
+    # plt.close()
+
+    # # plt.figure()
+    # # plt.plot(weights)
+    # # plt.title('Learned weights')
+    # # plt.savefig('weights{}.jpg'.format(optimizer.param_groups[0]['lr']))
+    # # plt.close()
+
+    # plt.figure()
+    # plt.plot(running_losses)
+    # plt.title('TRAINING LOSS')
+    # plt.savefig('loss.jpg')
+    # plt.close()
 
 def test_model(model, test_loader):
     ''' Takes given PyTorch model and test DataLoader, and returns all labels and corresponding model predictions.'''
