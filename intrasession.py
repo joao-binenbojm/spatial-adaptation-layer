@@ -2,6 +2,7 @@ import os
 from time import time
 import json
 import gc
+import wandb
 
 import numpy as np
 import pandas as pd
@@ -17,15 +18,16 @@ from sklearn.naive_bayes import GaussianNB
 from sklearn.ensemble import RandomForestClassifier
 import matplotlib.pyplot as plt
 import psutil
+from copy import deepcopy
 
 
 # from data_loaders import load_tensors, extract_frames_csl, extract_frames_capgmyo, EMGFrameLoader
-from utils.tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CSLDataSegmentRMS, CapgmyoDataSegmentRMS
+from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CSLDataSegmentRMS, CapgmyoDataSegmentRMS
 from torch_loaders import EMGFrameLoader
-from utils.deep_learning import train_model, test_model
-from utils.emg_processing import majority_voting_segments, majority_voting_full_segment
-from utils.networks import CapgMyoNet, LogisticRegressor
-from utils.networks import median_pool_2d
+from deep_learning import train_model, test_model
+from emg_processing import majority_voting_segments, majority_voting_full_segment
+from networks import CapgMyoNet, LogisticRegressor
+from networks_utils import median_pool_2d
 
 # from torch.utils.tensorboard import SummaryWriter
 # writer = SummaryWriter('runs/capgmyo')
@@ -44,6 +46,17 @@ if __name__ == '__main__':
         data = json.load(f)
     emg_tensorizer_def = eval(exp['emg_tensorizer'])
     name = exp['name']# keep experiment name
+
+    # Log wandb conditions
+    config = deepcopy(exp)
+    config['scheduler'] = json.dumps(config['scheduler'])
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project="intrasession",
+        config=config,
+        # mode='disabled',
+    )
+
 
     t0 = time()
 
@@ -65,7 +78,8 @@ if __name__ == '__main__':
         emg_tensorizer.load_tensors()
 
         for session in tqdm(data['sessions']):
-            for test_idx in range(10):
+            sample_reps = list(np.random.choice(list(range(10)), replace=False, size=exp['K']))
+            for test_idx in sample_reps:
                 subs.append(sub)
                 sessions.append(session)
                 test_reps.append(test_idx)
@@ -74,31 +88,6 @@ if __name__ == '__main__':
 
                 X_train, Y_train, X_test, Y_test, test_durations = emg_tensorizer.get_tensors(test_session=session, rep_idx=test_idx)
 
-                # COMPUTE THE AVERAGE EMG IMAGE FOR EACH GESTURE
-                X_train_plot = median_pool_2d(X_train)
-                if exp['dataset'] == 'csl':
-                    fig, axs = plt.subplots(5, 5, figsize=(100, 100))
-                    for idx in range(5):
-                        for jdx in range(5):
-                            cur_label = idx*5 + jdx
-                            Xmean = X_train_plot[Y_train == cur_label, 0, :, :].mean(axis=0)
-                            im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
-                            axs[idx, jdx].set_title(str(idx*5 + jdx))
-                            plt.colorbar(im_plot, ax=axs[idx, jdx])
-                    plt.savefig('avg_image.jpg')
-                    plt.close()
-                elif exp['dataset'] == 'capgmyo':
-                    fig, axs = plt.subplots(2, 4, figsize=(100, 100))
-                    for idx in range(2):
-                        for jdx in range(4):
-                            cur_label = idx*4 + jdx
-                            Xmean = X_train_plot[Y_train == cur_label, 0, :, :].mean(axis=0)
-                            im_plot = axs[idx, jdx].imshow(Xmean, cmap='gray')
-                            axs[idx, jdx].set_title(str(idx*4 + jdx))
-                            plt.colorbar(im_plot, ax=axs[idx, jdx])
-                    plt.savefig('avg_image.jpg')
-                    plt.close()
-                
                 # Get PyTorch DataLoaders
                 train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=exp['norm'])
                 test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
@@ -121,7 +110,8 @@ if __name__ == '__main__':
                 if exp['adaptation'] == 'shift-adaptation':
                     model.shift.xshift.requires_grad = False
                     model.shift.yshift.requires_grad = False
-                    model.baseline.requires_grad = False
+                    if exp['learnable_baseline']:
+                        model.baseline.requires_grad = False
                 train_model(model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                             warmup_scheduler=warmup_scheduler) # run training loop
         
@@ -148,14 +138,14 @@ if __name__ == '__main__':
                     maj_accs.append(maj_acc)
                     print('Majority Voting Accuracy:', maj_acc)
 
-                # Plotting confusion matrix to understand what's going on
-                # labs = np.arange(1, 27)
-                labs = np.arange(data['num_gestures'])
-                cf = confusion_matrix(all_labs, all_preds, labels=labs)
-                disp = ConfusionMatrixDisplay(confusion_matrix=cf, display_labels=labs)
-                disp.plot()
-                plt.savefig('cfm.jpg')
-                plt.close()
+                # # Plotting confusion matrix to understand what's going on
+                # # labs = np.arange(1, 27)
+                # labs = np.arange(data['num_gestures'])
+                # cf = confusion_matrix(all_labs, all_preds, labels=labs)
+                # disp = ConfusionMatrixDisplay(confusion_matrix=cf, display_labels=labs)
+                # disp.plot()
+                # plt.savefig('cfm.jpg')
+                # plt.close()
 
                 # # Plotting a prediction-label stream
                 # plt.figure()
@@ -165,12 +155,12 @@ if __name__ == '__main__':
                 # plt.savefig('stream_maj.jpg')
                 # plt.close()
 
-                plt.figure()
-                plt.plot(all_labs)
-                plt.plot(all_preds)
-                plt.legend(['Labels', 'Predictions'])
-                plt.savefig('stream.jpg')
-                plt.close()
+                # plt.figure()
+                # plt.plot(all_labs)
+                # plt.plot(all_preds)
+                # plt.legend(['Labels', 'Predictions'])
+                # plt.savefig('stream.jpg')
+                # plt.close()
 
                 # SAVE RESULTS
                 arr = np.array([subs, sessions, test_reps, accs, maj_accs]).T
@@ -181,6 +171,14 @@ if __name__ == '__main__':
     arr = np.array([subs, sessions, test_reps, accs, maj_accs]).T
     df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy'])
     df.to_csv(name)
+
+    # Logging final results onto wandb 
+    table = wandb.Table(dataframe=df)
+    wandb.log({'complete_results': table})
+    wandb.log({'Accuracy': df['Accuracy'].mean()})
+    wandb.log({'Majority Voting Accuracy': df['Majority Voting Accuracy'].mean()})
+
+    wandb.finish()
 
     tf = time()
     h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
