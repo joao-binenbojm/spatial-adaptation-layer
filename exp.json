@@ -1,9 +1,9 @@
 {
     "name": "exp.csv",
     "K": 1,
-    "num_epochs": 15,
+    "num_epochs": 1,
     "norm": 0,
-    "lr": 5e-5,
+    "lr": 5e-4,
     "p_input": 0.5, 
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
@@ -12,15 +12,17 @@
             "gamma": 0.1
         }
     },
-    "batch_size": 1024,
+    "batch_size": 128,
     "momentum": 0,
     "weight_decay": 0,
-    "network": "LogisticRegressor",
+    "network": "CapgMyoNet",
     "dataset": "csl",
     "emg_tensorizer": "CSLDataSegmentRMS",
     "Trms": 75,
     "adaptation": "shift-adaptation",
     "real_baseline": false,
     "learnable_baseline": true,
-    "adabatch": false
+    "adabatch": false,
+    "dropout_training": true,
+    "dropout_fine_tuning": true
 }

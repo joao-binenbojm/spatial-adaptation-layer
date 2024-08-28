@@ -49,7 +49,7 @@ if __name__ == '__main__':
         # set the wandb project where this run will be logged
         project="intersession",
         config=config,
-        # mode='disabled',
+        mode='disabled',
     )
 
     t0 = time()
@@ -165,13 +165,19 @@ if __name__ == '__main__':
                     if exp['adaptation'] == 'shift-adaptation':
                         for param in adapted_model.parameters():
                             param.requires_grad = False
-                        # adapted_model.bn.eval()                            
                         adapted_model.shift.xshift.requires_grad = True
                         adapted_model.shift.yshift.requires_grad = True
+                        adapted_model.input_dropout.train()
                         if exp['learnable_baseline']:
                             adapted_model.baseline.requires_grad = True
+
+                    elif exp['adaptation'] == 'fine-tuning':
+                        adapted_model.train()
+
+
                     if exp['adabatch']:
                         init_adabn(adapted_model)
+                    
 
                     optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, adapted_model.parameters()),
                                                 lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
@@ -252,9 +258,8 @@ if __name__ == '__main__':
     wandb.log({'Majority Voting Accuracy': df['Majority Voting Accuracy'].mean()})
     wandb.log({'Majority Voting Tuned Accuracy': df['Majority Voting Tuned Accuracy'].mean()})
 
-
-    wandb.finish()
-
     tf = time()
     h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
     print('EXPERIMENT #{} - TOTAL TIME ELAPSED: {}h, {}min'.format(name, h, m))
+    wandb.log({'Time Ellapsed':f'{h}h, {m}min'})
+    wandb.finish()

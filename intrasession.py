@@ -73,6 +73,7 @@ if __name__ == '__main__':
         sub_id = 'subject{}'.format(sub+1)
 
         # Load EMG data in uniform format
+        print('\nLOADING EMG TENSOR...')
         emg_tensorizer = emg_tensorizer_def(dataset=exp['dataset'], path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
                                             input_shape=data['input_shape'], fs=data['fs'], sessions=session_ids, intrasession=True)
         emg_tensorizer.load_tensors()
@@ -178,8 +179,10 @@ if __name__ == '__main__':
     wandb.log({'Accuracy': df['Accuracy'].mean()})
     wandb.log({'Majority Voting Accuracy': df['Majority Voting Accuracy'].mean()})
 
-    wandb.finish()
 
     tf = time()
     h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
     print('EXPERIMENT #{} - TOTAL TIME ELAPSED: {}h, {}min'.format(name, h, m))
+    wandb.log({'Time Ellapsed':f'{h}h, {m}min'})
+    wandb.finish()
+

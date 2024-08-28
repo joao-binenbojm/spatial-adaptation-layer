@@ -68,8 +68,7 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
         scheduler.step()
         tf = time()
         h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
-        if verbose:
-            print('TOTAL TIME ELAPSED: {}h, {}min'.format(h, m))
+        print('TOTAL TIME ELAPSED: {}h, {}min'.format(h, m))
     
     # # Plot learnable shifts and baseline
     # # if 'model.shift' in locals():
