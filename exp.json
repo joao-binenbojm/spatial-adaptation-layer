@@ -23,6 +23,4 @@
     "real_baseline": false,
     "learnable_baseline": true,
     "adabatch": false,
-    "dropout_training": true,
-    "dropout_fine_tuning": true
 }
