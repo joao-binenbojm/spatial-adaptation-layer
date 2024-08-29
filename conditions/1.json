@@ -1,10 +1,10 @@
 {
-    "name": "exp2.csv",
+    "name": "exp1.csv",
     "K": 1,
     "num_epochs": 1,
     "norm": 0,
-    "lr": 0.0005,
-    "p_input": 0.5,
+    "lr": 5e-4,
+    "p_input": 0.0, 
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
         "params": {
