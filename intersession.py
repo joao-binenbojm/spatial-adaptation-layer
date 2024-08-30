@@ -82,7 +82,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 continue
             
             sample_reps = list(np.random.choice(list(range(10)), replace=False, size=exp['K'])) # sample repetition numbers, ensuring we don't sample the same rep twice
-            for adapt_rep in sample_reps: # for each possible repetition we can use to adapt
+            for adapt_rep in [7]: #sample_reps: # for each possible repetition we can use to adapt
                 subs.append(sub)
                 train_sessions.append(train_session)
                 test_sessions.append(test_session)
@@ -112,10 +112,10 @@ for idx, sub in tqdm(enumerate(data['subs'])):
 
                     base_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_gestures'], 
                                                         p_input=exp['p_input'], baseline=exp['learnable_baseline']).to(device)
-                    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, base_model.parameters()),
-                                            lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
-                    # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
-                    #                             lr=exp['lr'], weight_decay=exp['weight_decay'])
+                    # optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, base_model.parameters()),
+                    #                        lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
+                    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, base_model.parameters()),
+                                                lr=exp['lr'], weight_decay=exp['weight_decay'])
                     scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
                     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
@@ -193,9 +193,9 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 if exp['adabatch']:
                     init_adabn(adapted_model)
                 
-
-                optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, adapted_model.parameters()),
-                                            lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
+                optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                lr=exp['lr'], weight_decay=exp['weight_decay'])
+                # optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, adapted_model.parameters()),
+                #                             lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
                 # for g in optimizer.param_groups:
                     # g['lr'] = exp['lr']
                 scheduler_params = exp['scheduler']['params']
@@ -253,12 +253,18 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 disp.plot()
                 plt.savefig('cfm.jpg')
                 plt.close()
-
                 # SAVE RESULTS
                 arr = np.array([subs, train_sessions, test_sessions, adapt_reps, accs, tuned_accs, maj_accs, maj_tuned_accs, xshifts, yshifts]).T
                 df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy', 'xshift', 'yshift'])
                 df.to_csv(name)
-        
+                print(f'----------------------Affine learned params----------------------A')
+                print(f'The x shift is {adapted_model.spatial_adapt.xshift}')
+                print(f'The y shift is {adapted_model.spatial_adapt.yshift}')
+                print(f'The rotation theta angle is {adapted_model.spatial_adapt.rot_theta}')
+                print(f'The x scale is {adapted_model.spatial_adapt.xscale}')
+                print(f'The y scale is {adapted_model.spatial_adapt.yscale}')
+                print(f'The x shear is {adapted_model.spatial_adapt.xshear}')
+                print(f'The y shear is {adapted_model.spatial_adapt.yshear}')        
         is_model_trained = False
 
 # Save experiment data in .csv file

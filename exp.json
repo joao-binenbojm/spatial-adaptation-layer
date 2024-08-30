@@ -1,9 +1,9 @@
 {
     "name": "exp.csv",
     "K": 1,
-    "num_epochs": 5,
+    "num_epochs": 2,
     "norm": 0,
-    "lr": 0.00005,
+    "lr": 0.05,
     "p_input": 0.5,
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
@@ -13,7 +13,7 @@
         }
     },
     "batch_size": 1024,
-    "momentum": 0,
+    "momentum": 0.0,
     "weight_decay": 0,
     "network": "LogisticRegressor",
     "dataset": "csl",
