@@ -20,6 +20,7 @@
     "emg_tensorizer": "CSLDataSegmentRMS",
     "Trms": 75,
     "adaptation": "fine-tuning",
+    "adaptation_params": {"T": true, "R": true, "Sc": true, "Sh": true},
     "real_baseline": true,
     "learnable_baseline": false,
     "adabatch": false
