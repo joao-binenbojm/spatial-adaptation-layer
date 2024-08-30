@@ -84,7 +84,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 continue
             
             sample_reps = list(np.random.choice(list(range(10)), replace=False, size=exp['K'])) # sample repetition numbers, ensuring we don't sample the same rep twice
-            for adapt_rep in [7]: #sample_reps: # for each possible repetition we can use to adapt
+            for adapt_rep in sample_reps: # for each possible repetition we can use to adapt
                 subs.append(sub)
                 train_sessions.append(train_session)
                 test_sessions.append(test_session)

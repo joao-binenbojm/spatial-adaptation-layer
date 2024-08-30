@@ -1,5 +1,5 @@
 {
-    "name": "exp.csv",
+    "name": "experiment16",
     "K": 1,
     "num_epochs": 1,
     "norm": 0,
@@ -13,14 +13,19 @@
         }
     },
     "batch_size": 128,
-    "momentum": 0.0,
+    "momentum": 0,
     "weight_decay": 0,
     "network": "CapgMyoNet",
     "dataset": "csl",
     "emg_tensorizer": "CSLDataSegmentRMS",
     "Trms": 75,
     "adaptation": "spatial-adaptation",
-    "adaptation_params": {"T": true, "R": true, "Sc": true, "Sh": true},
+    "adaptation_params": {
+        "T": true,
+        "R": true,
+        "Sc": true,
+        "Sh": true
+    },
     "real_baseline": false,
     "learnable_baseline": true,
     "adabatch": false
