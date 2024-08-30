@@ -168,7 +168,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 # Fine-tune to update model's shifting position
                 adapted_model = deepcopy(base_model)
                 print('FINE-TUNING...')
-                if exp['adaptation'] == 'shift-adaptation':
+                if exp['adaptation'] == 'spatial-adaptation':
                     for param in adapted_model.parameters():
                         param.requires_grad = False
                     # adapted_model.shift.xshift.requires_grad = True
