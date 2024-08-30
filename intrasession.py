@@ -54,6 +54,7 @@ if __name__ == '__main__':
         # set the wandb project where this run will be logged
         project="intrasession",
         config=config,
+        name=name,
         # mode='disabled',
     )
 
@@ -166,12 +167,12 @@ if __name__ == '__main__':
                 # SAVE RESULTS
                 arr = np.array([subs, sessions, test_reps, accs, maj_accs]).T
                 df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy'])
-                df.to_csv(name)
+                df.to_csv(f"{name}")
 
     # Save experiment data in .csv file
     arr = np.array([subs, sessions, test_reps, accs, maj_accs]).T
     df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy'])
-    df.to_csv(name)
+    df.to_csv(f"{name}")
 
     # Logging final results onto wandb 
     table = wandb.Table(dataframe=df)

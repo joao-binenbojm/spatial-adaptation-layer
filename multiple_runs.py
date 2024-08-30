@@ -2,8 +2,9 @@ import os
 import json
 from tqdm import tqdm
 
+N_runs = os.listdir('conditions')
 exps = []
-for idx in range(1, 6):
+for idx in range(1, N_runs+1):
     with open(f'conditions/{idx}.json', 'r') as file:
         exps.append(json.load(file))
 
