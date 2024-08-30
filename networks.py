@@ -108,7 +108,7 @@ class CapgMyoNet(nn.Module):
 
 class LogisticRegressor(nn.Module):
 
-    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, p_input=0.0, track_running_stats=True):
+    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, p_input=0.0, track_running_stats=True, T = True, R = True, Sc = True, Sh = True):
         super(LogisticRegressor, self).__init__()
 
         self.channels = channels
@@ -124,7 +124,8 @@ class LogisticRegressor(nn.Module):
 
         self.input_dropout = nn.Dropout(p=p_input)
         self.bn = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
-        self.shift = Shift(input_shape)
+        # self.shift = Shift(input_shape)
+        self.spatial_adapt = SpatialAdaptation(T = True, R = True, Sc = True, Sh = True)
         self.fc = nn.Linear(self.channels, self.num_classes)
         # self.sm = nn.Softmax(dim=1)
 
@@ -133,7 +134,7 @@ class LogisticRegressor(nn.Module):
         # x = median_pool_2d(x, kernel_size=(3,1), padding=(1,0)) # perform median filtering step
         x = self.bn(x) # applies normalization procedure after usual filtering operations
         x = x - self.baseline # subtract baseline for baseline normalization
-        x = self.shift(x) # perform image resampling step
+        x = self.spatial_adapt(x) # perform image resampling step
         x = x.view(x.shape[0],-1) # flatten for determining classification
         x = self.input_dropout(x)
         x = self.fc(x)
