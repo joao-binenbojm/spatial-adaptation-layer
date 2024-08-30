@@ -19,7 +19,7 @@ class CapgMyoNet(nn.Module):
         self.input_shape = input_shape
         self.num_classes = num_classes
 
-        self.shift = Shift(input_shape)
+        self.spatial_adapt = SpatialAdaptation(input_shape)
 
         if baseline:
             self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
@@ -86,7 +86,7 @@ class CapgMyoNet(nn.Module):
 
         x = self.batchnorm0(x)
         x = x - self.baseline # perform baseline normalization
-        x = self.shift(x) # perform image resampling step
+        x = self.spatial_adapt(x) # perform image resampling step
         x = self.input_dropout(x)
         # x = self.batchnorm0(x)
         x = self.relu1(self.batchnorm1(self.conv1(x)))
@@ -108,7 +108,7 @@ class CapgMyoNet(nn.Module):
 
 class LogisticRegressor(nn.Module):
 
-    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, p_input=0.0, track_running_stats=True, T = True, R = True, Sc = True, Sh = True):
+    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, p_input=0.0, track_running_stats=True):
         super(LogisticRegressor, self).__init__()
 
         self.channels = channels
@@ -125,7 +125,7 @@ class LogisticRegressor(nn.Module):
         self.input_dropout = nn.Dropout(p=p_input)
         self.bn = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
         # self.shift = Shift(input_shape)
-        self.spatial_adapt = SpatialAdaptation(input_shape, T = True, R = True, Sc = True, Sh = True)
+        self.spatial_adapt = SpatialAdaptation(input_shape)
         self.fc = nn.Linear(self.channels, self.num_classes)
         # self.sm = nn.Softmax(dim=1)
 

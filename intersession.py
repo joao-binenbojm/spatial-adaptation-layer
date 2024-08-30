@@ -49,6 +49,7 @@ wandb.init(
     # set the wandb project where this run will be logged
     project="intersession",
     config=config,
+    name=name,
     # mode='disabled',
 )
 
@@ -257,7 +258,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 # SAVE RESULTS
                 arr = np.array([subs, train_sessions, test_sessions, adapt_reps, accs, tuned_accs, maj_accs, maj_tuned_accs, xshifts, yshifts]).T
                 df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy', 'xshift', 'yshift'])
-                df.to_csv(name)
+                df.to_csv(f"{name}.csv")
                 print(f'----------------------Affine learned params----------------------A')
                 print(f'The x shift is {adapted_model.spatial_adapt.xshift}')
                 print(f'The y shift is {adapted_model.spatial_adapt.yshift}')
@@ -271,7 +272,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
 # Save experiment data in .csv file
 arr = np.array([subs, train_sessions, test_sessions, adapt_reps, accs, tuned_accs, maj_accs, maj_tuned_accs, xshifts, yshifts, rot_thetas, xscales, yscales, xshears, yshears]).T
 df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy','xshift', 'yshift', 'rot_theta','xscale','yscale','xshear','yshear'])
-df.to_csv(name)
+df.to_csv(f"{name}.csv")
 
 # # Log wandb conditions
 # config = deepcopy(exp)
