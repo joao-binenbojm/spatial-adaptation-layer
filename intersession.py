@@ -62,6 +62,7 @@ accs, tuned_accs = [], [] # different metrics to be saved in csv from experiment
 maj_accs, maj_tuned_accs = [], [] 
 is_model_trained = False
 device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
+print('Device:', device)
 
 print('INTERSESSION:', data['dataset_name'])
 for idx, sub in tqdm(enumerate(data['subs'])):

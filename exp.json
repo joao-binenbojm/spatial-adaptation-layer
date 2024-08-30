@@ -1,7 +1,7 @@
 {
     "name": "exp.csv",
     "K": 1,
-    "num_epochs": 2,
+    "num_epochs": 1,
     "norm": 0,
     "lr": 0.05,
     "p_input": 0.5,
