@@ -46,8 +46,13 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
             # weights.append(model.fc.weight.cpu().detach().numpy().ravel())
 #            baseline.append(model.baseline.cpu().detach().numpy().ravel())
             # if 'model.shift' in locals():
-            xshift.append(model.shift.xshift.cpu().detach().numpy())
-            yshift.append(model.shift.yshift.cpu().detach().numpy())
+            # xshift.append(model.shift.xshift.cpu().detach().numpy())
+            # yshift.append(model.shift.yshift.cpu().detach().numpy())
+
+            # NB there are lines here that are model specific
+            # training loop here
+            xshift.append(model.affine_shift.xshift.cpu().detach().numpy())
+            yshift.append(model.affine_shift.yshift.cpu().detach().numpy())
             baseline.append(model.baseline.cpu().detach().numpy().ravel())
 
             _, predicted = torch.max(outputs.data, 1)
