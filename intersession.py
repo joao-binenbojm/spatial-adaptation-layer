@@ -75,8 +75,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
     emg_tensorizer.load_tensors()
 
     # Run code 5 times for every train/test session pair, except where same session is used for train and test
-    for train_session in tqdm(data['sessions']):
-        for test_session in tqdm(data['sessions']):
+    for train_idx, train_session in tqdm(enumerate(data['sessions'])):
+        for test_idx, test_session in tqdm(enumerate(data['sessions'])):
             # Only run if train/test session aren't the same
             if test_session == train_session:
                 continue
@@ -92,8 +92,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 print('ADAPT REP #{}'.format(adapt_rep+1))
                 
                 X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations = emg_tensorizer.get_tensors(
-                                                                                test_session=test_session,
-                                                                                train_session=train_session,
+                                                                                test_session=test_idx,
+                                                                                train_session=train_idx,
                                                                                 rep_idx=adapt_rep)
 
                 
