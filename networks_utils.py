@@ -45,7 +45,8 @@ class SpatialAdaptation(torch.nn.Module):
         dev = x.device
         N, C, _, _ = x.shape
         H, W = self.Nv, self.Nh
-        xshift_std, yshift_std = 2*self.xshift/(W) - 1, 2*self.yshift/(H) - 1 # scale between -1 and 1
+        # xshift_std, yshift_std = 2*self.xshift/(W) - 1, 2*self.yshift/(H) - 1 # scale between -1 and 1
+        xshift_std, yshift_std = self.xshift, self.yshift# scale between -1 and 1
         # Define separable transformations that make up affine transformation for interpretability
         T = torch.tensor([[1, 0, xshift_std],[0,1,yshift_std],[0,0,1]], dtype=torch.float).to(dev)
         R = torch.tensor([[torch.cos(self.rot_theta), -torch.sin(self.rot_theta), 0],[torch.sin(self.rot_theta), torch.cos(self.rot_theta), 0], [0, 0, 1]],dtype=torch.float).to(dev)
