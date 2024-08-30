@@ -93,11 +93,12 @@ class EMGData:
     def load_tensors(self):
         ''' Takes in data files and cretes complete data tensor for either intrasession or intersession case.'''
         for idx, session in enumerate(self.sessions):
-            self.current_session = idx+1
+            # self.current_session = idx+1
             DIR = os.path.join(self.path, self.sub, session)
             Xs, Ys = self.extract_frames(DIR)
             self.X[idx, :, :, :, :, :, :] = Xs # add data extracted from given session
             self.Y[idx, :, :, :] = Ys # add labels extracted from given session
+            self.current_session += 1
 
         # Convert data to tensor
         self.X = torch.tensor(self.X)
@@ -259,6 +260,12 @@ class EMGSegmentData(EMGData):
                 adapt_active = adapt_active[:, gest_idxs, :]
 
             # Get only detected active segments of activity
+            # X_train, X_adapt, X_test = X_train[train_active], X_adapt[adapt_active], X_test[test_active]
+
+            # changed to adapt to older pytorch version
+            train_active = torch.tensor(train_active)
+            adapt_active = torch.tensor(adapt_active)
+            test_active = torch.tensor(test_active)
             X_train, X_adapt, X_test = X_train[train_active], X_adapt[adapt_active], X_test[test_active]
             Y_train, Y_adapt, Y_test = Y_train[train_active], Y_adapt[adapt_active], Y_test[test_active]
             test_durations = self.durations[test_session, :, idxs]
@@ -672,7 +679,8 @@ class CSLDataSegmentRMS(EMGSegmentData):
                 emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
 
                 # Get segmentation outcome
-                sdx = int(DIR[-1]) - 1 # get the session number
+                # sdx = int(DIR[-1]) - 1 # get the session number
+                sdx = self.current_session
                 start, end = self.segment(emg, baseline)
                 self.active[sdx, cur_label, idx, start:end] = True # set signals to active within that timeframe
                 self.durations[sdx, cur_label, idx] = end - start # store segment duration in samples
