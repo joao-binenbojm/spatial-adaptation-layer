@@ -125,7 +125,7 @@ class LogisticRegressor(nn.Module):
         self.input_dropout = nn.Dropout(p=p_input)
         self.bn = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
         # self.shift = Shift(input_shape)
-        self.spatial_adapt = SpatialAdaptation(T = True, R = True, Sc = True, Sh = True)
+        self.spatial_adapt = SpatialAdaptation(input_shape, T = True, R = True, Sc = True, Sh = True)
         self.fc = nn.Linear(self.channels, self.num_classes)
         # self.sm = nn.Softmax(dim=1)
 
