@@ -32,6 +32,7 @@ class SpatialAdaptation(torch.nn.Module):
         self.Nv, self.Nh = input_shape
         self.register_buffer('yreg', torch.arange(self.Nv)) # original coordinates
         self.register_buffer('xreg', torch.arange(self.Nh)) # original coordinates
+        # make the scaling...
         self.xshift = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) 
         self.yshift = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) 
         self.rot_theta = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=R) # theta in rads.
@@ -42,16 +43,32 @@ class SpatialAdaptation(torch.nn.Module):
   
     def forward(self, x):
         '''Regrids input image based on affine shift parameters.'''
-        dev = x.device
+        dev = x.device # assuming x and model are on the same device
         N, C, _, _ = x.shape
         H, W = self.Nv, self.Nh
-        # xshift_std, yshift_std = 2*self.xshift/(W) - 1, 2*self.yshift/(H) - 1 # scale between -1 and 1
-        xshift_std, yshift_std = self.xshift, self.yshift# scale between -1 and 1
-        # Define separable transformations that make up affine transformation for interpretability
-        T = torch.tensor([[1, 0, xshift_std],[0,1,yshift_std],[0,0,1]], dtype=torch.float).to(dev)
-        R = torch.tensor([[torch.cos(self.rot_theta), -torch.sin(self.rot_theta), 0],[torch.sin(self.rot_theta), torch.cos(self.rot_theta), 0], [0, 0, 1]],dtype=torch.float).to(dev)
-        Sc = torch.tensor([[self.xscale, 0, 0], [0, self.yscale, 0], [0,0,1]],dtype=torch.float).to(dev)
-        Sh = torch.tensor([[1, self.xshear, 0], [self.yshear, 1, 0], [0,0,1]],dtype=torch.float).to(dev)
+        # xshift_std, yshift_std = 2*self.xshift/(W), 2*self.yshift/(H) # scale shifts in the range (-1 to 1) to keep xshift and yshift in pixel coords
+        xshift_std, yshift_std = self.xshift, self.yshift # scale shifts in the range (-1 to 1) to keep xshift and yshift in pixel coords
+        T = torch.cat([ # Translation Matrix
+            torch.stack([torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev), xshift_std]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev), yshift_std]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
+        ], dim=0)
+        R = torch.cat([ # Rotation Matrix
+            torch.stack([torch.cos(self.rot_theta), -torch.sin(self.rot_theta), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.sin(self.rot_theta), torch.cos(self.rot_theta), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
+        ], dim=0)
+        Sc = torch.cat([ # Scaling Matrix
+            torch.stack([self.xscale, torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), self.yscale, torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
+        ], dim=0)
+        Sh = torch.cat([ # Shear Matrix
+            torch.stack([torch.tensor(1.0).to(dev), self.xshear, torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([self.yshear, torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
+        ], dim=0)
+
         theta = Sh @ Sc @ R @ T
         theta = theta[0:2,:] # slice into submatrix expected by affine_grid
         theta = theta.repeat(N,1,1)
