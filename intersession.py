@@ -57,7 +57,7 @@ t0 = time()
 # Preinitialize metric arrays
 session_ids = ['session'+str(ses+1) for ses in data['sessions']]
 subs, test_sessions, train_sessions, adapt_reps = [], [], [], []
-xshifts, yshifts = [], []
+xshifts, yshifts, rot_thetas, xscales, yscales, xshears, yshears = [], [], [], [], [], [], []
 accs, tuned_accs = [], [] # different metrics to be saved in csv from experiment
 maj_accs, maj_tuned_accs = [], [] 
 is_model_trained = False
@@ -120,8 +120,15 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
                     # Train the model
-                    base_model.shift.xshift.requires_grad = False
-                    base_model.shift.yshift.requires_grad = False
+                    # base_model.shift.xshift.requires_grad = False
+                    # base_model.shift.yshift.requires_grad = False
+                    base_model.spatial_adapt.xshift.requires_grad = False
+                    base_model.spatial_adapt.yshift.requires_grad = False
+                    base_model.spatial_adapt.rot_theta.requires_grad = False
+                    base_model.spatial_adapt.xscale.requires_grad = False
+                    base_model.spatial_adapt.yscale.requires_grad = False
+                    base_model.spatial_adapt.xshear.requires_grad = False
+                    base_model.spatial_adapt.yshear.requires_grad = False
                     base_model.baseline.requires_grad = False
                     train_model(base_model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                                 warmup_scheduler=warmup_scheduler) # run training loop
@@ -164,8 +171,17 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 if exp['adaptation'] == 'shift-adaptation':
                     for param in adapted_model.parameters():
                         param.requires_grad = False
-                    adapted_model.shift.xshift.requires_grad = True
-                    adapted_model.shift.yshift.requires_grad = True
+                    # adapted_model.shift.xshift.requires_grad = True
+                    # adapted_model.shift.yshift.requires_grad = True
+                    # adapted_model.input_dropout.train()
+                    adapted_model.spatial_adapt.xshift.requires_grad = exp['adaptation_params']["T"]
+                    adapted_model.spatial_adapt.yshift.requires_grad = exp['adaptation_params']["T"]
+                    adapted_model.spatial_adapt.rot_theta.requires_grad = exp['adaptation_params']["R"]
+                    adapted_model.spatial_adapt.xscale.requires_grad = exp['adaptation_params']["Sc"]
+                    adapted_model.spatial_adapt.yscale.requires_grad = exp['adaptation_params']["Sc"]
+                    adapted_model.spatial_adapt.xshear.requires_grad = exp['adaptation_params']["Sh"]
+                    adapted_model.spatial_adapt.yshear.requires_grad = exp['adaptation_params']["Sh"]
+                    
                     adapted_model.input_dropout.train()
                     if exp['learnable_baseline']:
                         adapted_model.baseline.requires_grad = True
@@ -189,11 +205,23 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
                             warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
 
-                xshift = adapted_model.shift.xshift.cpu().detach().numpy()[0]
-                yshift = adapted_model.shift.yshift.cpu().detach().numpy()[0]
-
+                xshift = adapted_model.spatial_adapt.xshift.cpu().detach().numpy()
+                yshift = adapted_model.spatial_adapt.yshift.cpu().detach().numpy()
+                rot_theta = adapted_model.spatial_adapt.rot_theta.cpu().detach().numpy()
+                xscale = adapted_model.spatial_adapt.xscale.cpu().detach().numpy()
+                yscale = adapted_model.spatial_adapt.yscale.cpu().detach().numpy()
+                xshear = adapted_model.spatial_adapt.xshear.cpu().detach().numpy()
+                yshear = adapted_model.spatial_adapt.yshear.cpu().detach().numpy()
+                
+                
                 xshifts.append(xshift)
                 yshifts.append(yshift)
+                rot_thetas.append(rot_theta)
+                xscales.append(xscale)
+                yscales.append(yscale)
+                xshears.append(xshear)
+                yshears.append(yshear)
+
 
                 # Testing loop over test loader (K-shot)
                 print('TESTING...')
@@ -234,8 +262,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
         is_model_trained = False
 
 # Save experiment data in .csv file
-arr = np.array([subs, train_sessions, test_sessions, adapt_reps, accs, tuned_accs, maj_accs, maj_tuned_accs, xshifts, yshifts]).T
-df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy','xshift', 'yshift'])
+arr = np.array([subs, train_sessions, test_sessions, adapt_reps, accs, tuned_accs, maj_accs, maj_tuned_accs, xshifts, yshifts, rot_thetas, xscales, yscales, xshears, yshears]).T
+df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy','xshift', 'yshift', 'rot_theta','xscale','yscale','xshear','yshear'])
 df.to_csv(name)
 
 # # Log wandb conditions
