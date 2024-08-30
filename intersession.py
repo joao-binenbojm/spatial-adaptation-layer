@@ -122,8 +122,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     # Train the model
                     base_model.shift.xshift.requires_grad = False
                     base_model.shift.yshift.requires_grad = False
-                    if exp['learnable_baseline']:
-                        base_model.baseline.requires_grad = False
+                    base_model.baseline.requires_grad = False
                     train_model(base_model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                                 warmup_scheduler=warmup_scheduler) # run training loop
                     
