@@ -186,6 +186,7 @@ class AffineShift(torch.nn.Module):
         self.Nv, self.Nh = input_shape
         self.register_buffer('yreg', torch.arange(self.Nv)) # original coordinates
         self.register_buffer('xreg', torch.arange(self.Nh)) # original coordinates
+        # make the scaling...
         self.xshift = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) 
         self.yshift = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) 
         self.rot_theta = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=R) # theta in rads.
@@ -199,7 +200,8 @@ class AffineShift(torch.nn.Module):
         dev = x.device # assuming x and model are on the same device
         N, C, _, _ = x.shape
         H, W = self.Nv, self.Nh
-        xshift_std, yshift_std = 2*self.xshift/(W), 2*self.yshift/(H) # scale shifts in the range (-1 to 1) to keep xshift and yshift in pixel coords
+        # xshift_std, yshift_std = 2*self.xshift/(W), 2*self.yshift/(H) # scale shifts in the range (-1 to 1) to keep xshift and yshift in pixel coords
+        xshift_std, yshift_std = self.xshift, self.yshift # scale shifts in the range (-1 to 1) to keep xshift and yshift in pixel coords
         T = torch.cat([ # Translation Matrix
             torch.stack([torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev), xshift_std]).unsqueeze(0),
             torch.stack([torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev), yshift_std]).unsqueeze(0),
@@ -233,6 +235,7 @@ class RMSNet(nn.Module):
 
     def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, track_running_stats=True):
         super(RMSNet, self).__init__()
+        # super().__init__()
 
         self.channels = channels
         self.kernel_sz = kernel_sz
@@ -257,6 +260,42 @@ class RMSNet(nn.Module):
         x = self.bn(x) # applies normalization procedure after usual filtering operations
         x = x - self.baseline # subtract baseline for baseline normalization
         x = self.shift(x) # perform image resampling step
+        x = x.view(x.shape[0],-1) # flatten for determining classification
+        x = self.fc(x)
+        # x = self.sm(x)
+        return x.reshape(x.shape[0], self.num_classes)
+    
+class LogRegressAffine(nn.Module):
+
+    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, track_running_stats=True, T = True, R = True, Sc = True, Sh = True):
+        super().__init__()
+
+        self.channels = channels
+        self.kernel_sz = kernel_sz
+
+        self.input_shape = input_shape
+        self.num_classes = num_classes
+        # self.T = T
+        # self.R = R
+        # self.Sc
+        
+        if baseline:
+            self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
+        else:
+            self.register_buffer('baseline', torch.zeros(1, 1, input_shape[0], input_shape[1])) # original coordinates
+
+        self.bn = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
+        self.bn2 = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
+        self.affine_shift = AffineShift(input_shape, T = T, R = R, Sc = Sc, Sh = Sh)
+        self.fc = nn.Linear(self.channels, self.num_classes)
+        # self.sm = nn.Softmax(dim=1)
+
+
+    def forward(self, x):
+        # x = median_pool_2d(x, kernel_size=(3,1), padding=(1,0)) # perform median filtering step
+        x = self.bn(x) # applies normalization procedure after usual filtering operations
+        x = x - self.baseline # subtract baseline for baseline normalization
+        x = self.affine_shift(x) # perform image resampling step
         x = x.view(x.shape[0],-1) # flatten for determining classification
         x = self.fc(x)
         # x = self.sm(x)
