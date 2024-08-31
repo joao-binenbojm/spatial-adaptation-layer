@@ -120,10 +120,11 @@ if __name__ == '__main__':
                     model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_gestures']).to(device)
                     num_epochs = exp['num_epochs']
                     criterion = nn.CrossEntropyLoss(reduction='sum')
-                    # optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
-                    #                             lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
-                    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
-                                                lr=exp['lr'], weight_decay=exp['weight_decay'])
+                    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
+                                                lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
+
+                    # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
+                    #                             lr=exp['lr'], weight_decay=exp['weight_decay'])
                     scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
                     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
@@ -178,8 +179,8 @@ if __name__ == '__main__':
                         model.affine_shift.rot_theta.requires_grad = True
                         model.affine_shift.xscale.requires_grad = True
                         model.affine_shift.yscale.requires_grad = True
-                        model.affine_shift.xshear.requires_grad = True
-                        model.affine_shift.yshear.requires_grad = True
+                        model.affine_shift.xshear.requires_grad = False
+                        model.affine_shift.yshear.requires_grad = False
                         model.baseline.requires_grad = True
                 
                     for g in optimizer.param_groups:
