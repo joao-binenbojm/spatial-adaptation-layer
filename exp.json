@@ -1,7 +1,8 @@
 {
-    "name": "experiment16",
+    "name": "experiment1",
+    "project": "interpretability",
     "K": 1,
-    "num_epochs": 1,
+    "num_epochs": 2,
     "norm": 0,
     "lr": 0.05,
     "p_input": 0.5,
@@ -12,19 +13,22 @@
             "gamma": 0.1
         }
     },
-    "batch_size": 128,
+    "batch_size": 1024,
     "momentum": 0,
     "weight_decay": 0,
-    "network": "CapgMyoNet",
+    "network": "LogisticRegressor",
     "dataset": "csl",
     "emg_tensorizer": "CSLDataSegmentRMS",
     "Trms": 75,
     "adaptation": "spatial-adaptation",
     "adaptation_params": {
-        "T": true,
-        "R": true,
-        "Sc": true,
-        "Sh": true
+        "xshift": false,
+        "yshift": true,
+        "rot_theta": true,
+        "xscale": true,
+        "yscale": true,
+        "xshear": true,
+        "yshear": true
     },
     "real_baseline": false,
     "learnable_baseline": true,
