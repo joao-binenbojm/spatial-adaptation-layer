@@ -47,7 +47,7 @@ config = deepcopy(exp)
 config['scheduler'] = json.dumps(config['scheduler'])
 wandb.init(
     # set the wandb project where this run will be logged
-    project="intersession",
+    project=exp.pop("project"),
     config=config,
     name=name,
     # mode='disabled',
@@ -176,13 +176,13 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     # adapted_model.shift.xshift.requires_grad = True
                     # adapted_model.shift.yshift.requires_grad = True
                     # adapted_model.input_dropout.train()
-                    adapted_model.spatial_adapt.xshift.requires_grad = exp['adaptation_params']["T"]
-                    adapted_model.spatial_adapt.yshift.requires_grad = exp['adaptation_params']["T"]
-                    adapted_model.spatial_adapt.rot_theta.requires_grad = exp['adaptation_params']["R"]
-                    adapted_model.spatial_adapt.xscale.requires_grad = exp['adaptation_params']["Sc"]
-                    adapted_model.spatial_adapt.yscale.requires_grad = exp['adaptation_params']["Sc"]
-                    adapted_model.spatial_adapt.xshear.requires_grad = exp['adaptation_params']["Sh"]
-                    adapted_model.spatial_adapt.yshear.requires_grad = exp['adaptation_params']["Sh"]
+                    adapted_model.spatial_adapt.xshift.requires_grad = exp['adaptation_params']["xshift"]
+                    adapted_model.spatial_adapt.yshift.requires_grad = exp['adaptation_params']["yshift"]
+                    adapted_model.spatial_adapt.rot_theta.requires_grad = exp['adaptation_params']["rot_theta"]
+                    adapted_model.spatial_adapt.xscale.requires_grad = exp['adaptation_params']["xscale"]
+                    adapted_model.spatial_adapt.yscale.requires_grad = exp['adaptation_params']["yscale"]
+                    adapted_model.spatial_adapt.xshear.requires_grad = exp['adaptation_params']["xshear"]
+                    adapted_model.spatial_adapt.yshear.requires_grad = exp['adaptation_params']["yshear"]
                     
                     adapted_model.input_dropout.train()
                     if exp['learnable_baseline']:
