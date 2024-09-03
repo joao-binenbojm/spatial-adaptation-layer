@@ -1,8 +1,8 @@
 {
-    "name": "experiment1",
-    "project": "interpretability",
+    "name": "experiment9",
+    "project": "intrasession",
     "K": 1,
-    "num_epochs": 2,
+    "num_epochs": 1,
     "norm": 0,
     "lr": 0.05,
     "p_input": 0.5,
@@ -13,16 +13,16 @@
             "gamma": 0.1
         }
     },
-    "batch_size": 1024,
+    "batch_size": 128,
     "momentum": 0,
     "weight_decay": 0,
-    "network": "LogisticRegressor",
-    "dataset": "csl",
-    "emg_tensorizer": "CSLDataSegmentRMS",
+    "network": "CapgMyoNet",
+    "dataset": "capgmyo",
+    "emg_tensorizer": "CapgmyoData",
     "Trms": 75,
     "adaptation": "spatial-adaptation",
     "adaptation_params": {
-        "xshift": false,
+        "xshift": true,
         "yshift": true,
         "rot_theta": true,
         "xscale": true,
@@ -31,6 +31,6 @@
         "yshear": true
     },
     "real_baseline": false,
-    "learnable_baseline": true,
+    "learnable_baseline": false,
     "adabatch": false
 }
