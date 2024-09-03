@@ -15,11 +15,12 @@ from networks_utils import median_pool_2d
 class EMGData:
     
     def __init__(self, dataset='csl', path='../datasets/capgmyo/dbb_csl', sub='subject1', transform=None, target_transform=None, norm=0,
-                  num_gestures=26, num_repetitions=10, input_shape=(8, 24), fs=2048, sessions='session1', intrasession=False, remove_baseline=False):
+                  num_gestures=26, num_repetitions=10, input_shape=(8, 24), fs=2048, Trms=150, sessions='session1', intrasession=False, remove_baseline=False):
         # Store all appropriate data parameters
         self.dataset = dataset
         self.path = path
         self.fs = fs
+        self.Mrms = int(self.fs*(Trms / 1000))        
         self.intrasession = intrasession
         self.num_samples = fs
         self.norm = norm
@@ -338,9 +339,8 @@ class CapgmyoData(EMGData):
 
 class CapgmyoDataRMS(EMGData):
     
-    def __init__(self, Trms=150, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.Mrms = int(self.fs*(Trms / 1000))
         self.durations = np.ones((self.num_sessions, self.num_gestures, self.num_repetitions))*2048
 
     def extract_frames(self, DIR):
@@ -400,9 +400,8 @@ class CapgmyoDataRMS(EMGData):
 
 class CapgmyoDataSegmentRMS(EMGSegmentData):
     
-    def __init__(self, Trms=150, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.Mrms = int(self.fs*(Trms / 1000))        
 
         # Preinitialize Data tensors
         self.num_samples = 6349 # largest number of samples found in the dataset for a given movement
@@ -516,10 +515,8 @@ class CSLData(EMGData):
 
 class CSLDataRMS(EMGData):
     
-    def __init__(self, Trms=150, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.Mrms = int(self.fs*(Trms / 1000))
-
 
     def extract_frames(self, DIR):
         ''' Extract frames for the given subject/session for CSL dataset.'''
@@ -566,9 +563,8 @@ class CSLDataRMS(EMGData):
 
 class CSLDataSegmentRMS(EMGSegmentData):
     
-    def __init__(self, Trms=150, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs) 
-        self.Mrms = int(self.fs*(Trms / 1000))    
 
         # Preinitialize Data tensors
         self.num_samples = 3*self.fs
