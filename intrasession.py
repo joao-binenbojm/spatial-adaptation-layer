@@ -52,7 +52,7 @@ if __name__ == '__main__':
     config['scheduler'] = json.dumps(config['scheduler'])
     wandb.init(
         # set the wandb project where this run will be logged
-        project="intrasession",
+        project=exp.pop("project"),
         config=config,
         name=name,
         # mode='disabled',
@@ -167,12 +167,12 @@ if __name__ == '__main__':
                 # SAVE RESULTS
                 arr = np.array([subs, sessions, test_reps, accs, maj_accs]).T
                 df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy'])
-                df.to_csv(f"{name}")
+                df.to_csv(f"{name}.csv")
 
     # Save experiment data in .csv file
     arr = np.array([subs, sessions, test_reps, accs, maj_accs]).T
     df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy'])
-    df.to_csv(f"{name}")
+    df.to_csv(f"{name}.csv")
 
     # Logging final results onto wandb 
     table = wandb.Table(dataframe=df)
