@@ -144,3 +144,28 @@ class LocallyConnected2d(nn.Module):
         if self.bias is not None:
             out += self.bias
         return out
+
+
+class FactorizedDepthwiseSeparableConv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=(3, 3), stride=1, padding=1):
+        super(FactorizedDepthwiseSeparableConv, self).__init__()
+
+        # Factorize the kernel size (3, 3) into (3, 1) and (1, 3) or custom if provided
+        k1, k2 = kernel_size
+
+        # Depthwise k1x1 Convolution
+        self.depthwise_k1 = nn.Conv2d(in_channels, in_channels, kernel_size=(k1, 1), 
+                                      stride=stride, padding=(padding, 0), groups=in_channels)
+
+        # Depthwise 1xk2 Convolution
+        self.depthwise_k2 = nn.Conv2d(in_channels, in_channels, kernel_size=(1, k2), 
+                                      stride=stride, padding=(0, padding), groups=in_channels)
+
+        # Pointwise Convolution
+        self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, x):
+        x = self.depthwise_k1(x)
+        x = self.depthwise_k2(x)
+        x = self.pointwise(x)
+        return x
