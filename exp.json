@@ -1,8 +1,8 @@
 {
-    "name": "experiment2",
+    "name": "experiment3",
     "project": "architecture-evaluation",
     "K": 1,
-    "num_epochs": 0,
+    "num_epochs": 1,
     "norm": 0,
     "lr": 0.05,
     "p_input": 0.5,
