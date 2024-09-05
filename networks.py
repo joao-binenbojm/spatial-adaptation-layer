@@ -143,7 +143,7 @@ class LogisticRegressor(nn.Module):
 
 
 class ImageClassifier(nn.Module):
-    def __init__(self, num_classes=8, channels=64, in_channels=1, inter_channels=20, input_shape=(7, 24), conv_kernel_size=[3, 3], pool_kernel_size=[2, 2],
+    def __init__(self, num_classes=8, channels=64, in_channels=1, inter_channels=16, input_shape=(7, 24), conv_kernel_size=[3, 3], pool_kernel_size=[2, 2],
                   baseline=True, p_input=0.0, track_running_stats=True):
         super(ImageClassifier, self).__init__()
 

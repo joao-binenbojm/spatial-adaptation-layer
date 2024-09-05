@@ -274,15 +274,15 @@ arr = np.array([subs, train_sessions, test_sessions, adapt_reps, accs, tuned_acc
 df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy','xshift', 'yshift', 'rot_theta','xscale','yscale','xshear','yshear'])
 df.to_csv(f"{name}.csv")
 
-# Log wandb conditions
-config = deepcopy(exp)
-config['scheduler'] = json.dumps(config['scheduler'])
-wandb.init(
-    # set the wandb project where this run will be logged
-    project="intersession",
-    config=config,
-    mode='disabled',
-)
+# # Log wandb conditions
+# config = deepcopy(exp)
+# config['scheduler'] = json.dumps(config['scheduler'])
+# wandb.init(
+#     # set the wandb project where this run will be logged
+#     project="intersession",
+#     config=config,
+#     mode='disabled',
+# )
 
 table = wandb.Table(dataframe=df)
 wandb.log({'complete_results': table})
