@@ -1,4 +1,5 @@
 # SPATIAL ADAPTATION LAYER
+**Article:** https://arxiv.org/pdf/2409.08058
 This repository will be used to investigate the effect of the newly implemented Spatial Adaptation Torch layer. This layer assumes that from one session to another, performance drops can be accounted for by accounting for an affine transformation applied to grid coordinates, and accounting for baseline normalization (subtracting by the baseline amount of activity besides rest). This study focuses on EMG surface images only, with explicit temporal component (although sliding RMS surface images are primarily considered). This repository contains various different elements and it's important to be familiar with them when working with them.
 
 ## Novelties
