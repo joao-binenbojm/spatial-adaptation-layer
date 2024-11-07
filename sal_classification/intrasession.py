@@ -24,7 +24,7 @@ from copy import deepcopy
 # from data_loaders import load_tensors, extract_frames_csl, extract_frames_capgmyo, EMGFrameLoader
 from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CSLDataSegmentRMS, CapgmyoDataSegmentRMS
 from torch_loaders import EMGFrameLoader
-from deep_learning import train_model, test_model
+from sal_classification.deep_learning import train_model, test_model
 from emg_processing import majority_voting_segments, majority_voting_full_segment
 from networks import CapgMyoNet, LogisticRegressor
 from networks_utils import median_pool_2d

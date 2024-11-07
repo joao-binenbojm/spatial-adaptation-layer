@@ -72,7 +72,7 @@ class SpatialAdaptation(torch.nn.Module):
         theta = Sh @ Sc @ R @ T
         theta = theta[0:2,:] # slice into submatrix expected by affine_grid
         theta = theta.repeat(N,1,1)
-        grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W))
+        grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=False)
         xresamp = torch.nn.functional.grid_sample(x, grid)
         
         return xresamp

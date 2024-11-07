@@ -621,3 +621,43 @@ class CSLDataSegmentRMS(EMGSegmentData):
 
         return X, Y
 
+
+######################################################  EMG TENSORIZERS FOR DECOMPOSITION #######################################################################################
+class MUEditDecompData(EMGData):
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def extract_frames(self, DIR):
+        ''' Extract frames for the given subject/session for CSL dataset.'''
+
+        # Initialize data container for given session
+        filenames = os.listdir(DIR)
+        X = np.zeros((self.num_gestures, self.num_repetitions, self.fs, 1, self.input_shape[0], self.input_shape[1]))
+        Y = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples))
+
+        for gdx, name in enumerate(filenames):
+            mat = sio.loadmat(os.path.join(DIR, name))
+            cur_label = int(name.replace('gest', '').replace('.mat', '')) # get the label for the given gesture
+            if cur_label == 0: continue # exclude rest
+            else: cur_label -= 1
+
+            # Account for exception case of missing repetitions
+            reps = mat['gestures'].shape[0]
+            missing = self.num_repetitions - reps # number of missing repetitions from the protocol
+
+            # For each repetition available 
+            for idx in range(reps):
+                emg = mat['gestures'][idx, 0].T
+                emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+                center = len(emg) // 2 # get the central index of the given repetition
+                emg_segment = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
+                images = self.get_images(emg_segment)
+
+                # Add data extracted from given repetition to our data matrix            
+                X[cur_label, idx, :, :, :, :] = images # add EMG surface images onto our data matrix
+                Y[cur_label, idx, :] = np.array([cur_label]*self.num_samples)  # add labels onto our label matrix
+        
+            # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
+            X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
+        return X, Y

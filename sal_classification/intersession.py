@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 # from data_loaders import load_tensors, extract_frames_csl, extract_frames_capgmyo, EMGFrameLoader
 from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CapgmyoDataSegmentRMS, CSLDataSegmentRMS
 from torch_loaders import EMGFrameLoader
-from deep_learning import train_model, test_model, init_adabn
+from sal_classification.deep_learning import train_model, test_model, init_adabn
 from networks import CapgMyoNet, LogisticRegressor, ImageClassifier
 from networks_utils import median_pool_2d
 from emg_processing import majority_voting_full_segment, majority_voting_segments
@@ -195,7 +195,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 if exp['adabatch']:
                     init_adabn(adapted_model)
                 
-                optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                lr=exp['lr'], weight_decay=exp['weight_decay'])
+                optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
+                                             lr=exp['lr'], weight_decay=exp['weight_decay'])
                 # optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, adapted_model.parameters()),
                 #                             lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
                 # for g in optimizer.param_groups:
