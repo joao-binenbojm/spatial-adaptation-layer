@@ -5,52 +5,31 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import torch
 import seaborn as sns
+from sklearn.cluster import KMeans
 
-# Bayesian Optimization code
-from botorch.models import SingleTaskGP
-from botorch.fit import fit_gpytorch_mll
-from botorch.acquisition import LogExpectedImprovement
-from botorch.optim import optimize_acqf
-from gpytorch.mlls import ExactMarginalLogLikelihood
-# from botorch.kernels import RBFKernel
-from gpytorch.kernels import RBFKernel
+# # Bayesian Optimization code
+# from botorch.models import SingleTaskGP
+# from botorch.fit import fit_gpytorch_mll
+# from botorch.acquisition import LogExpectedImprovement
+# from botorch.optim import optimize_acqf
+# from gpytorch.mlls import ExactMarginalLogLikelihood
+# # from botorch.kernels import RBFKernel
+# from gpytorch.kernels import RBFKernel
 from gpytorch.priors import LogNormalPrior
 # from botorch.distributions import LogNormal
 
 
-from sal_decomposition.MUEdit.processing_tools import extend_emg, whiten_emg
+from sal_decomposition.MUEdit.processing_tools import extend_emg, whiten_emg, get_silohuette, maxk
+from sal_decomposition.MUEdit.processing_tools import batch_process_filters as get_pulse_trains
 from loss_functions import KurtosisLoss, NegentropyLoss
 from sda import SpatialDecompositionAdaptation
-
-def inject_gradient_noise(model, epoch, total_epochs, initial_noise_std=0.1):
-    """
-    Gradually reduce the noise standard deviation as training progresses.
-    Args:
-        model (torch.nn.Module): The model to modify gradients for.
-        epoch (int): Current epoch.
-        total_epochs (int): Total number of epochs.
-        initial_noise_std (float): Initial standard deviation of noise.
-    """
-    noise_std = initial_noise_std * (1 - epoch / total_epochs)  # Decrease noise as training progresses
-    for param in model.parameters():
-        if param.grad is not None:
-            noise = torch.randn_like(param.grad) * noise_std
-            param.grad += noise  # Add the noise to the gradient
-
-# Reflective boundary function
-def apply_reflective_boundary(param, bound):
-    if param < -bound:  # Below lower bound
-        param = bound + (bound - param)
-    elif param > bound:  # Above upper bound
-        param = bound - (param - bound)
-    return param
 
 class SDAExperiment:
 
     def __init__(self):
         self.params = {}
 
-    def generate_gaussian_muaps(self, mu_count, H, W, L, fxmax, sampfactor=100):
+    def generate_gaussian_muaps(self, mu_count, H, W, L, fxmax, sampfactor=10):
         '''Generates gaussian sequence with a sampling rate freqfactor times greater than desired, so that we can lowpass and then downsample.
         '''
         params = {'mu_count': mu_count, 'H': H, 'W': W, 'L':L, 'fxmax':fxmax, 'sampfactor':sampfactor}
@@ -69,9 +48,18 @@ class SDAExperiment:
         muaps = scipy.signal.filtfilt(b, a, muaps, axis=2) # filter along columns
         return torch.tensor(muaps.copy()).to(torch.float32)
 
+    # def load_muap_sims(self, PATH, mu_count=20):
+    #     ''' Loads simulated MUAPs from the cyllindrical model.'''
+    #     muaps = np.load(PATH)['muap']
+    #     mu_idxs = np.random.choice(np.arange(muaps.shape[0]), replace=False, size=mu_count) # sample MUs
+    #     muaps = muaps[mu_idxs, :,:] # take subset of motor units
+    #     muaps = muaps.reshape(muaps.shape[0], 20, 50, -1).transpose((0,2,1,3)) # keep long dimension as number of rows
+    #     muaps = muaps[:, ::2, ::2, ::4] # twice as many channels as in our simulation, now we have 4mm IED. 50 sample MUAP shape
+    #     return torch.tensor(muaps).to(torch.float32)
+
     def generate_spike_trains(self, mu_count, duration, Tmean=60, ISV=0.15):
         ''' Generate motor unit spike trains, both at very high as well as normal resolution.'''
-        params = {'mu_count': mu_count, 'duration': duration, 'sampfactor': sampfactor, 'Tmean':Tmean, 'ISV':ISV}
+        params = {'mu_count': mu_count, 'duration': duration, 'Tmean':Tmean, 'ISV':ISV}
         self.params.update(params)# keep track of chosing experimental parameters
         
         spts = torch.zeros(mu_count, duration)
@@ -81,9 +69,10 @@ class SDAExperiment:
         for mu_idx in range(mu_count):
             times = torch.normal(mean=torch.ones(int(duration/Tmean))*Tmean, std=Tstd)
             times = torch.cumsum(times, dim=0)#.to(torch.int64) # cumulative sum of firing times
-            int_times = torch.round(times).to(torch.int64)
+            int_times = torch.round(times).to(int)
             dts.append(int_times) # become discharge times in seconds
             fr_times = int_times[int_times < duration]
+            # dts.append(fr_times) # become discharge times in seconds
             spts[mu_idx, fr_times] = 1 # set all firing time values to 1
 
         return spts, dts
@@ -105,10 +94,11 @@ class SDAExperiment:
         left_padding = padding_total // 2    
         right_padding = padding_total - left_padding
         spts = torch.nn.functional.pad(spts, (left_padding, right_padding), mode='constant', value=0)
+        # spts = torch.nn.functional.pad(spts, (0, padding_total), mode='constant', value=0)
 
         # Prepare muaps as kernels
         H, W = muaps.shape[1], muaps.shape[2]
-        muaps = muaps.view(muaps.shape[0], muaps.shape[1]*muaps.shape[2], muaps.shape[3]) # flatten over channels
+        muaps = muaps.reshape(muaps.shape[0], muaps.shape[1]*muaps.shape[2], muaps.shape[3]) # flatten over channels
         muaps = torch.transpose(muaps, dim0=0, dim1=1).unsqueeze(2)
         muaps = torch.flip(muaps, dims=[3]) # flip kernel to obtain proper convolution 
         EMG = torch.nn.functional.conv2d(spts.to(device), muaps.to(device)) # obtain convolutive mixture
@@ -172,11 +162,11 @@ class SDAExperiment:
         '''Downsample the MUAPs before generating separation vectors.'''
         return muaps[:, ::sampfactor, ::sampfactor, :] # downsample muaps along spatial coordinates
 
-    def grid_crop(self, emg_grid, xcrop=0, ycrop=0):
-        ''' Keep only a subgrid at the center, returning a signal of shape (H - 2ycrop, W - 2xcrop)'''
-        cropped_emg = emg_grid.clone() # ensures no aliasing issues
-        cropped_emg = cropped_emg[:, :, ycrop:cropped_emg.shape[2]-ycrop, xcrop:cropped_emg.shape[3]-xcrop]
-        return cropped_emg
+    # def grid_crop(self, emg_grid, xcrop=0, ycrop=0):
+    #     ''' Keep only a subgrid at the center, returning a signal of shape (H - 2ycrop, W - 2xcrop)'''
+    #     cropped_emg = emg_grid.clone() # ensures no aliasing issues
+    #     cropped_emg = cropped_emg[:, :, ycrop:cropped_emg.shape[2]-ycrop, xcrop:cropped_emg.shape[3]-xcrop]
+    #     return cropped_emg
 
     def get_separation_vectors(self, muaps, R=None, xcrop=0, ycrop=0):
         ''' Based on MUAPs, just generate the separation vectors neccessary.'''
@@ -193,6 +183,24 @@ class SDAExperiment:
                 B[mdx, l*Nch:(l+1)*Nch] = muaps[mdx, ycrop:H-ycrop, xcrop:W-xcrop, R-l].ravel() # MUAP reversed is the separation vector itself!
             B[mdx, :] = B[mdx, :] / (torch.norm(B[mdx, :]) + 1e-12) # make a unit vector
         return B
+    
+    # def get_separation_vectors(self, emg_grid, dts, R=None, xcrop=0, ycrop=0):
+    #     ''' Based on MUAPs, just generate the separation vectors neccessary.'''
+    #     R = R if R is not None else muaps.shape[-1]
+    #     params = {'R': R, 'xcrop': xcrop, 'ycrop': ycrop}
+    #     self.params.update(params)# keep track of chosing experimental parameters
+    #     emg = np.array(emg_grid).squeeze().reshape(emg_grid.shape[0], -1).T
+    #     extended_emg_template = np.zeros((R*emg.shape[0], emg.shape[1] + R - 1))
+    #     extended_emg = torch.tensor(extend_emg(extended_emg_template, emg, R)).to(torch.float32)
+    #     B = torch.zeros(len(dts), emg.shape[0]*R)
+    #     # N, H, W, L = muaps.shape
+    #     if R is None: R = L
+    #     # Nch = (H-2*ycrop)*(W-2*xcrop)
+    #     B = torch.zeros(len(dts), emg.shape[0]*R)
+    #     for mdx in range(len(dts)):
+    #         B[mdx, :] = extended_emg[:, dts[mdx]].mean(dim=1) # spike triggered averaging
+    #         B[mdx, :] = B[mdx, :] / (torch.norm(B[mdx, :]) + 1e-12)
+    #     return B
     
     def get_whiten_matrix(self, emg_grid, B):
         ''' Get whiten matrix based on EMG and apply transpose to separation vectors.'''
@@ -215,7 +223,6 @@ class SDAExperiment:
             ica_loss = NegentropyLoss()
         with torch.no_grad():
             self.base_loss = ica_loss(sda(emg_grid.to(device))).item()
-
 
     def fit_sda(self, emg_grid_transform, nepochs=100, lr=1e-4, device='cpu', loss='kurtosis', plot=1):
         ''' Fit SDA to emg_grid data to find optimal affine parameters. If plot, plot learning of all parameters and loss over iterations.'''
@@ -323,6 +330,7 @@ class SDAExperiment:
         init_params = 2*torch.tensor(engine.random(n=npoints)).to(torch.float32)-1 # scale from [0,1] to [-1, 1]
         init_params[:,0], init_params[:,1], init_params[:, 2] = boundaries[0]*init_params[:,0]/W, boundaries[1]*init_params[:,1]/H, boundaries[2]*init_params[:, 2]
         init_params = init_params.to(device)
+        # self.sda.eval()
         with torch.no_grad():
             for npoint in tqdm(range(npoints)):
                 # Set initial conditions
@@ -346,6 +354,7 @@ class SDAExperiment:
 
         # Loop through the DataLoader
         print('TRAINING FROM BEST INIT. CONDITION...')
+        # self.sda.train()
         losses = []
         for ne in tqdm(range(nepochs)):
             # Forward pass through the model
@@ -458,8 +467,7 @@ class SDAExperiment:
         # Return the best parameters found
         best_index = train_y.argmax()
         return train_x[best_index], train_y.max()
-
-
+    
     def loss_sampling(self, emg_grid_transform, num_points=20, loss='kurtosis', device='cpu'):
         ''' Method used to sample the loss landscape.'''
         N, C, H, W = emg_grid_transform.shape
@@ -535,6 +543,51 @@ class SDAExperiment:
         plt.savefig('theta_loss_landscape.jpg')
         print()
 
+    def get_silohuette(self, sources_pred, distance=20):
+        '''Get silhouette values given source predictions.'''
+        
+        # Step 4b:
+        sils = np.zeros(sources_pred.shape[1])
+        pred_dts = []
+        for mu_idx in range(sources_pred.shape[1]):
+            source_pred = sources_pred[:, mu_idx] # get a single source prediction
+            peaks, _ = scipy.signal.find_peaks(source_pred.squeeze(), distance=distance) # default about 2ms 
+            source_pred /=  np.mean(maxk(source_pred[peaks], 10))
+            if len(peaks) > 1:
+
+                kmeans = KMeans(n_clusters = 2,init = 'k-means++',n_init = 1).fit(source_pred[peaks].reshape(-1,1)) # two classes: 1) spikes 2) noise
+                # indices of the spike and noise clusters (the spike cluster should have a larger value)
+                spikes_ind = np.argmax(kmeans.cluster_centers_)
+                noise_ind = np.argmin(kmeans.cluster_centers_)
+                # get the points that correspond to each of these clusters
+                spikes = peaks[np.where(kmeans.labels_ == spikes_ind)]
+                noise = peaks[np.where(kmeans.labels_ == noise_ind)]
+                # calculate the centroids
+                spikes_centroid = kmeans.cluster_centers_[spikes_ind]
+                noise_centroid = kmeans.cluster_centers_[noise_ind]
+                # difference between the within-cluster sums of point-to-centroid distances 
+                intra_sums = (((source_pred[spikes]- spikes_centroid)**2).sum()) 
+                # difference between the between-cluster sums of point-to-centroid distances
+                inter_sums = (((source_pred[spikes] - noise_centroid)**2).sum())
+                sil = (inter_sums - intra_sums) / max(intra_sums, inter_sums)  
+
+            else:
+                sil = 0
+            sils[mu_idx] = sil
+            pred_dts.append(spikes)
+        return pred_dts, sils
+
+    def spike_scores(self, dts, dts_pred):
+        ''' For each motor unit, compute the spiking accuracy, sensitivity and precision.'''
+        scores = {'sensitivity': np.zeros(len(dts)), 'precision': np.zeros(len(dts))}
+        for mu_idx in range(len(dts)):
+            gt, pred = set(dts[mu_idx].tolist()), set(dts_pred[mu_idx])
+            tps = len(gt.intersection(pred)) # intersection of discharge times is true positives
+            fps = len(pred.difference(gt)) # false positives = dts in pred not in gt
+            fns = len(gt.difference(pred)) # false negatives = dts in gt not in pred
+            scores['sensitivity'][mu_idx] = tps / (tps + fns) # how real spikes are missed
+            scores['precision'][mu_idx] = tps / (tps + fps) # how many fake spikes are assumed
+        return scores
 
 if __name__ == '__main__':
 
@@ -543,13 +596,14 @@ if __name__ == '__main__':
     H, W, L =25, 10, 50
     R = 16
     fxmax=0.9 # normalized spatial cutoff frequency
-    sampfactor=15
+    sampfactor=1 #15 #15
 
     duration = 20000 # number of time samples in EMG, equivalent of 10s with fs=2000Hz
     Tmean, ISV = 60, 0.2 # sample statistics of spikes # equivalent of 30Hz with fs=2000Hz
-    SNR = 1 # SNR for synthetic EMG
+    SNR = 30 # SNR for synthetic EMG
 
-    Tx, Ty, theta, xscale, yscale = -1.5, 1.5, -15*np.pi/180, 1, 1 # affine parameters applied
+    # Tx, Ty, theta, xscale, yscale = -1.5, 1.5, -15*np.pi/180, 1, 1 # affine parameters applied
+    Tx, Ty, theta, xscale, yscale = -1.5, 1.5, 0.0, 1, 1 # affine parameters applied
     # Training params
     nepochs=50
     lr = 5e-3
@@ -561,6 +615,7 @@ if __name__ == '__main__':
 
     print('GENERATING MUAPS....')
     muaps = exp.generate_gaussian_muaps(mu_count, H, W, L, fxmax, sampfactor) # generate MUAPs
+    # muaps = exp.load_muap_sims(PATH='/home/joao/Desktop/datasets/sims/muaps.npz', mu_count=mu_count)
 
     print('GENERATING SPIKE TRAINS...')
     spts, dts = exp.generate_spike_trains(mu_count, duration, Tmean, ISV) # Generate spike trains
@@ -568,6 +623,7 @@ if __name__ == '__main__':
     print('GENERATE EMG...')
     emg = exp.generate_emg(spts, muaps) # make synthetic EMG from simulated MUAPs and spike trains
     emg = exp.add_noise(emg, SNR) # add noise to synthetic signal
+    # emg = (emg - emg.mean()) / (emg.std() - 1e-9)
     emg_grid = exp.make_grid(emg) # reshape into EMG grid
 
     print('APPLY TRANSFORM...')
@@ -579,7 +635,9 @@ if __name__ == '__main__':
 
     print('GET SEPARATION VECTORS...')
     # torch.set_default_dtype(torch.float64) # Set pytorch default to float64
+    # B = exp.get_separation_vectors(muaps, R=R)
     B = exp.get_separation_vectors(muaps, R=R)
+    # B = exp.get_separation_vectors(emg_grid, dts, R=R)
     print('GET WHITENING MATRIX AND TRANSFORMING SEPARATION VECTORS...')
     # emg_grid = exp.grid_crop(emg_grid, xcrop=0, ycrop=0) # crop grid so that we get appropriate shapes for the EMG
     source_est = exp.get_whiten_matrix(emg_grid, B) # stores separation vector and whiten matrices as attributes
@@ -588,7 +646,7 @@ if __name__ == '__main__':
     # print('TRAINING SDA MODULE...')
 
     # exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
-    # sources, losses = exp.fit_sda(emg_grid_transform.to(torch.float32), nepochs, lr, device=device, loss=loss)
+    # sources, losses = exp.fit_sda(emg_grid_transform.to(torch.float32) , nepochs, lr, device=device, loss=loss)
 
     # num_points=100
     # print(f'THETA SAMPLING LOSS LANDSCAPE ({num_points} samples)...')
@@ -596,15 +654,18 @@ if __name__ == '__main__':
 
     # num_points=20
     # print(f'SAMPLING LOSS LANDSCAPE ({num_points}x{num_points})...')
-    # # emg_grid_transform = exp.apply_affine(emg_grid_transform, 0, 0, -theta, 1, 1, sampfactor=1) #REVERT ROTATION AND LOOK AT LOSS LANDSCAPE
     # exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
     # losses = exp.loss_sampling(emg_grid_transform.to(torch.float32), num_points=num_points, device=device)
 
     # SDA BO approach
     # exp.get_base_loss(emg_grid.to(torch.float64), loss=loss, device=device)
     # params, loss = exp.bo_sda(emg_grid_transform.to(torch.float64), n_init_trials=1, n_updates=20, device='cuda')
-
     print('TRAINING SDA MODULE...')
     exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
-    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=30, nepochs=nepochs, lr=lr, device=device, loss=loss)
+    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=50, nepochs=nepochs, lr=lr, device=device, loss=loss)
+    print()
+
+    # Performance metrics based on output losses
+    pred_dts, sils = exp.get_silohuette(sources.detach().cpu().numpy())
+    scores = exp.spike_scores(dts, pred_dts)
     print()
