@@ -109,14 +109,15 @@ def grid_crop(emg_obj, xcrop: int, ycrop: int, grid_shape):
     emg_obj.signal_dict['segmented_data'] = emg_grid[ycrop:emg_grid.shape[0]-ycrop, xcrop:emg_grid.shape[1]-xcrop, :].reshape(-1, emg_grid.shape[2])
 
 
-# DIR = '/home/joao/Desktop/datasets/simon/ta_grid'
-# filename = 'S1_20_DF.otb+_decomp.mat_edited.mat'
-DIR = '/home/joao/Desktop/datasets/DatasetEmanuele/Subject3'
-filename = 'S_3_50_1.otb+'
+DIR = '/home/joao/Desktop/datasets/simon/ta_grid'
+filename = 'S1_20_DF.otb+_decomp.mat_edited.mat'
+# DIR = '/home/joao/Desktop/datasets/DatasetEmanuele/Subject3'
+# filename = 'S_3_50_1.otb+'
 emg_obj = offline_EMG('./results',1)
-ycrop, xcrop = 2, 2
-grid_shape = (24, 10) # (12, 5)
-filetype = 'otb'
+ycrop, xcrop = 2, 1
+# grid_shape = (24, 10)
+grid_shape = (12, 5)
+filetype = 'mat'
 
 ########### Update: 12/03/24 - adding different file options for opening...
 

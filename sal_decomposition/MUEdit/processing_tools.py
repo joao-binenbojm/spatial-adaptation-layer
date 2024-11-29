@@ -203,10 +203,10 @@ def extend_emg(extended_template, signal, ext_factor):
     Structure: [channel1(k), channel2(k),..., channelm(k); channel1(k-1), channel2(k-1),...,channelm(k-1);...;channel1(k - (R-1)),channel2(k-(R-1)), channelm(k-(R-1))] """
 
     # signal = self.signal_dict['batched_data'][tracker][0:] (shape is channels x temporal observations)
-
+    from tqdm import tqdm
     nchans = np.shape(signal)[0]
     nobvs = np.shape(signal)[1]
-    for i in range(ext_factor):
+    for i in tqdm(range(ext_factor)):
 
         extended_template[nchans*i :nchans*(i+1), i:nobvs +i] = signal
   
@@ -221,8 +221,10 @@ def whiten_emg(signal):
     # get the covariance matrix of the extended EMG observations
 
     cov_mat = np.cov(np.squeeze(signal),bias=True)
+    print('FINISHED GETTING COVARIANCE MATRIX...')
     # get the eigenvalues and eigenvectors of the covariance matrix
-    evalues, evectors  = scipy.linalg.eigh(cov_mat) 
+    evalues, evectors  = scipy.linalg.eigh(cov_mat)
+    print('FINISHED GETTING EIGENDECOMPOSITION...')
     # in MATLAB: eig(A) returns diagonal matrix D of eigenvalues and matrix V whose columns are the corresponding right eigenvectors, so that A*V = V*D
     # sort the eigenvalues in descending order, and then find the regularisation factor = "average of the smallest half of the eigenvalues of the correlation matrix of the extended EMG signals" (Negro 2016)
     sorted_evalues = np.sort(evalues)[::-1]
@@ -242,6 +244,8 @@ def whiten_emg(signal):
     # np.dot is faster than @, since it's derived from C-language
     # np.linalg.solve can be faster than np.linalg.inv
     whitening_mat = evectors @ np.linalg.inv(np.sqrt(diag_mat)) @ np.transpose(evectors)
+    # whitening_mat = evectors @ np.diag(1 / np.diagonal(np.sqrt(diag_mat))) @ np.transpose(evectors)
+    print('FINISHED INVERTING DIAGONAL MATRIX...')
     dewhitening_mat = evectors @ np.sqrt(diag_mat) @ np.transpose(evectors)
     whitened_emg =  np.matmul(whitening_mat, signal).real 
 

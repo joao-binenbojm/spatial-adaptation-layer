@@ -83,30 +83,27 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         self.xcrop = xcrop
 
         self.whiten_mat = torch.nn.Linear(whiten_mat.shape[0], whiten_mat.shape[1], bias=False)
-        self.sep_mat = torch.nn.Linear(sep_mat.shape[0], sep_mat.shape[1], bias=False)
+        self.sep_mat = torch.nn.Linear(sep_mat.shape[1], sep_mat.shape[0], bias=False)
         with torch.no_grad():
             self.whiten_mat.weight.copy_(whiten_mat)
-            self.sep_mat.weight.copy_(sep_mat.T)
+            self.sep_mat.weight.copy_(sep_mat)
         
         self.extension_factor = extension_factor
     
     def extend_emg(self, emg):
         '''Extend the original EMG batch given extension factor.'''
         device = emg.device
-        nchans = emg.shape[0]
-        extended_emg = torch.zeros((nchans*self.extension_factor, emg.shape[1] + self.extension_factor - 1)).to(device)
+        nchans = emg.shape[1]
+        extended_emg = torch.zeros((emg.shape[0] + self.extension_factor - 1, nchans*self.extension_factor)).to(device)
         for idx in range(self.extension_factor):
-            extended_emg[idx*nchans:(idx+1)*nchans, idx:emg.shape[1]+idx] = emg
-        return extended_emg.T
+            extended_emg[idx:emg.shape[0]+idx, idx*nchans:(idx+1)*nchans] = emg
+        return extended_emg
 
     # Extend, whiten and separate sources
     def forward(self, emg):
-        # N, R, H, W = extended_emg.shape
-        # extended_emg = extended_emg.reshape(N*R, 1, H, W)
-        # emg = self.bn(emg) # batch norm the EMG for better optimization
         emg_sal = self.sal(emg).squeeze()
         emg_sal = emg_sal[:, self.ycrop:emg_sal.shape[1]-self.ycrop, self.xcrop:emg_sal.shape[2]-self.xcrop] # differentiable cropping
-        extended_emg = self.extend_emg(emg_sal.flatten(1,2).T)
+        extended_emg = self.extend_emg(emg_sal.reshape(emg_sal.shape[0], -1))
         Z = self.whiten_mat(extended_emg)
         sources = self.sep_mat(Z)
         return sources
@@ -195,13 +192,17 @@ def post_process_pulses(sources, emg, plateau, fsamp, extension_factor=16, cov_t
 if __name__ == '__main__':
     DIR = './sal_decomposition'
     filename = 'decomposition_data.pkl'
-    grid_shape = (24, 10)
+    # grid_shape = (24, 10)
+    grid_shape = (25, 10)
     fsamp = 2048
 
     # Affine transformation to correct for
     rot_angle = 0
-    xshift =  -0.75 #2*0.5/grid_shape[1]
-    yshift = -0.75
+    xshift =  1.5 #2*0.5/grid_shape[1]
+    yshift = -0.5
+
+    # Set pytorch default to float64
+    # torch.set_default_dtype(torch.float64)
 
     # Load initial pickle data
     with open(os.path.join(DIR, filename), 'rb') as f:
@@ -210,26 +211,26 @@ if __name__ == '__main__':
     # Use Dataset and DataLoader to get data
     ycrop,xcrop = decomp_data['parameters']['ycrop'], decomp_data['parameters']['xcrop']
     emg_grid = decomp_data['uncropped_data'].T.reshape((decomp_data['uncropped_data'].shape[1], 1) + grid_shape) # reshape into a grid and test that it's behaving as expected
-    emg_grid = torch.tensor(emg_grid, dtype=torch.float32, requires_grad=True)
+    emg_grid = torch.tensor(emg_grid, requires_grad=True).to(torch.float32)
 
     # dataset = TensorDataset(extended_emg_transform) # long EMG tensor as single data tensor
     # dataloader = DataLoader(dataset, batch_size=extended_emg.shape[0], shuffle=True)
     nchans = (grid_shape[0]-2*abs(ycrop)) * (grid_shape[1]-2*abs(xcrop))
-    extension_factor = int(1000/nchans) #33 #25 #33 #17
+    extension_factor = decomp_data['parameters']['ext_factor'] #int(1000/nchans) #33 #25 #33 #17
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
     # Create layer for whitening matrix and layer for separation vector matrix inside module
     
-    whiten_mat = torch.tensor(decomp_data['whiten_mat'], dtype=torch.float32, requires_grad=True)
-    sep_mat = torch.tensor(np.delete(decomp_data['mu_filters'], 3, axis=1), dtype=torch.float32, requires_grad=True)
-    # sep_mat = torch.tensor(decomp_data['mu_filters'], dtype=torch.float32, requires_grad=True)
+    whiten_mat = torch.tensor(decomp_data['whiten_mat'], requires_grad=True)
+    # sep_mat = torch.tensor(np.delete(decomp_data['mu_filters'], 3, axis=1), requires_grad=True)
+    sep_mat = torch.tensor(decomp_data['mu_filters'], requires_grad=True)
     
     # Create a SDA object
-    nepochs = 300
-    sda = SpatialDecompositionAdaptation(grid_shape=grid_shape, whiten_mat=whiten_mat, sep_mat=sep_mat, ycrop=ycrop, xcrop=xcrop, extension_factor=extension_factor).to(device)
-    ica_loss = KurtosisLoss() # loss function for updating SAL parameters
+    nepochs = 50
+    sda = SpatialDecompositionAdaptation(grid_shape=grid_shape, whiten_mat=whiten_mat.to(torch.float32), sep_mat=sep_mat.to(torch.float32), ycrop=ycrop, xcrop=xcrop, extension_factor=extension_factor).to(device)
+    ica_loss = NegentropyLoss() #KurtosisLoss() # loss function for updating SAL parameters
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, sda.parameters()),
-                                                lr=1e-3, weight_decay=0)
+                                                lr=1e-2, weight_decay=0)
 
     # Freeze all parameters excep for sal
     for param in sda.parameters():
@@ -248,7 +249,7 @@ if __name__ == '__main__':
     with torch.no_grad():
         sal_test.yshift.copy_(torch.tensor(2*yshift/emg_grid.shape[2]))
         sal_test.xshift.copy_(torch.tensor(2*xshift/emg_grid.shape[3]))
-        emg_grid_transform = sal_test(emg_grid) # compute this to see if translation matches expected
+        emg_grid_transform = sal_test(emg_grid.to(torch.float32)) # compute this to see if translation matches expected
 
     rms_transform = torch.sqrt(torch.tensor(emg_grid_transform**2).mean(dim=(0,1)))
     rms = torch.sqrt(torch.tensor(emg_grid**2).mean(dim=(0,1)))

@@ -15,7 +15,7 @@ np.random.seed(1337) # Fixes random generation to get same results each time the
 class EMG():
 
     def __init__(self):
-        self.its = 120 # number of iterations of the fixed point algorithm 
+        self.its = 5 # number of iterations of the fixed point algorithm 
         self.ref_exist = 1 # if ref_signal exist ref_exist = 1; if not ref_exist = 0 and manual selection of windows
         self.check_emg = 0 # 0 = Automatic selection of EMG channels (remove 5% of channels) ; 1 = Visual checking
         self.drawing_mode = 0 # 0 = Output in the command window ; 1 = Output in a figure
