@@ -1,5 +1,7 @@
 *.csv
 *.jpg
+*.png
+*.pkl
 __pycache__/
 wandb/
 mean_images/
