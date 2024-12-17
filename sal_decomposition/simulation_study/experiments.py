@@ -4,12 +4,15 @@ import scipy
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import pickle
+import wandb
+import pandas as pd
 
 from sal_decomposition.simulation_study.sda_pipeline import SDAExperiment
 
 # Define experimental checklist to include all conditions already tried and ran
 # this will allow us to continue where we left off if the system breaks
 # checklist is a set of tuples of experimental conditions
+
 checklist = []
 
 # Define experimental parameters
@@ -38,6 +41,10 @@ for opt in opts:
         for SNR in SNRs:
             for fxmax in fxmaxs:
                 
+                # If in checklist, already run, continue to next condition
+                if (opt, mu_count, SNR, fxmax) in checklist:
+                    continue
+
                 with torch.no_grad():
                     exp = SDAExperiment()
                     print('GENERATING MUAPS....')
@@ -68,7 +75,13 @@ for opt in opts:
                     xscale, yscale = np.random.uniform(0.8, 1.2), np.random.uniform(0.8, 1.2)
 
                     # Start the wandb run
-
+                    wandb.init(
+                        # set the wandb project where this run will be logged
+                        project="sda-simulations",
+                        name=f'{opt}-{mu_count}-{SNR}-{fxmax}',
+                        # mode='disabled',
+                    )
+                    
                     # Keep track of experimental parameters of the run
                     params = {'opt': opt, 'mu_count': mu_count, 'SNR':SNR, 'fxmax': fxmax,
                                 'Tx': Tx, 'Ty': Ty, 'theta': theta, 'xscale': xscale, 'yscale': yscale}
@@ -82,11 +95,11 @@ for opt in opts:
 
                     # Optimization
                     if opt == 'fit':
-                        sources, losses = exp.fit_sda(emg_grid_transform.to(torch.float32), nepochs=nepochs, lr=lr, device=device, loss=loss)
+                        sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), n_points=0, nepochs=nepochs, lr=lr, device=device, loss=loss, plot=0)
                     elif opt == 'search_fit':
-                        sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=3*nepochs//2, nepochs=nepochs//2, lr=lr, device=device, loss=loss)
+                        sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=3*nepochs//2, nepochs=nepochs//2, lr=lr, device=device, loss=loss, plot=0)
                     else: # search only
-                        sources, losses = exp.search_sda(emg_grid_transform.to(torch.float32), npoints=3*nepochs, lr=lr, device=device, loss=loss)
+                        sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=3*nepochs, nepochs=0, lr=lr, device=device, loss=loss, plot=0)
                     
                     # Get learned transformations
                     Tx_opt, Ty_opt = W*exp.sda.sal.xshift.item()/2, H*exp.sda.sal.yshift.item()/2
@@ -108,6 +121,7 @@ for opt in opts:
                                    'precision_avg': np.mean(scores['precision']), 'precision_std': np.std(scores['precision'])})
 
                     # Finish wandb run with all scores and parameters of the system
-                
+                    wandb.log(params)
                 # Add parameters to checklist besides the affine transformation ones
                 checklist.append((opt, mu_count, SNR, fxmax))
+

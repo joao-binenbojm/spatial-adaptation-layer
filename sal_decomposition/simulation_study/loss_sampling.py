@@ -52,5 +52,4 @@ for mu_count in mu_counts:
             emg_grid_transform = exp.downsample_grid(emg_grid_transform, sampfactor)
 
             losses = exp.loss_sampling(emg_grid_transform.to(torch.float32), num_points=num_points, loss=loss, device=device)
-            
-            ## RENAME loss_landscape.jpg to given mu_count and fxmax
+            os.rename('./loss_landscapes/loss_landscape.jpg', f'./loss_landscapes/{mu_count}_{fxmax}.jpg')

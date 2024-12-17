@@ -6,20 +6,7 @@ from tqdm import tqdm
 import torch
 import seaborn as sns
 from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
 
-# # Bayesian Optimization code
-# from botorch.models import SingleTaskGP
-# from botorch.fit import fit_gpytorch_mll
-# from botorch.acquisition import LogExpectedImprovement
-# from botorch.optim import optimize_acqf
-# from gpytorch.mlls import ExactMarginalLogLikelihood
-# # from botorch.kernels import RBFKernel
-# from gpytorch.kernels import RBFKernel
-from gpytorch.priors import LogNormalPrior
-# from botorch.distributions import LogNormal
-
-from torchaudio.functional import convolve
 from sal_decomposition.MUEdit.processing_tools import extend_emg, whiten_emg, get_silohuette, maxk
 # from sal_decomposition.MUEdit.processing_tools import batch_process_filters as get_pulse_trains
 from loss_functions import KurtosisLoss, NegentropyLoss
@@ -63,21 +50,11 @@ class SDAExperiment:
             times = torch.normal(mean=torch.ones(int(duration/Tmean))*Tmean, std=Tstd)
             times = torch.cumsum(times, dim=0)#.to(torch.int64) # cumulative sum of firing times
             int_times = torch.round(times).to(int)
-            # dts.append(int_times) # become discharge times in seconds
             fr_times = int_times[int_times < duration]
             dts.append(fr_times) # become discharge times in seconds
             spts[mu_idx, fr_times] = 1 # set all firing time values to 1
 
         return spts, dts
-
-    # def generate_emg(self, spts, muaps, device='cpu'):
-    #     ''' Generate EMG based on spike trains and simulated MUAPs.'''
-    #     EMG = torch.zeros(muaps.shape[1], muaps.shape[2], spts.shape[1]) # empty EMG array
-    #     for mdx in tqdm(range(muaps.shape[0])):
-    #         for row in range(muaps.shape[1]):
-    #             for col in range(muaps.shape[2]):
-    #                 EMG[row, col, :] += convolve(spts[mdx,:], muaps[mdx, row, col, :], mode='same')
-    #     return EMG
 
     def generate_emg(self, spts, muaps, R, device='cpu'):
         ''' Generate EMG based on spike trains and simulated MUAPs.'''
@@ -113,30 +90,6 @@ class SDAExperiment:
         emg_grid = emg.T.reshape((emg.shape[1], 1) + (H, W))
         return emg_grid
     
-    def get_true_cov(self, muaps, fr, R):
-        '''Based on the firing rate and muaps, get the true covariance matrix.'''
-        H = muaps.reshape(muaps.shape[0], muaps.shape[1]*muaps.shape[2], muaps.shape[3])
-        H = torch.transpose(H, dim0=0, dim1=1) # swap dimensions
-        H = H.reshape(H.shape[0], H.shape[1]*H.shape[2]) # non-extended version of mixing matrix
-
-        # Given all extensions, get estimation of cov matrix
-        hdim = H.shape[0]
-        cov = torch.zeros((hdim*R, hdim*R))
-        for idx in tqdm(range(R)):
-            for jdx in range(idx, R): # given symmetry
-                # Get appropriate delayed representations
-                H1 = torch.cat((torch.zeros(hdim, idx), H[:, :H.shape[1]-idx]), dim=1)
-                H2 = torch.cat((torch.zeros(hdim, jdx), H[:, :H.shape[1]-jdx]), dim=1)
-                
-                # Multiply to get result
-                res = H1 @ H2.T
-                cov[idx*hdim:(idx+1)*hdim, jdx*hdim:(jdx+1)*hdim] = res # store block matrix
-                cov[jdx*hdim:(jdx+1)*hdim, idx*hdim:(idx+1)*hdim] = res # same result due to symmetry
-        
-        # Account for scaling from firing rate
-        cov = cov*fr
-        return cov # covariance matrix from the given data model
-
     def apply_affine(self, emg_grid, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, sampfactor=10):
         '''Applies an affine transformation to grid coordinates prior to downsampling to simulate a near-perfect interpolation.'''
         params = {'Tx': Tx, 'Ty': Ty, 'theta': theta, 'xscale':xscale, 'yscale':yscale, 'sampfactor': sampfactor}
@@ -145,22 +98,6 @@ class SDAExperiment:
         N, C, H, W = emg_grid.shape
         Tx, Ty = torch.tensor(2*Tx*sampfactor/W), torch.tensor(2*sampfactor*Ty/H) # Normalize translation values automatically
         theta, xscale, yscale = torch.tensor(theta), torch.tensor(xscale), torch.tensor(yscale)
-
-        # T = torch.cat([ # Translation Matrix
-        #     torch.stack([torch.tensor(1.0), torch.tensor(0.0), Tx]).unsqueeze(0),
-        #     torch.stack([torch.tensor(0.0), torch.tensor(1.0), Ty]).unsqueeze(0),
-        #     torch.stack([torch.tensor(0.0), torch.tensor(0.0), torch.tensor(1.0)]).unsqueeze(0)
-        # ], dim=0)
-        # R = torch.cat([ # Rotation Matrix
-        #     torch.stack([torch.cos(theta), -torch.sin(theta), torch.tensor(0.0)]).unsqueeze(0),
-        #     torch.stack([torch.sin(theta), torch.cos(theta), torch.tensor(0.0)]).unsqueeze(0),
-        #     torch.stack([torch.tensor(0.0), torch.tensor(0.0), torch.tensor(1.0)]).unsqueeze(0)
-        # ], dim=0)
-        # Sc = torch.cat([ # Scaling Matrix
-        #     torch.stack([xscale, torch.tensor(0.0), torch.tensor(0.0)]).unsqueeze(0),
-        #     torch.stack([torch.tensor(0.0), yscale, torch.tensor(0.0)]).unsqueeze(0),
-        #     torch.stack([torch.tensor(0.0), torch.tensor(0.0), torch.tensor(1.0)]).unsqueeze(0)
-        # ], dim=0)
 
         T = torch.cat([ # Translation Matrix
             torch.stack([torch.tensor(1.0), torch.tensor(0.0), Tx]).unsqueeze(0),
@@ -195,12 +132,6 @@ class SDAExperiment:
         '''Downsample the MUAPs before generating separation vectors.'''
         return muaps[:, ::sampfactor, ::sampfactor, :] # downsample muaps along spatial coordinates
 
-    # def grid_crop(self, emg_grid, xcrop=0, ycrop=0):
-    #     ''' Keep only a subgrid at the center, returning a signal of shape (H - 2ycrop, W - 2xcrop)'''
-    #     cropped_emg = emg_grid.clone() # ensures no aliasing issues
-    #     cropped_emg = cropped_emg[:, :, ycrop:cropped_emg.shape[2]-ycrop, xcrop:cropped_emg.shape[3]-xcrop]
-    #     return cropped_emg
-
     def get_separation_vectors(self, muaps, R=None, xcrop=0, ycrop=0):
         ''' Based on MUAPs, just generate the separation vectors neccessary.'''
         R = R if R is not None else muaps.shape[-1]
@@ -218,25 +149,20 @@ class SDAExperiment:
             B[mdx, :] = B[mdx, :] / (torch.linalg.vector_norm(B[mdx, :]) + 1e-12) # make a unit vector
         return B
     
-    def get_separation_vectors_avg(self, whitened_emg, dts, R=None, xcrop=0, ycrop=0):
-        ''' Based on MUAPs, just generate the separation vectors neccessary.'''
-        R = R if R is not None else muaps.shape[-1]
-        # params = {'R': R, 'xcrop': xcrop, 'ycrop': ycrop}
-        # self.params.update(params)# keep track of chosing experimental parameters
-        # emg = np.array(emg_grid).squeeze().reshape(emg_grid.shape[0], -1).T
-        # extended_emg_template = np.zeros((R*emg.shape[0], emg.shape[1] + R - 1))
-        # extended_emg = torch.tensor(extend_emg(extended_emg_template, emg, R)).to(torch.float32)
-        B = torch.zeros(len(dts), whitened_emg.shape[0]*R)
-        # N, H, W, L = muaps.shape
-        if R is None: R = L
-        # Nch = (H-2*ycrop)*(W-2*xcrop)
-        self.delay = torch.ceil(torch.tensor(((L + R) / 2))).to(torch.int) # center extended delays about center of MUAP
-        B = torch.zeros(len(dts), whitened_emg.shape[0])
-        for mdx in range(len(dts)):
-            mu_dts = dts[mdx][dts[mdx] <= (dts[mdx].max() - self.delay)]
-            B[mdx, :] = whitened_emg[:, mu_dts + self.delay].mean(dim=1) # spike triggered averaging
-            B[mdx, :] = B[mdx, :] / (torch.linalg.vector_norm(B[mdx, :]) + 1e-12)
-        return B
+    # def get_separation_vectors_avg(self, whitened_emg, dts, R=None, xcrop=0, ycrop=0):
+    #     ''' Based on MUAPs, just generate the separation vectors neccessary.'''
+    #     R = R if R is not None else muaps.shape[-1]
+    #     B = torch.zeros(len(dts), whitened_emg.shape[0]*R)
+    #     # N, H, W, L = muaps.shape
+    #     if R is None: R = L
+    #     # Nch = (H-2*ycrop)*(W-2*xcrop)
+    #     self.delay = torch.ceil(torch.tensor(((L + R) / 2))).to(torch.int) # center extended delays about center of MUAP
+    #     B = torch.zeros(len(dts), whitened_emg.shape[0])
+    #     for mdx in range(len(dts)):
+    #         mu_dts = dts[mdx][dts[mdx] <= (dts[mdx].max() - self.delay)]
+    #         B[mdx, :] = whitened_emg[:, mu_dts + self.delay].mean(dim=1) # spike triggered averaging
+    #         B[mdx, :] = B[mdx, :] / (torch.linalg.vector_norm(B[mdx, :]) + 1e-12)
+    #     return B
     
     def get_whiten_mat(self, emg_grid, B, R):
         ''' Get whiten matrix based on EMG and apply transpose to separation vectors.'''
@@ -246,40 +172,37 @@ class SDAExperiment:
         extended_emg_template = np.zeros((self.params['R']*emg.shape[0], emg.shape[1] + self.params['R'] - 1))
         extended_emg = extend_emg(extended_emg_template, emg, self.params['R'])
         whitened_emg, self.whiten_mat,_ = whiten_emg(extended_emg) # we don't care about the whitened emg for now
-        print('GETTING COVARIANCE MATRIX...')
-        cov_mat = np.cov(np.squeeze(extended_emg),bias=True)
 
         # Get separation matrix based on whitened observations
         print('GETTING SEPARATION VECTORS...')
-        B = B @ self.whiten_mat.T
-        self.sep_mat = torch.tensor(B).to(torch.float32) #@ self.whiten_mat.T # multiply by transpose of whiten matrix (i.e. inverse since orthogonal)
-        # self.whiten_mat.requires_grad, self.sep_mat.requires_grad = True, True
+        B = B @ self.whiten_mat
+        self.sep_mat = torch.tensor(B).to(torch.float32)
         self.whiten_mat = torch.tensor(self.whiten_mat).to(torch.float32)
         sources = self.sep_mat @ torch.tensor(extended_emg).to(torch.float32) # return sources
         return sources
 
-    def get_sep_mat(self, emg_grid, muaps, R):
+    # def get_sep_mat(self, emg_grid, muaps, R):
         
-        # Get initial average separation vectors
-        B = exp.get_separation_vectors(muaps, R=R)
-        exp.whiten_mat = torch.eye(emg_grid.shape[2]*emg_grid.shape[3]*R) # no whitening 
+    #     # Get initial average separation vectors
+    #     B = exp.get_separation_vectors(muaps, R=R)
+    #     exp.whiten_mat = torch.eye(emg_grid.shape[2]*emg_grid.shape[3]*R) # no whitening 
 
-        # Extend EMG
-        emg = np.array(emg_grid).squeeze().reshape(emg_grid.shape[0], -1).T
-        extended_emg_template = np.zeros((R*emg.shape[0], emg.shape[1] + R - 1))
-        extended_emg = extend_emg(extended_emg_template, emg, R)
+    #     # Extend EMG
+    #     emg = np.array(emg_grid).squeeze().reshape(emg_grid.shape[0], -1).T
+    #     extended_emg_template = np.zeros((R*emg.shape[0], emg.shape[1] + R - 1))
+    #     extended_emg = extend_emg(extended_emg_template, emg, R)
 
-        # Apply covariance matrix inverse
-        print('GETTING COVARIANCE MATRIX...')
-        # cov_mat = np.cov(np.squeeze(extended_emg), bias=True)
-        # pinv_cov_matrix = np.linalg.pinv(cov_mat) # pseudoinverse to account for instabilities
+    #     # Apply covariance matrix inverse
+    #     print('GETTING COVARIANCE MATRIX...')
+    #     # cov_mat = np.cov(np.squeeze(extended_emg), bias=True)
+    #     # pinv_cov_matrix = np.linalg.pinv(cov_mat) # pseudoinverse to account for instabilities
         
-        # Get Separation matrix and source estimates
-        # B = B @ torch.tensor(pinv_cov_matrix).to(torch.float32) # apply inverse of cov matrix
-        exp.sep_mat = B
-        # exp.sep_mat.requires_grad = True
-        sources = exp.sep_mat @ torch.tensor(extended_emg).to(torch.float32)
-        return sources
+    #     # Get Separation matrix and source estimates
+    #     # B = B @ torch.tensor(pinv_cov_matrix).to(torch.float32) # apply inverse of cov matrix
+    #     exp.sep_mat = B
+    #     # exp.sep_mat.requires_grad = True
+    #     sources = exp.sep_mat @ torch.tensor(extended_emg).to(torch.float32)
+    #     return sources
 
     def get_base_loss(self, emg_grid, loss='kurtosis', device='cpu'):
         '''Getting base loss.'''
@@ -292,80 +215,71 @@ class SDAExperiment:
         with torch.no_grad():
             self.base_loss = ica_loss(sda(emg_grid.to(device))).item()
 
-    def fit_sda(self, emg_grid_transform, nepochs=100, lr=1e-4, device='cpu', loss='kurtosis', plot=1):
-        ''' Fit SDA to emg_grid data to find optimal affine parameters. If plot, plot learning of all parameters and loss over iterations.'''
-        params = {'nepochs': nepochs, 'lr': lr}
-        self.params.update(params)# keep track of chosing experimental parameter
+    # def fit_sda(self, emg_grid_transform, nepochs=100, lr=1e-4, device='cpu', loss='kurtosis', plot=1):
+    #     ''' Fit SDA to emg_grid data to find optimal affine parameters. If plot, plot learning of all parameters and loss over iterations.'''
+    #     params = {'nepochs': nepochs, 'lr': lr}
+    #     self.params.update(params)# keep track of chosing experimental parameter
         
-        N, C, H, W = emg_grid_transform.shape
-        self.sda = SpatialDecompositionAdaptation(grid_shape=(H, W), whiten_mat=self.whiten_mat, sep_mat=self.sep_mat, extension_factor=self.params['R']).to(device)
-        if loss == 'kurtosis':
-            ica_loss = KurtosisLoss()
-        else:
-            ica_loss = NegentropyLoss()
-        # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.sda.parameters()),
-        #                                             lr=lr)
-        optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, self.sda.parameters()),
-                                                    lr=lr)
+    #     N, C, H, W = emg_grid_transform.shape
+    #     self.sda = SpatialDecompositionAdaptation(grid_shape=(H, W), whiten_mat=self.whiten_mat, sep_mat=self.sep_mat, extension_factor=self.params['R']).to(device)
+    #     if loss == 'kurtosis':
+    #         ica_loss = KurtosisLoss()
+    #     else:
+    #         ica_loss = NegentropyLoss()
+    #     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.sda.parameters()),
+    #                                                 lr=lr)
 
-        # Collect output tensors
-        output_list = []
-        losses = []
-        xshifts,yshifts,angles = [], [], []
+    #     # Collect output tensors
+    #     output_list = []
+    #     losses = []
+    #     xshifts,yshifts,angles = [], [], []
 
-        # Freeze all parameters except for SAL parameters
-        for param in self.sda.parameters():
-            param.requires_grad = False
+    #     # Freeze all parameters except for SAL parameters
+    #     for param in self.sda.parameters():
+    #         param.requires_grad = False
         
-        # for param in self.sda.sal.parameters():
-            # param.requires_grad = True
-        self.sda.sal.xshift.requires_grad = True
-        self.sda.sal.yshift.requires_grad = True
-        self.sda.sal.rot_theta.requires_grad = True
-        # base_noise_scale = 0.3
+    #     for param in self.sda.sal.parameters():
+    #         param.requires_grad = True
+    #     # self.sda.sal.xshift.requires_grad = True
+    #     # self.sda.sal.yshift.requires_grad = True
+    #     # self.sda.sal.rot_theta.requires_grad = True
 
-        for ne in tqdm(range(nepochs)):
-            # Forward pass through the model
-            outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
+    #     for ne in tqdm(range(nepochs)):
+    #         # Forward pass through the model
+    #         outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
 
-            # Compute ICA Loss and backprop    
-            loss = ica_loss(outputs)
-            optimizer.zero_grad()
-            loss.backward()
-            print('LOSS:', loss.item()/self.base_loss)
+    #         # Compute ICA Loss and backprop    
+    #         loss = ica_loss(outputs)
+    #         optimizer.zero_grad()
+    #         loss.backward()
+    #         print('LOSS:', loss.item()/self.base_loss)
 
-            optimizer.step()
-            print(f'PARAMS: xshift: {W*self.sda.sal.xshift.item()/2}, yshift: {H*self.sda.sal.yshift.item()/2}, theta: {self.sda.sal.rot_theta.item()} ')
+    #         optimizer.step()
+    #         print(f'PARAMS: xshift: {W*self.sda.sal.xshift.item()/2}, yshift: {H*self.sda.sal.yshift.item()/2}, theta: {self.sda.sal.rot_theta.item()} ')
 
-            # # Apply reflective boundary
-            # with torch.no_grad():
-            #     self.sda.sal.xshift.data = apply_reflective_boundary(self.sda.sal.xshift.data, 2*2/W)
-            #     self.sda.sal.yshift.data = apply_reflective_boundary(self.sda.sal.yshift.data, 2*2/H)
-            #     self.sda.sal.rot_theta.data = apply_reflective_boundary(self.sda.sal.rot_theta.data, 30*np.pi/180)
+    #         # Collect outputs and loss
+    #         output_list.append(outputs)
+    #         losses.append(loss.item())
+    #         xshifts.append(self.sda.sal.xshift.item())
+    #         yshifts.append(self.sda.sal.yshift.item())
+    #         angles.append(self.sda.sal.rot_theta.item())
 
-            # Collect outputs and loss
-            output_list.append(outputs)
-            losses.append(loss.item())
-            xshifts.append(self.sda.sal.xshift.item())
-            yshifts.append(self.sda.sal.yshift.item())
-            angles.append(self.sda.sal.rot_theta.item())
+    #     if plot:
+    #         fig, axs = plt.subplots(1, 2)
+    #         axs[0].plot(np.array(losses)/self.base_loss)
+    #         # axs[0].hlines(y=base_loss, xmin=0, xmax=len(np.array(losses).ravel()), linestyles='dashed')
+    #         axs[0].set_title('Training Loss')
+    #         axs[1].plot(W*(np.array(xshifts).ravel())/2)
+    #         axs[1].plot(H*(np.array(yshifts).ravel())/2)
+    #         axs[1].plot(angles)
+    #         axs[1].hlines(y=[-self.params['Tx'], -self.params['Ty'], -self.params['theta']], xmin=0, xmax=len(np.array(xshifts).ravel()), linestyles='dashed', label='ground truth')
+    #         axs[1].legend(['xshift-pred','yshift-pred', 'theta'])
+    #         axs[1].set_title('Parameter Dynamics')
+    #         axs[1].set_ylim([-3.0, 3.0])
+    #         plt.savefig('learning.jpg')
 
-        if plot:
-            fig, axs = plt.subplots(1, 2)
-            axs[0].plot(np.array(losses)/self.base_loss)
-            # axs[0].hlines(y=base_loss, xmin=0, xmax=len(np.array(losses).ravel()), linestyles='dashed')
-            axs[0].set_title('Training Loss')
-            axs[1].plot(W*(np.array(xshifts).ravel())/2)
-            axs[1].plot(H*(np.array(yshifts).ravel())/2)
-            axs[1].plot(angles)
-            axs[1].hlines(y=[-self.params['Tx'], -self.params['Ty'], -self.params['theta']], xmin=0, xmax=len(np.array(xshifts).ravel()), linestyles='dashed', label='ground truth')
-            axs[1].legend(['xshift-pred','yshift-pred', 'theta'])
-            axs[1].set_title('Parameter Dynamics')
-            axs[1].set_ylim([-2.0, 2.0])
-            plt.savefig('learning.jpg')
-
-        sources = outputs.detach().cpu()
-        return sources, losses
+    #     sources = outputs.detach().cpu()
+    #     return sources, losses
 
     def search_fit_sda(self, emg_grid_transform, npoints=50, nepochs=50, lr=1e-4, device='cpu', loss='kurtosis', plot=1):
         ''' Fit SDA to emg_grid data to find optimal affine parameters. If plot, plot learning of all parameters and loss over iterations.'''
@@ -411,18 +325,20 @@ class SDAExperiment:
                 loss = ica_loss(outputs)
                 losses[npoint] = loss.item()
 
-            losses = losses / self.base_loss # normalize by baseline loss
-            self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = init_params[losses.argmax(), :] # get best initialization
-            print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=5)}')
+            if npoints > 0:
+                losses = losses / self.base_loss # normalize by baseline loss
+                self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = init_params[losses.argmax(), :] # get best initialization
+                print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=torch.min([npoints, 5]))}')
 
         # Make SAL parameters learnable
+        # for param in self.sda.sal.parameters():
+        #     param.requires_grad = True        
         self.sda.sal.xshift.requires_grad = True
         self.sda.sal.yshift.requires_grad = True
         self.sda.sal.rot_theta.requires_grad = True
 
         # Loop through the DataLoader
         print('TRAINING FROM BEST INIT. CONDITION...')
-        # self.sda.train()
         losses = []
         for ne in tqdm(range(nepochs)):
             # Forward pass through the model
@@ -446,7 +362,6 @@ class SDAExperiment:
         if plot:
             fig, axs = plt.subplots(1, 2)
             axs[0].plot(losses)
-            # axs[0].hlines(y=base_loss, xmin=0, xmax=len(np.array(losses).ravel()), linestyles='dashed')
             axs[0].set_title('Training Loss')
             axs[1].plot(W*(np.array(xshifts).ravel())/2)
             axs[1].plot(H*(np.array(yshifts).ravel())/2)
@@ -457,84 +372,12 @@ class SDAExperiment:
             axs[1].set_ylim([-3.0, 3.0])
             plt.savefig('learning.jpg')
 
-        sources = outputs.detach().cpu()
+        # Get final outputs, i.e. optimal souces
+        with torch.no_grad():
+            final_outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
+
+        sources = final_outputs.detach().cpu()
         return sources, losses
-    
-    # def bo_sda(self, emg_grid_transform, n_init_trials=10, n_updates=30, device='cpu', loss='kurtosis'):
-    #     '''Bayesian optimization of the affine parameters given the loss function and SAL.'''
-    #     # Define parameter bounds
-    #     N, C, H, W = emg_grid_transform.shape
-    #     self.sda = SpatialDecompositionAdaptation(grid_shape=(H, W), whiten_mat=self.whiten_mat, sep_mat=self.sep_mat, extension_factor=self.params['R']).to(device)
-    #     for param in self.sda.parameters():
-    #         param.requires_grad = False
-        
-    #     if loss == 'kurtosis':
-    #         ica_loss = KurtosisLoss()
-    #     else:
-    #         ica_loss = NegentropyLoss()
-    #     # Optimize the parameters using BOTorch
-    #     # bounds = torch.tensor([[-2*3.0/W, -2*3.0/H, -20*np.pi/180], [2*3.0/W, 2*3.0/H, 20*np.pi/180]])  # symmetric bounds for parameters
-    #     bounds = torch.tensor([[0.0,0.0,0.0], [1.0, 1.0, 1.0]])
-    #     train_x = []  # Sampled parameter sets
-    #     train_y = []  # Corresponding loss values
-
-    #     # Initial random sampling
-    #     print('SAMPLING INITIAL TRIALS FOR WARM START...')
-    #     for _ in range(n_init_trials):
-    #         params = torch.rand(3) * (bounds[1] - bounds[0]) + bounds[0]
-    #         xshift, yshift, rot_theta = params.to(device)
-    #         self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = 3*((2*xshift-1)*2)/W, 3*((2*yshift-1)*2)/H, (2*rot_theta-1)*20*np.pi/180 
-    #         outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
-    #         loss = ica_loss(outputs).detach()/self.base_loss
-    #         train_x.append(params)
-    #         train_y.append(loss)
-
-    #     train_x = torch.stack(train_x)
-    #     train_y = torch.tensor(train_y).unsqueeze(-1)
-
-    #     # UPDATING GP FOR BO
-    #     for update in range(n_updates):
-    #         # Step 2: Train GP with current data
-    #         # kernel = RBFKernel(
-    #         #     lengthscale_prior=LogNormalPrior(loc=-1.0, scale=0.5)  # Example prior
-    #         # )
-    #         # gp = SingleTaskGP(train_x, train_y, covar_module=kernel)
-    #         gp = SingleTaskGP(train_x, train_y)
-    #         gp.likelihood.noise = torch.tensor([1e-5], requires_grad=True) # lower noise so that we trust loss onservations more
-    #         mll = ExactMarginalLogLikelihood(gp.likelihood, gp)
-    #         fit_gpytorch_mll(mll)
-
-    #         # Step 3: Optimize acquisition function to find new candidate
-    #         ei = LogExpectedImprovement(gp, best_f=train_y.max())
-    #         new_x, _ = optimize_acqf(
-    #             acq_function=ei,
-    #             bounds=bounds,
-    #             q=1,
-    #             num_restarts=10,
-    #             raw_samples=50,
-    #         )
-
-    #         # Step 4: Evaluate the new candidate
-    #         xshift, yshift, rot_theta = new_x.squeeze(0).to(device)
-    #         self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = 3*((2*xshift-1)*2)/W, 3*((2*yshift-1)*2)/H, (2*rot_theta-1)*20*np.pi/180 
-    #         outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
-    #         new_y = ica_loss(outputs).detach().cpu().view((1,1)) / self.base_loss
-
-    #         # Step 5: Update training data
-    #         train_x = torch.cat([train_x, new_x])
-    #         train_y = torch.cat([train_y, new_y])
-
-    #         print(f"Update {update + 1}/{n_updates}: Loss = {new_y.item()}, Params = {new_x}")
-    #         # Print best
-    #         xbest, ybest, thetabest = train_x[train_y.argmax()]
-    #         xbest, ybest, thetabest = 3*((2*xbest-1)*2)/W, 3*((2*ybest-1)*2)/H, (2*thetabest-1)*20*np.pi/180 
-    #         print(f"Best: loss -> {train_y.max()} params -> {xbest}, {ybest}, {thetabest}")
-    #         print()
-
-
-    #     # Return the best parameters found
-    #     best_index = train_y.argmax()
-    #     return train_x[best_index], train_y.max()
     
     def loss_sampling(self, emg_grid_transform, num_points=20, loss='kurtosis', device='cpu'):
         ''' Method used to sample the loss landscape.'''
@@ -549,10 +392,7 @@ class SDAExperiment:
             ica_loss = NegentropyLoss()
 
         # Getting torch meshgrid
-        # x = torch.linspace(-self.params['xcrop'], self.params['xcrop'], num_points) #.round(decimals=3)
         x = torch.linspace(-torch.tensor(3.0), torch.tensor(3.0), num_points)
-        # x = torch.linspace(-1, 1, num_points) # theta
-        # y = torch.linspace(-self.params['ycrop'], self.params['ycrop'], num_points) #.round(decimals=3)
         y = torch.linspace(-torch.tensor(3.0), torch.tensor(3.0), num_points)
         loss_arr = torch.zeros(y.shape[0], x.shape[0])
 
@@ -563,14 +403,13 @@ class SDAExperiment:
                     emg_grid_test = emg_grid_transform.clone().detach()
                     sda.sal.yshift.copy_(torch.tensor(2*yi/H).to(device))
                     sda.sal.xshift.copy_(torch.tensor(2*xi/W).to(device))
-                    # sda.sal.rot_theta.copy_(torch.tensor(xi).to(device))
 
                     outputs = sda(emg_grid_test.to(device))
                     loss = ica_loss(outputs)
                     loss_arr[yidx, xidx] = loss.item()
         
         plt.figure()
-        plt.title(f'Kurtosis Loss Landscape (Post (y={Ty}, x={Tx}) translation)')
+        # plt.title(f'Kurtosis Loss Landscape (Post (y={Ty}, x={Tx}) translation)')
         # ax = sns.heatmap(np.array(loss_arr)/self.base_loss, xticklabels=np.around((x).tolist(), 3), yticklabels=np.around((y).tolist(), 3))
         ax = sns.heatmap(np.array(loss_arr)/self.base_loss)
         ax.set(xlabel='Circumferential Shifts (mm)', ylabel='Longitudinal Shifts (mm)', fontsize=16)
@@ -697,15 +536,6 @@ if __name__ == '__main__':
 
         print('APPLY TRANSFORM...')
         emg_grid_transform = exp.apply_affine(emg_grid, Tx, Ty, theta, xscale, yscale, sampfactor)
-        # emg_grid_transform = exp.apply_affine(emg_grid, -Tx, -Ty, -theta, xscale, yscale, sampfactor)
-            # Sample transform
-                # Initialize module
-        # sal_test = SpatialAdaptation(input_shape=(H, W)).eval()
-        # sal_test.yshift.copy_(torch.tensor(2*Ty*sampfactor/emg_grid.shape[2]))
-        # sal_test.xshift.copy_(torch.tensor(2*Tx*sampfactor/emg_grid.shape[3]))
-        # emg_grid_transform = sal_test(emg_grid) # compute this to see if translation matches expected
-        # params = {'Tx': Tx, 'Ty': Ty, 'theta': theta, 'xscale':xscale, 'yscale':yscale, 'sampfactor': sampfactor}
-        # exp.params.update(params)
 
         print('DOWNSAMPLING...')
         emg_grid, emg_grid_transform = exp.downsample_grid(emg_grid, sampfactor), exp.downsample_grid(emg_grid_transform, sampfactor)
@@ -716,50 +546,13 @@ if __name__ == '__main__':
         source_est = exp.get_whiten_mat(emg_grid, B, R=R)
         print()
 
-        # source_est = exp.get_sep_mat(emg_grid, muaps, R=R)
-        # torch.set_default_dtype(torch.float64) # Set pytorch default to float64
-        # B = exp.get_separation_vectors(muaps, R=R)
-        # B = exp.get_separation_vectors(muaps, R=R)
-        # print('GET WHITENING MATRIX AND TRANSFORMING SEPARATION VECTORS...')
-        # emg_grid = exp.grid_crop(emg_grid, xcrop=0, ycrop=0) # crop grid so that we get appropriate shapes for the EMG
-        # exp.whiten_mat = torch.eye(emg_grid.shape[2]*emg_grid.shape[3]*R) # no whitening 
-        # source_est = exp.get_whiten_sep_mat(emg_grid, dts, R=R) # stores separation vector and whiten matrices as attributes
-        # B = exp.get_separation_vectors_avg(emg_grid, dts, R=R)
-        # emg = np.array(emg_grid_transform).squeeze().reshape(emg_grid_transform.shape[0], -1).T
-        # extended_emg_template = np.zeros((R*emg.shape[0], emg.shape[1] + R - 1))
-        # extended_emg = extend_emg(extended_emg_template, emg, R)
-        # source_est2 = exp.sep_mat @ torch.tensor(extended_emg).to(torch.float32)
-        # print()
-
-        # print('GETTING COVARIANCE MATRIX...')
-        # cov_mat = np.cov(np.squeeze(extended_emg), bias=True)
-        # pinv_cov_matrix = scipy.linalg.pinvh(cov_mat) # pseudoinverse to account for instabilities
-        # B = B @ torch.tensor(pinv_cov_matrix).to(torch.float32)
-        # B.requires_grad = True
-        # exp.sep_mat = B
-        # source_est = B @ torch.tensor(extended_emg).to(torch.float32)
-        # # source_est = B @ torch.tensor(extended_emg).to(torch.float32)
-        # print()
-         
-    # print('TRAINING SDA MODULE...')
-
-    # exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
-    # sources, losses = exp.fit_sda(emg_grid_transform.to(torch.float32) , nepochs, lr, device=device, loss=loss)
-
-        # num_points=100
-        # print(f'THETA SAMPLING LOSS LANDSCAPE ({num_points} samples)...')
-        # losses = exp.theta_loss_sampling(emg_grid_transform.to(torch.float32), num_points=num_points, device=device)
-
+    # Loss sampling
     with torch.no_grad():
         num_points=20
         print(f'SAMPLING LOSS LANDSCAPE ({num_points}x{num_points})...')
         exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
         losses = exp.loss_sampling(emg_grid_transform.to(torch.float32), num_points=num_points, loss=loss, device=device)
 
-    # SDA BO approach
-    # exp.get_base_loss(emg_grid.to(torch.float64), loss=loss, device=device)
-    # params, loss = exp.bo_sda(emg_grid_transform.to(torch.float64), n_init_trials=1, n_updates=20, device='cuda')
-    
     with torch.no_grad():
         print('TRAINING SDA MODULE...')
         exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
