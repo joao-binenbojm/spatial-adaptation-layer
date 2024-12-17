@@ -135,7 +135,7 @@ class SDAExperiment:
     def get_separation_vectors(self, muaps, R=None, xcrop=0, ycrop=0):
         ''' Based on MUAPs, just generate the separation vectors neccessary.'''
         R = R if R is not None else muaps.shape[-1]
-        delay = torch.ceil(torch.tensor(((self.params['L'] + R) / 2))).to(torch.int) # delay introduced by causality of triggering process
+        delay = torch.ceil(torch.tensor(((self.params['L'] + R) / 2))).to(torch.int) - 1 # delay introduced by causality of triggering process
         params = {'R': R, 'xcrop': xcrop, 'ycrop': ycrop, 'delay': delay}
         self.params.update(params)# keep track of chosing experimental parameters
 
@@ -145,7 +145,7 @@ class SDAExperiment:
         B = torch.zeros(N, Nch*R)
         for mdx in range(N):
             for l in range(R):
-                B[mdx, l*Nch:(l+1)*Nch] = muaps[mdx, ycrop:H-ycrop, xcrop:W-xcrop, delay - 1 - l].ravel() # MUAP reversed is the separation vector itself!
+                B[mdx, l*Nch:(l+1)*Nch] = muaps[mdx, ycrop:H-ycrop, xcrop:W-xcrop, delay - l].ravel() # MUAP reversed is the separation vector itself!
             B[mdx, :] = B[mdx, :] / (torch.linalg.vector_norm(B[mdx, :]) + 1e-12) # make a unit vector
         return B
     
@@ -328,7 +328,7 @@ class SDAExperiment:
             if npoints > 0:
                 losses = losses / self.base_loss # normalize by baseline loss
                 self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = init_params[losses.argmax(), :] # get best initialization
-                print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=torch.min([npoints, 5]))}')
+                print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=torch.min(torch.tensor([npoints, 5])))}')
 
         # Make SAL parameters learnable
         # for param in self.sda.sal.parameters():
@@ -503,17 +503,18 @@ if __name__ == '__main__':
     mu_count=20
     H, W, L = 25, 10, 50
     R = 16
-    fxmax=1.2 # normalized spatial cutoff frequency
-    sampfactor=15
+    fxmax=0.8 # normalized spatial cutoff frequency
+    sampfactor=1
 
     duration = 20000 # number of time samples in EMG, equivalent of 10s with fs=2000Hz
     Tmean, ISV = 60, 0.2 # sample statistics of spikes # equivalent of 30Hz with fs=2000Hz
     SNR = 1 # SNR for synthetic EMG
 
     # Tx, Ty, theta, xscale, yscale = -1.5, 1.5, 15*np.pi/180, 1, 1 # affine parameters applied
-    Tx, Ty, theta, xscale, yscale = -1.5, 2.5, 0, 1, 1 # affine parameters applied
+    # Tx, Ty, theta, xscale, yscale = -1.5, 2.5, 0, 1, 1 # affine parameters applied
+    Tx, Ty, theta, xscale, yscale = 0, 0, 0, 1, 1
     # Training params
-    nepochs=50
+    nepochs=2
     lr = 5e-3
     loss = 'kurtosis'
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
@@ -546,17 +547,17 @@ if __name__ == '__main__':
         source_est = exp.get_whiten_mat(emg_grid, B, R=R)
         print()
 
-    # Loss sampling
-    with torch.no_grad():
-        num_points=20
-        print(f'SAMPLING LOSS LANDSCAPE ({num_points}x{num_points})...')
-        exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
-        losses = exp.loss_sampling(emg_grid_transform.to(torch.float32), num_points=num_points, loss=loss, device=device)
+    # # Loss sampling
+    # with torch.no_grad():
+    #     num_points=20
+    #     print(f'SAMPLING LOSS LANDSCAPE ({num_points}x{num_points})...')
+    #     exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
+    #     losses = exp.loss_sampling(emg_grid_transform.to(torch.float32), num_points=num_points, loss=loss, device=device)
 
     with torch.no_grad():
         print('TRAINING SDA MODULE...')
         exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
-    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=100, nepochs=nepochs, lr=lr, device=device, loss=loss)
+    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=0, nepochs=nepochs//2, lr=lr, device=device, loss=loss)
     print()
 
     # Performance metrics based on output losses
