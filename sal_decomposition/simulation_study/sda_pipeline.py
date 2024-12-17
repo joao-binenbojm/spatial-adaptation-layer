@@ -23,7 +23,7 @@ from torchaudio.functional import convolve
 from sal_decomposition.MUEdit.processing_tools import extend_emg, whiten_emg, get_silohuette, maxk
 # from sal_decomposition.MUEdit.processing_tools import batch_process_filters as get_pulse_trains
 from loss_functions import KurtosisLoss, NegentropyLoss
-from sda import SpatialDecompositionAdaptation
+from sal_decomposition.sda import SpatialDecompositionAdaptation
 from networks_utils import SpatialAdaptation
 
 class SDAExperiment:
@@ -49,15 +49,6 @@ class SDAExperiment:
         muaps = scipy.signal.filtfilt(b, a, muaps, axis=1) # filter along rows
         muaps = scipy.signal.filtfilt(b, a, muaps, axis=2) # filter along columns
         return torch.tensor(muaps.copy()).to(torch.float32)
-
-    # def load_muap_sims(self, PATH, mu_count=20):
-    #     ''' Loads simulated MUAPs from the cyllindrical model.'''
-    #     muaps = np.load(PATH)['muap']
-    #     mu_idxs = np.random.choice(np.arange(muaps.shape[0]), replace=False, size=mu_count) # sample MUs
-    #     muaps = muaps[mu_idxs, :,:] # take subset of motor units
-    #     muaps = muaps.reshape(muaps.shape[0], 20, 50, -1).transpose((0,2,1,3)) # keep long dimension as number of rows
-    #     muaps = muaps[:, ::2, ::2, ::4] # twice as many channels as in our simulation, now we have 4mm IED. 50 sample MUAP shape
-    #     return torch.tensor(muaps).to(torch.float32)
 
     def generate_spike_trains(self, mu_count, duration, Tmean=60, ISV=0.15):
         ''' Generate motor unit spike trains, both at very high as well as normal resolution.'''
@@ -469,81 +460,81 @@ class SDAExperiment:
         sources = outputs.detach().cpu()
         return sources, losses
     
-    def bo_sda(self, emg_grid_transform, n_init_trials=10, n_updates=30, device='cpu', loss='kurtosis'):
-        '''Bayesian optimization of the affine parameters given the loss function and SAL.'''
-        # Define parameter bounds
-        N, C, H, W = emg_grid_transform.shape
-        self.sda = SpatialDecompositionAdaptation(grid_shape=(H, W), whiten_mat=self.whiten_mat, sep_mat=self.sep_mat, extension_factor=self.params['R']).to(device)
-        for param in self.sda.parameters():
-            param.requires_grad = False
+    # def bo_sda(self, emg_grid_transform, n_init_trials=10, n_updates=30, device='cpu', loss='kurtosis'):
+    #     '''Bayesian optimization of the affine parameters given the loss function and SAL.'''
+    #     # Define parameter bounds
+    #     N, C, H, W = emg_grid_transform.shape
+    #     self.sda = SpatialDecompositionAdaptation(grid_shape=(H, W), whiten_mat=self.whiten_mat, sep_mat=self.sep_mat, extension_factor=self.params['R']).to(device)
+    #     for param in self.sda.parameters():
+    #         param.requires_grad = False
         
-        if loss == 'kurtosis':
-            ica_loss = KurtosisLoss()
-        else:
-            ica_loss = NegentropyLoss()
-        # Optimize the parameters using BOTorch
-        # bounds = torch.tensor([[-2*3.0/W, -2*3.0/H, -20*np.pi/180], [2*3.0/W, 2*3.0/H, 20*np.pi/180]])  # symmetric bounds for parameters
-        bounds = torch.tensor([[0.0,0.0,0.0], [1.0, 1.0, 1.0]])
-        train_x = []  # Sampled parameter sets
-        train_y = []  # Corresponding loss values
+    #     if loss == 'kurtosis':
+    #         ica_loss = KurtosisLoss()
+    #     else:
+    #         ica_loss = NegentropyLoss()
+    #     # Optimize the parameters using BOTorch
+    #     # bounds = torch.tensor([[-2*3.0/W, -2*3.0/H, -20*np.pi/180], [2*3.0/W, 2*3.0/H, 20*np.pi/180]])  # symmetric bounds for parameters
+    #     bounds = torch.tensor([[0.0,0.0,0.0], [1.0, 1.0, 1.0]])
+    #     train_x = []  # Sampled parameter sets
+    #     train_y = []  # Corresponding loss values
 
-        # Initial random sampling
-        print('SAMPLING INITIAL TRIALS FOR WARM START...')
-        for _ in range(n_init_trials):
-            params = torch.rand(3) * (bounds[1] - bounds[0]) + bounds[0]
-            xshift, yshift, rot_theta = params.to(device)
-            self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = 3*((2*xshift-1)*2)/W, 3*((2*yshift-1)*2)/H, (2*rot_theta-1)*20*np.pi/180 
-            outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
-            loss = ica_loss(outputs).detach()/self.base_loss
-            train_x.append(params)
-            train_y.append(loss)
+    #     # Initial random sampling
+    #     print('SAMPLING INITIAL TRIALS FOR WARM START...')
+    #     for _ in range(n_init_trials):
+    #         params = torch.rand(3) * (bounds[1] - bounds[0]) + bounds[0]
+    #         xshift, yshift, rot_theta = params.to(device)
+    #         self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = 3*((2*xshift-1)*2)/W, 3*((2*yshift-1)*2)/H, (2*rot_theta-1)*20*np.pi/180 
+    #         outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
+    #         loss = ica_loss(outputs).detach()/self.base_loss
+    #         train_x.append(params)
+    #         train_y.append(loss)
 
-        train_x = torch.stack(train_x)
-        train_y = torch.tensor(train_y).unsqueeze(-1)
+    #     train_x = torch.stack(train_x)
+    #     train_y = torch.tensor(train_y).unsqueeze(-1)
 
-        # UPDATING GP FOR BO
-        for update in range(n_updates):
-            # Step 2: Train GP with current data
-            # kernel = RBFKernel(
-            #     lengthscale_prior=LogNormalPrior(loc=-1.0, scale=0.5)  # Example prior
-            # )
-            # gp = SingleTaskGP(train_x, train_y, covar_module=kernel)
-            gp = SingleTaskGP(train_x, train_y)
-            gp.likelihood.noise = torch.tensor([1e-5], requires_grad=True) # lower noise so that we trust loss onservations more
-            mll = ExactMarginalLogLikelihood(gp.likelihood, gp)
-            fit_gpytorch_mll(mll)
+    #     # UPDATING GP FOR BO
+    #     for update in range(n_updates):
+    #         # Step 2: Train GP with current data
+    #         # kernel = RBFKernel(
+    #         #     lengthscale_prior=LogNormalPrior(loc=-1.0, scale=0.5)  # Example prior
+    #         # )
+    #         # gp = SingleTaskGP(train_x, train_y, covar_module=kernel)
+    #         gp = SingleTaskGP(train_x, train_y)
+    #         gp.likelihood.noise = torch.tensor([1e-5], requires_grad=True) # lower noise so that we trust loss onservations more
+    #         mll = ExactMarginalLogLikelihood(gp.likelihood, gp)
+    #         fit_gpytorch_mll(mll)
 
-            # Step 3: Optimize acquisition function to find new candidate
-            ei = LogExpectedImprovement(gp, best_f=train_y.max())
-            new_x, _ = optimize_acqf(
-                acq_function=ei,
-                bounds=bounds,
-                q=1,
-                num_restarts=10,
-                raw_samples=50,
-            )
+    #         # Step 3: Optimize acquisition function to find new candidate
+    #         ei = LogExpectedImprovement(gp, best_f=train_y.max())
+    #         new_x, _ = optimize_acqf(
+    #             acq_function=ei,
+    #             bounds=bounds,
+    #             q=1,
+    #             num_restarts=10,
+    #             raw_samples=50,
+    #         )
 
-            # Step 4: Evaluate the new candidate
-            xshift, yshift, rot_theta = new_x.squeeze(0).to(device)
-            self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = 3*((2*xshift-1)*2)/W, 3*((2*yshift-1)*2)/H, (2*rot_theta-1)*20*np.pi/180 
-            outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
-            new_y = ica_loss(outputs).detach().cpu().view((1,1)) / self.base_loss
+    #         # Step 4: Evaluate the new candidate
+    #         xshift, yshift, rot_theta = new_x.squeeze(0).to(device)
+    #         self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = 3*((2*xshift-1)*2)/W, 3*((2*yshift-1)*2)/H, (2*rot_theta-1)*20*np.pi/180 
+    #         outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
+    #         new_y = ica_loss(outputs).detach().cpu().view((1,1)) / self.base_loss
 
-            # Step 5: Update training data
-            train_x = torch.cat([train_x, new_x])
-            train_y = torch.cat([train_y, new_y])
+    #         # Step 5: Update training data
+    #         train_x = torch.cat([train_x, new_x])
+    #         train_y = torch.cat([train_y, new_y])
 
-            print(f"Update {update + 1}/{n_updates}: Loss = {new_y.item()}, Params = {new_x}")
-            # Print best
-            xbest, ybest, thetabest = train_x[train_y.argmax()]
-            xbest, ybest, thetabest = 3*((2*xbest-1)*2)/W, 3*((2*ybest-1)*2)/H, (2*thetabest-1)*20*np.pi/180 
-            print(f"Best: loss -> {train_y.max()} params -> {xbest}, {ybest}, {thetabest}")
-            print()
+    #         print(f"Update {update + 1}/{n_updates}: Loss = {new_y.item()}, Params = {new_x}")
+    #         # Print best
+    #         xbest, ybest, thetabest = train_x[train_y.argmax()]
+    #         xbest, ybest, thetabest = 3*((2*xbest-1)*2)/W, 3*((2*ybest-1)*2)/H, (2*thetabest-1)*20*np.pi/180 
+    #         print(f"Best: loss -> {train_y.max()} params -> {xbest}, {ybest}, {thetabest}")
+    #         print()
 
 
-        # Return the best parameters found
-        best_index = train_y.argmax()
-        return train_x[best_index], train_y.max()
+    #     # Return the best parameters found
+    #     best_index = train_y.argmax()
+    #     return train_x[best_index], train_y.max()
     
     def loss_sampling(self, emg_grid_transform, num_points=20, loss='kurtosis', device='cpu'):
         ''' Method used to sample the loss landscape.'''
@@ -580,8 +571,9 @@ class SDAExperiment:
         
         plt.figure()
         plt.title(f'Kurtosis Loss Landscape (Post (y={Ty}, x={Tx}) translation)')
-        ax = sns.heatmap(np.array(loss_arr)/self.base_loss, xticklabels=np.around((x).tolist(), 3), yticklabels=np.around((y).tolist(), 3))
-        ax.set(xlabel='Circumferential Shifts (m)', ylabel='Longitudinal Shifts (m)')
+        # ax = sns.heatmap(np.array(loss_arr)/self.base_loss, xticklabels=np.around((x).tolist(), 3), yticklabels=np.around((y).tolist(), 3))
+        ax = sns.heatmap(np.array(loss_arr)/self.base_loss)
+        ax.set(xlabel='Circumferential Shifts (mm)', ylabel='Longitudinal Shifts (mm)', fontsize=16)
         ax.text(np.where(np.array(x)>=-Tx)[0][0] + 0.5, np.where(y>=-Ty)[0][0]+0.5, 'X', color='green', ha='center', va='center', fontsize=16)
         plt.savefig('loss_landscape.jpg')
         print()
