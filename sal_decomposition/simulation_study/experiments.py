@@ -36,38 +36,39 @@ lr = 5e-3
 loss = 'kurtosis' # loss function for optimization
 device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
-for opt in opts:
-    for mu_count in tqdm(mu_counts):
+for fxmax in tqdm(fxmaxs):
+    for mu_count in mu_counts:
+
+        with torch.no_grad():
+            exp = SDAExperiment()
+            print('GENERATING MUAPS....')
+            muaps = exp.generate_gaussian_muaps(mu_count, H, W, L, fxmax / (fsx/2), sampfactor) # generate MUAPs
+            muaps_down = exp.downsample_muaps(muaps, sampfactor) # downsample MUAPs
+            B = exp.get_separation_vectors(muaps_down, R=R)
+            print('GENERATING SPIKE TRAINS...')
+            spts, dts = exp.generate_spike_trains(mu_count, duration, Tmean, ISV) # Generate spike trains
+            print('GENERATE EMG...')
+            emg = exp.generate_emg(spts, muaps, R=R) # make synthetic EMG from simulated MUAPs and spike trains
+            
         for SNR in SNRs:
-            for fxmax in fxmaxs:
-                
+            for opt in opts:
                 # If in checklist, already run, continue to next condition
                 if (opt, mu_count, SNR, fxmax) in checklist:
                     continue
 
-                with torch.no_grad():
-                    exp = SDAExperiment()
-                    print('GENERATING MUAPS....')
-                    muaps = exp.generate_gaussian_muaps(mu_count, H, W, L, fxmax / (fsx/2), sampfactor) # generate MUAPs
+                noisy_emg = exp.add_noise(emg, SNR) # add noise to synthetic signal
+                noisy_emg = (noisy_emg - noisy_emg.mean(dim=2, keepdim=True)) / (noisy_emg.std(dim=2, keepdim=True) - 1e-9)
+                emg_grid = exp.make_grid(noisy_emg) # reshape into EMG grid
+                emg_grid_down = exp.downsample_grid(emg_grid, sampfactor) # downsample EMG grid
 
-                    print('GENERATING SPIKE TRAINS...')
-                    spts, dts = exp.generate_spike_trains(mu_count, duration, Tmean, ISV) # Generate spike trains
+                print('GET SEPARATION VECTORS & WHITENING...')
+                source_est = exp.get_whiten_mat(emg_grid_down, B, R=R)
+                exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device) # get baseline loss
 
-                    print('GENERATE EMG...')
-                    emg = exp.generate_emg(spts, muaps, R=R) # make synthetic EMG from simulated MUAPs and spike trains
-                    emg = exp.add_noise(emg, SNR) # add noise to synthetic signal
-                    emg = (emg - emg.mean(dim=2, keepdim=True)) / (emg.std(dim=2, keepdim=True) - 1e-9)
-                    emg_grid = exp.make_grid(emg) # reshape into EMG grid
-                    muaps = exp.downsample_muaps(muaps, sampfactor) # downsample MUAPs
-                    emg_grid_down = exp.downsample_grid(emg_grid, sampfactor) # downsample EMG grid
-
-                    print('GET SEPARATION VECTORS & WHITENING...')
-                    B = exp.get_separation_vectors(muaps, R=R)
-                    source_est = exp.get_whiten_mat(emg_grid_down, B, R=R)
-                    exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device) # get baseline loss
-
-                    # Get baseline performance metrics before transform (mainly to evaluate initial decomp.)
-
+                # Get baseline performance metrics before transform (mainly to evaluate initial decomp.)
+                pred_dts, sils_base = exp.get_silohuette(source_est.detach().cpu().numpy())
+                scores_base = exp.spike_scores(dts, pred_dts)
+    
                 # Test 30 randomly sampled spatial transformations
                 for trans_idx in range(30):
                     Tx, Ty = np.random.uniform(-3.0, 3.0), np.random.uniform(-3.0, 3.0)
@@ -85,6 +86,11 @@ for opt in opts:
                     # Keep track of experimental parameters of the run
                     params = {'opt': opt, 'mu_count': mu_count, 'SNR':SNR, 'fxmax': fxmax,
                                 'Tx': Tx, 'Ty': Ty, 'theta': theta, 'xscale': xscale, 'yscale': yscale}
+                    params.update({
+                        'sils_base_avg': np.mean(sils_base), 'sils_base_std': np.std(sils_base),
+                        'sensitivity_base_avg': np.mean(scores_base['sensitivity']), 'sensitivity_base_std': np.std(scores_base['sensitivity']),
+                        'precision_base_avg': np.mean(scores_base['precision']), 'precision_base_std': np.std(scores_base['precision'])
+                        })
 
                     with torch.no_grad():
                         print('APPLY TRANSFORM...')

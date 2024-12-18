@@ -298,7 +298,7 @@ class SDAExperiment:
         # Collect output tensors
         output_list = []
         losses = []
-        xshifts,yshifts,angles = [], [], []
+        xshifts,yshifts,angles,xscales,yscales = [], [], [], [], []
 
         # Freeze all parameters except for SAL parameters
         for param in self.sda.parameters():
@@ -317,7 +317,6 @@ class SDAExperiment:
             for npoint in tqdm(range(npoints)):
                 # Set initial conditions
                 self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = init_params[npoint, :]
-
                 # Evaluate loss function at given condition
                 outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
 
@@ -331,11 +330,11 @@ class SDAExperiment:
                 print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=torch.min(torch.tensor([npoints, 5])))}')
 
         # Make SAL parameters learnable
-        # for param in self.sda.sal.parameters():
-        #     param.requires_grad = True        
-        self.sda.sal.xshift.requires_grad = True
-        self.sda.sal.yshift.requires_grad = True
-        self.sda.sal.rot_theta.requires_grad = True
+        for param in self.sda.sal.parameters():
+            param.requires_grad = True        
+        # self.sda.sal.xshift.requires_grad = True
+        # self.sda.sal.yshift.requires_grad = True
+        # self.sda.sal.rot_theta.requires_grad = True
 
         # Loop through the DataLoader
         print('TRAINING FROM BEST INIT. CONDITION...')
@@ -350,14 +349,16 @@ class SDAExperiment:
             loss.backward()
             print('LOSS:', loss.item()/self.base_loss)
             optimizer.step()
-            print(f'PARAMS: xshift: {W*self.sda.sal.xshift.item()/2}, yshift: {H*self.sda.sal.yshift.item()/2}, theta: {self.sda.sal.rot_theta.item()} ')
-
+            print(f'PARAMS:\n xshift: {W*self.sda.sal.xshift.item()/2}, yshift: {H*self.sda.sal.yshift.item()/2}, theta: {self.sda.sal.rot_theta.item()} ')
+            print(f'xscale: {self.sda.sal.xscale.item()}, yscale: {self.sda.sal.yscale.item()}')
             # Collect outputs and loss
             output_list.append(outputs)
             losses.append(loss.item())
             xshifts.append(self.sda.sal.xshift.item())
             yshifts.append(self.sda.sal.yshift.item())
             angles.append(self.sda.sal.rot_theta.item())
+            xscales.append(self.sda.sal.xscale.item())
+            yscales.append(self.sda.sal.yscale.item())
 
         if plot:
             fig, axs = plt.subplots(1, 2)
@@ -366,8 +367,11 @@ class SDAExperiment:
             axs[1].plot(W*(np.array(xshifts).ravel())/2)
             axs[1].plot(H*(np.array(yshifts).ravel())/2)
             axs[1].plot(angles)
-            axs[1].hlines(y=[-self.params['Tx'], -self.params['Ty'], -self.params['theta']], xmin=0, xmax=len(np.array(xshifts).ravel()), linestyles='dashed', label='ground truth')
-            axs[1].legend(['xshift-pred','yshift-pred', 'theta'])
+            axs[1].plot(xscales)
+            axs[1].plot(yscales)
+            axs[1].hlines(y=[-self.params['Tx'], -self.params['Ty'], -self.params['theta'], 1/self.params['xscale'], 1/self.params['yscale']],
+                          xmin=0, xmax=len(np.array(xshifts).ravel()), linestyles='dashed', label='ground truth')
+            axs[1].legend(['xshift-pred','yshift-pred', 'theta', 'xscale', 'yscale'])
             axs[1].set_title('Parameter Dynamics')
             axs[1].set_ylim([-3.0, 3.0])
             plt.savefig('learning.jpg')
@@ -451,7 +455,7 @@ class SDAExperiment:
         plt.savefig('theta_loss_landscape.jpg')
         print()
 
-    def get_silohuette(self, sources_pred, distance=20):
+    def get_silohuette(self, sources_pred, distance=4):
         '''Get silhouette values given source predictions.'''
         
         # Step 4b:
@@ -459,6 +463,7 @@ class SDAExperiment:
         pred_dts = []
         for mu_idx in range(sources_pred.shape[1]):
             source_pred = sources_pred[:, mu_idx] # get a single source prediction
+            source_pred = np.multiply(source_pred, source_pred) # get squared sources
             peaks, _ = scipy.signal.find_peaks(source_pred.squeeze(), distance=distance) # default about 2ms 
             source_pred /=  np.mean(maxk(source_pred[peaks], 10))
             if len(peaks) > 1:
@@ -478,7 +483,6 @@ class SDAExperiment:
                 # difference between the between-cluster sums of point-to-centroid distances
                 inter_sums = (((source_pred[spikes] - noise_centroid)**2).sum())
                 sil = (inter_sums - intra_sums) / max(intra_sums, inter_sums)  
-
             else:
                 sil = 0
             sils[mu_idx] = sil
@@ -504,7 +508,7 @@ if __name__ == '__main__':
     H, W, L = 25, 10, 50
     R = 16
     fxmax=0.8 # normalized spatial cutoff frequency
-    sampfactor=1
+    sampfactor=15
 
     duration = 20000 # number of time samples in EMG, equivalent of 10s with fs=2000Hz
     Tmean, ISV = 60, 0.2 # sample statistics of spikes # equivalent of 30Hz with fs=2000Hz
@@ -512,9 +516,9 @@ if __name__ == '__main__':
 
     # Tx, Ty, theta, xscale, yscale = -1.5, 1.5, 15*np.pi/180, 1, 1 # affine parameters applied
     # Tx, Ty, theta, xscale, yscale = -1.5, 2.5, 0, 1, 1 # affine parameters applied
-    Tx, Ty, theta, xscale, yscale = 0, 0, 0, 1, 1
+    Tx, Ty, theta, xscale, yscale = -1.5, 2.2, 8*np.pi/180, 1.15, 0.85
     # Training params
-    nepochs=2
+    nepochs=100
     lr = 5e-3
     loss = 'kurtosis'
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
@@ -524,7 +528,6 @@ if __name__ == '__main__':
 
         print('GENERATING MUAPS....')
         muaps = exp.generate_gaussian_muaps(mu_count, H, W, L, fxmax, sampfactor) # generate MUAPs
-        # muaps = exp.load_muap_sims(PATH='/home/joao/Desktop/datasets/sims/muaps.npz', mu_count=mu_count)
 
         print('GENERATING SPIKE TRAINS...')
         spts, dts = exp.generate_spike_trains(mu_count, duration, Tmean, ISV) # Generate spike trains
@@ -557,7 +560,7 @@ if __name__ == '__main__':
     with torch.no_grad():
         print('TRAINING SDA MODULE...')
         exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
-    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=0, nepochs=nepochs//2, lr=lr, device=device, loss=loss)
+    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=3*nepochs//2, nepochs=nepochs//2, lr=lr, device=device, loss=loss)
     print()
 
     # Performance metrics based on output losses
