@@ -8,8 +8,8 @@ from tqdm import tqdm
 from scipy.io import loadmat
 import scipy
 from torch.utils.data import DataLoader, TensorDataset
-from torchvision.transforms.functional import affine
-from torchvision.transforms import InterpolationMode 
+# from torchvision.transforms.functional import affine
+# from torchvision.transforms import InterpolationMode 
 from networks_utils import SpatialAdaptation
 import torch
 import matplotlib.pyplot as plt

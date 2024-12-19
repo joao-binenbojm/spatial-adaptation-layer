@@ -11,10 +11,11 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         # self.ycrop = ycrop
         # self.xcrop = xcrop
 
-        self.whiten_mat = torch.nn.Linear(whiten_mat.shape[0], whiten_mat.shape[1], bias=False)
+        # self.whiten_mat = torch.nn.Linear(whiten_mat.shape[0], whiten_mat.shape[1], bias=False)
+        sep_mat = sep_mat @ whiten_mat # inclued whitening matrix in the separation matrix
         self.sep_mat = torch.nn.Linear(sep_mat.shape[1], sep_mat.shape[0], bias=False)
         with torch.no_grad():
-            self.whiten_mat.weight.copy_(whiten_mat)
+            # self.whiten_mat.weight.copy_(whiten_mat)
             self.sep_mat.weight.copy_(sep_mat)
         
         self.extension_factor = extension_factor
@@ -34,7 +35,7 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         emg_sal = self.sal(emg).squeeze()
         # emg_sal = emg_sal[:, self.ycrop:emg_sal.shape[1]-self.ycrop, self.xcrop:emg_sal.shape[2]-self.xcrop] # differentiable cropping
         extended_emg = self.extend_emg(emg_sal.reshape(emg_sal.shape[0], -1))
-        Z = self.whiten_mat(extended_emg)
-        sources = self.sep_mat(Z)
-        # sources = self.sep_mat(extended_emg)
+        # Z = self.whiten_mat(extended_emg)
+        # sources = self.sep_mat(Z)
+        sources = self.sep_mat(extended_emg)
         return sources

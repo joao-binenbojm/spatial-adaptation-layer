@@ -171,14 +171,14 @@ class SDAExperiment:
         emg = np.array(emg_grid).squeeze().reshape(emg_grid.shape[0], -1).T
         extended_emg_template = np.zeros((self.params['R']*emg.shape[0], emg.shape[1] + self.params['R'] - 1))
         extended_emg = extend_emg(extended_emg_template, emg, self.params['R'])
-        whitened_emg, self.whiten_mat,_ = whiten_emg(extended_emg) # we don't care about the whitened emg for now
+        whitened_emg, self.whiten_mat, dewhitening_mat = whiten_emg(extended_emg) # we don't care about the whitened emg for now
 
         # Get separation matrix based on whitened observations
         print('GETTING SEPARATION VECTORS...')
-        B = B @ self.whiten_mat
+        B = B @ dewhitening_mat
         self.sep_mat = torch.tensor(B).to(torch.float32)
         self.whiten_mat = torch.tensor(self.whiten_mat).to(torch.float32)
-        sources = self.sep_mat @ torch.tensor(extended_emg).to(torch.float32) # return sources
+        sources = (self.sep_mat @ self.whiten_mat) @ torch.tensor(extended_emg).to(torch.float32) # return sources
         return sources
 
     # def get_sep_mat(self, emg_grid, muaps, R):
@@ -416,8 +416,11 @@ class SDAExperiment:
         # plt.title(f'Kurtosis Loss Landscape (Post (y={Ty}, x={Tx}) translation)')
         # ax = sns.heatmap(np.array(loss_arr)/self.base_loss, xticklabels=np.around((x).tolist(), 3), yticklabels=np.around((y).tolist(), 3))
         ax = sns.heatmap(np.array(loss_arr)/self.base_loss)
-        ax.set(xlabel='Circumferential Shifts (mm)', ylabel='Longitudinal Shifts (mm)', fontsize=16)
+        ax.set_xticks([], [])
+        ax.set_yticks([], [])
+        # ax.set(xlabel='Circumferential Shifts (mm)', ylabel='Longitudinal Shifts (mm)')
         ax.text(np.where(np.array(x)>=-Tx)[0][0] + 0.5, np.where(y>=-Ty)[0][0]+0.5, 'X', color='green', ha='center', va='center', fontsize=16)
+        
         plt.savefig('loss_landscape.jpg')
         print()
 
@@ -512,11 +515,11 @@ if __name__ == '__main__':
 
     duration = 20000 # number of time samples in EMG, equivalent of 10s with fs=2000Hz
     Tmean, ISV = 60, 0.2 # sample statistics of spikes # equivalent of 30Hz with fs=2000Hz
-    SNR = 1 # SNR for synthetic EMG
+    SNR = 30 # SNR for synthetic EMG
 
     # Tx, Ty, theta, xscale, yscale = -1.5, 1.5, 15*np.pi/180, 1, 1 # affine parameters applied
-    # Tx, Ty, theta, xscale, yscale = -1.5, 2.5, 0, 1, 1 # affine parameters applied
-    Tx, Ty, theta, xscale, yscale = -1.5, 2.2, 8*np.pi/180, 1.15, 0.85
+    Tx, Ty, theta, xscale, yscale = -1.5, 2.5, 0, 1, 1 # affine parameters applied
+    # Tx, Ty, theta, xscale, yscale = -1.5, 2.2, 8*np.pi/180, 1.0, 1.0
     # Training params
     nepochs=100
     lr = 5e-3
@@ -550,12 +553,12 @@ if __name__ == '__main__':
         source_est = exp.get_whiten_mat(emg_grid, B, R=R)
         print()
 
-    # # Loss sampling
-    # with torch.no_grad():
-    #     num_points=20
-    #     print(f'SAMPLING LOSS LANDSCAPE ({num_points}x{num_points})...')
-    #     exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
-    #     losses = exp.loss_sampling(emg_grid_transform.to(torch.float32), num_points=num_points, loss=loss, device=device)
+    # Loss sampling
+    with torch.no_grad():
+        num_points=20
+        print(f'SAMPLING LOSS LANDSCAPE ({num_points}x{num_points})...')
+        exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
+        losses = exp.loss_sampling(emg_grid_transform.to(torch.float32), num_points=num_points, loss=loss, device=device)
 
     with torch.no_grad():
         print('TRAINING SDA MODULE...')

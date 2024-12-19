@@ -9,9 +9,9 @@ import matplotlib.pyplot as plt
 import sklearn 
 from sklearn.metrics import silhouette_samples, r2_score
 from sklearn.cluster import KMeans
-import numba
+# import numba
 from copy import deepcopy
-from numba import jit
+# from numba import jit
 
 ##################################### FILTERING TOOLS #######################################################
 
@@ -255,7 +255,7 @@ def whiten_emg(signal):
 
 ###################################### DECOMPOSITION TOOLS ##################################################################
 
-@numba.njit
+# @numba.njit
 def ortho_gram_schmidt(w,B):
 
     """ This is the recommended method of orthogonalisation in Negro et.al 2016,
@@ -278,45 +278,45 @@ def ortho_gram_schmidt(w,B):
 # Using g' and g'' in the iterations of fast ICA (see Hyvarinen et.al 'Independent Component Analysis: Algorithms and Applications, 
 # and Negro et. al 'Multichannel intramuscular and surface EMG decomposition by convolutive blind source separation)
 
-@numba.njit
-def square(x):
-    return np.square(x)
+# @numba.njit
+# def square(x):
+#     return np.square(x)
 
-@numba.njit
-def skew(x):
-    return np.square(x)
+# @numba.njit
+# def skew(x):
+#     return np.square(x)
 
-@numba.njit
-def kurtosis(x):
-    return x**3
+# @numba.njit
+# def kurtosis(x):
+#     return x**3
 
-@numba.njit
-def exp(x):
-    return np.exp(-np.square(x)/2)
+# @numba.njit
+# def exp(x):
+#     return np.exp(-np.square(x)/2)
 
-@numba.njit
-def logcosh(x):
-    return np.log(np.cosh(x))
+# @numba.njit
+# def logcosh(x):
+#     return np.log(np.cosh(x))
 
-@numba.njit
-def dot_square(x):
-    return 2*x
+# @numba.njit
+# def dot_square(x):
+#     return 2*x
 
-@numba.njit
-def dot_skew(x):
-    return 2*x
+# @numba.njit
+# def dot_skew(x):
+#     return 2*x
 
-@numba.njit
-def dot_kurtosis(x):
-    return 3*(np.square(x))
+# @numba.njit
+# def dot_kurtosis(x):
+#     return 3*(np.square(x))
 
-@numba.njit
-def dot_exp(x):
-    return -1*(np.exp(-np.square(x)/2)) + np.dot((np.square(x)), np.exp(-np.square(x)/2))
+# @numba.njit
+# def dot_exp(x):
+#     return -1*(np.exp(-np.square(x)/2)) + np.dot((np.square(x)), np.exp(-np.square(x)/2))
 
-@numba.njit
-def dot_logcosh(x):
-    return np.tanh(x)
+# @numba.njit
+# def dot_logcosh(x):
+#     return np.tanh(x)
 
 """
 def _logcosh(da, xp, x):
@@ -326,7 +326,7 @@ def _logcosh(da, xp, x):
     return gx, g_x
 """
 
-@numba.njit(fastmath=True)
+# @numba.njit(fastmath=True)
 def fixed_point_alg(w_n, B, Z,cf, dot_cf, its = 500):
 
     """ Update function for source separation vectors. The code user can select their preferred contrast function using a string input:

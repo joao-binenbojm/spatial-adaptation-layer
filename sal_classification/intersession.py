@@ -12,7 +12,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torchvision.transforms.v2 import RandomAffine, InterpolationMode, Compose
+# from torchvision.transforms.v2 import RandomAffine, InterpolationMode, Compose
 from sklearn.metrics import  accuracy_score, confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 
