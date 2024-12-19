@@ -1,3 +1,10 @@
+import os
+import sys
+
+# Set the working directory to the directory of the script
+script_dir = os.path.dirname(os.path.realpath(sys.argv[0]))  # Get the script's directory
+os.chdir(script_dir)  # Change the current working directory to the script's directory
+
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -51,4 +58,5 @@ with torch.no_grad():
             emg_grid_transform = exp.downsample_grid(emg_grid_transform, sampfactor)
 
             losses = exp.loss_sampling(emg_grid_transform.to(torch.float32), num_points=num_points, loss=loss, device=device)
-            os.rename('loss_landscape.jpg', f'./loss_landscapes/{mu_count}_{fxmax}.jpg')
+            os.rename('/home/joao/Desktop/spatial-adaptation-layer/sal_decomposition/simulation_study/loss_landscape.jpg',
+                       f'/home/joao/Desktop/spatial-adaptation-layer/loss_landscapes/{mu_count}_{fxmax}.jpg')

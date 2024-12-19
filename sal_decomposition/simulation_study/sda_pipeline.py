@@ -97,7 +97,7 @@ class SDAExperiment:
 
         N, C, H, W = emg_grid.shape
         Tx, Ty = torch.tensor(2*Tx*sampfactor/W), torch.tensor(2*sampfactor*Ty/H) # Normalize translation values automatically
-        theta, xscale, yscale = torch.tensor(theta), torch.tensor(xscale), torch.tensor(yscale)
+        theta, xscale, yscale = torch.tensor(theta) / torch.pi, torch.tensor(xscale), torch.tensor(yscale)
 
         T = torch.cat([ # Translation Matrix
             torch.stack([torch.tensor(1.0), torch.tensor(0.0), Tx]).unsqueeze(0),
@@ -306,11 +306,14 @@ class SDAExperiment:
         
         # Searching through initial conditions
         print('SAMPLING AND EVALUATING INITIAL CONDITIONS...')
-        boundaries = torch.tensor([3.0, 3.0, 20*np.pi/180]) # symmetric for each dimension about zero
+        boundaries = torch.tensor([3.0, 3.0, 20*np.pi/180, 0.2, 0.2]) # symmetric for each dimension about zero
         losses = torch.zeros(npoints)
-        engine = scipy.stats.qmc.LatinHypercube(d=3)
+        engine = scipy.stats.qmc.LatinHypercube(d=5)
         init_params = 2*torch.tensor(engine.random(n=npoints)).to(torch.float32)-1 # scale from [0,1] to [-1, 1]
         init_params[:,0], init_params[:,1], init_params[:, 2] = 2*boundaries[0]*init_params[:,0]/W, 2*boundaries[1]*init_params[:,1]/H, boundaries[2]*init_params[:, 2]/np.pi
+        init_params[:, 3] = torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) ) # generates scalings appropriately
+        init_params[:, 4] = torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
+
         init_params = init_params.to(device)
         # self.sda.eval()
         with torch.no_grad():
@@ -515,10 +518,10 @@ if __name__ == '__main__':
 
     duration = 20000 # number of time samples in EMG, equivalent of 10s with fs=2000Hz
     Tmean, ISV = 60, 0.2 # sample statistics of spikes # equivalent of 30Hz with fs=2000Hz
-    SNR = 30 # SNR for synthetic EMG
+    SNR = 1 # SNR for synthetic EMG
 
-    # Tx, Ty, theta, xscale, yscale = -1.5, 1.5, 15*np.pi/180, 1, 1 # affine parameters applied
-    Tx, Ty, theta, xscale, yscale = -1.5, 2.5, 0, 1, 1 # affine parameters applied
+    Tx, Ty, theta, xscale, yscale = -1.5, 2.5, 15*np.pi/180, 1.15, 0.85 # affine parameters applied
+    # Tx, Ty, theta, xscale, yscale = -1.5, 2.5, 0, 1, 1 # affine parameters applied
     # Tx, Ty, theta, xscale, yscale = -1.5, 2.2, 8*np.pi/180, 1.0, 1.0
     # Training params
     nepochs=100
@@ -554,11 +557,11 @@ if __name__ == '__main__':
         print()
 
     # Loss sampling
-    with torch.no_grad():
-        num_points=20
-        print(f'SAMPLING LOSS LANDSCAPE ({num_points}x{num_points})...')
-        exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
-        losses = exp.loss_sampling(emg_grid_transform.to(torch.float32), num_points=num_points, loss=loss, device=device)
+    # with torch.no_grad():
+    #     num_points=20
+    #     print(f'SAMPLING LOSS LANDSCAPE ({num_points}x{num_points})...')
+    #     exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
+    #     losses = exp.loss_sampling(emg_grid_transform.to(torch.float32), num_points=num_points, loss=loss, device=device)
 
     with torch.no_grad():
         print('TRAINING SDA MODULE...')
