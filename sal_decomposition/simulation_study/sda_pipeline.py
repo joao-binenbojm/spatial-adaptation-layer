@@ -319,7 +319,8 @@ class SDAExperiment:
         with torch.no_grad():
             for npoint in tqdm(range(npoints)):
                 # Set initial conditions
-                self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = init_params[npoint, :]
+                self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = init_params[npoint, :3]
+                self.sda.sal.xscale.data, self.sda.sal.yscale.data = init_params[npoint, 3:]
                 # Evaluate loss function at given condition
                 outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
 
@@ -329,7 +330,8 @@ class SDAExperiment:
 
             if npoints > 0:
                 losses = losses / self.base_loss # normalize by baseline loss
-                self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = init_params[losses.argmax(), :] # get best initialization
+                self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = init_params[losses.argmax(), :3] # get best initialization
+                self.sda.sal.xscale.data, self.sda.sal.yscale.data = init_params[losses.argmax(), 3:]
                 print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=torch.min(torch.tensor([npoints, 5])))}')
 
         # Make SAL parameters learnable
@@ -510,7 +512,7 @@ class SDAExperiment:
 if __name__ == '__main__':
 
     # Experimental parameters
-    mu_count=20
+    mu_count=10
     H, W, L = 25, 10, 50
     R = 16
     fxmax=0.8 # normalized spatial cutoff frequency
