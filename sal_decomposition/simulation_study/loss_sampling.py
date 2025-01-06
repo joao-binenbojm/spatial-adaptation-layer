@@ -13,7 +13,7 @@ import os
 
 from sal_decomposition.simulation_study.sda_pipeline import SDAExperiment
 
-mu_counts = [1, 10, 20] # number of MUs
+mu_counts = [20] # number of MUs
 fxmaxs = [62.5, 125, 187.5] # maximum spatial bandwidth in both grid directions
 
 # Fixed simulation parameters
@@ -43,14 +43,15 @@ with torch.no_grad():
             print('GENERATE EMG...')
             emg = exp.generate_emg(spts, muaps, R=R) # make synthetic EMG from simulated MUAPs and spike trains
             emg = exp.add_noise(emg, SNR) # add noise to synthetic signal
-            emg = (emg - emg.mean(dim=2, keepdim=True)) / (emg.std(dim=2, keepdim=True) - 1e-9)
+            # emg = (emg - emg.mean(dim=2, keepdim=True)) / (emg.std(dim=2, keepdim=True) - 1e-9)
             emg_grid = exp.make_grid(emg) # reshape into EMG grid
             muaps = exp.downsample_muaps(muaps, sampfactor) # downsample MUAPs
             emg_grid_down = exp.downsample_grid(emg_grid, sampfactor) # downsample EMG grid
 
             print('GET SEPARATION VECTORS & WHITENING...')
             B = exp.get_separation_vectors(muaps, R=R)
-            source_est = exp.get_whiten_mat(emg_grid_down, B, R=R)
+            # source_est = exp.get_whiten_mat(emg_grid_down, B, R=R)
+            source_est = exp.process_sep_mat(emg_grid_down, B, R=R)
             exp.get_base_loss(emg_grid_down.to(torch.float32), loss=loss, device=device) # get baseline loss
 
             print('APPLY TRANSFORM AND DOWNSAMPLE...')

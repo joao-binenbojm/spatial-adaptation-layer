@@ -13,25 +13,27 @@ from sal_decomposition.simulation_study.sda_pipeline import SDAExperiment
 # this will allow us to continue where we left off if the system breaks
 # checklist is a set of tuples of experimental conditions
 
-# Get checklist of all runs done so far
-api = wandb.Api()
-runs = api.runs(f"jp2717-imperial-college-london/sal-decomposition-simulations")
+# # Get checklist of all runs done so far
 checklist = []
-for run in runs:
-    try:
-        snr = run.summary.get("SNR")
-        fxmax = run.summary.get("fxmax")
-        opt = run.summary.get("opt")
-        if snr is not None and fxmax is not None and opt is not None:
-            checklist.append((fxmax, snr, opt))
-    except KeyError:
-        print(f"Skipping run {run.id} due to missing entries.")
+# api = wandb.Api()
+# runs = api.runs(f"jp2717-imperial-college-london/sal-decomposition-simulations3")
+# checklist = []
+# for run in runs:
+#     try:
+#         snr = run.summary.get("SNR")
+#         fxmax = run.summary.get("fxmax")
+#         opt = run.summary.get("opt")
+#         if snr is not None and fxmax is not None and opt is not None:
+#             checklist.append((fxmax, snr, opt))
+#     except KeyError:
+#         print(f"Skipping run {run.id} due to missing entries.")
 
 # Define experimental parameters
 mu_count = 20
 SNRs = [30, 15, 5, 1]
-fxmaxs = [62.5, 93.75, 125, 156.25, 187.5] # m^-1
-opts = ['fit', 'search', 'search_fit'] # whether to only train, only search, or search and fit
+fxmaxs = [187.5, 156.25, 125, 93.75, 62.5] # m^-1
+# fxmaxs = [93.75]
+opts = ['search_fit', 'search', 'fit'] # whether to only train, only search, or search and fit
 
 # Fixed simulation parameters
 fs = 2000 # Hz
@@ -40,61 +42,66 @@ duration = 20000 # number of time samples in EMG, equivalent of 10s with fs=2000
 Tmean, ISV = 60, 0.2 # sample statistics of spikes # equivalent of 30Hz with fs=2000Hz
 H, W, L = 25, 10, 50
 R = 16
-sampfactor=15
+sampfactor=14
 
 # Training params
-nepochs=100
+nepochs=120
 lr = 5e-3
 loss = 'kurtosis' # loss function for optimization
 device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
+# Create range of spatial transformations to be used equally for every single condition
+Nt = 50
+Txs, Tys = np.random.uniform(-3.0, 3.0, size=Nt), np.random.uniform(-3.0, 3.0, size=Nt)
+thetas = np.random.uniform(-20*np.pi/180, 20*np.pi/180, size=Nt)
+xscales, yscales = np.random.uniform(0.8, 1.2, size=Nt), np.random.uniform(0.8, 1.2, size=Nt)
+
 for fxmax in tqdm(fxmaxs):
-    with torch.no_grad():
-        exp = SDAExperiment()
-        print('GENERATING MUAPS....')
-        muaps = exp.generate_gaussian_muaps(mu_count, H, W, L, fxmax / (fsx/2), sampfactor) # generate MUAPs
-        print('GENERATING SPIKE TRAINS...')
-        spts, dts = exp.generate_spike_trains(mu_count, duration, Tmean, ISV) # Generate spike trains
-        print('GENERATE EMG...')
-        emg = exp.generate_emg(spts, muaps, R=R) # make synthetic EMG from simulated MUAPs and spike trains
-        # Get separation vector
-        muaps_down = exp.downsample_muaps(muaps, sampfactor) # downsample MUAPs
-        B = exp.get_separation_vectors(muaps_down, R=R)
-
     for SNR in SNRs:
-        noisy_emg = exp.add_noise(emg, SNR) # add noise to synthetic signal
-        noisy_emg = (noisy_emg - noisy_emg.mean(dim=2, keepdim=True)) / (noisy_emg.std(dim=2, keepdim=True) - 1e-9)
-        emg_grid = exp.make_grid(noisy_emg) # reshape into EMG grid
-        emg_grid_down = exp.downsample_grid(emg_grid, sampfactor) # downsample EMG grid
-
-        print('GET SEPARATION VECTORS & WHITENING...')
-        source_est = exp.get_whiten_mat(emg_grid_down, B, R=R)
-        exp.get_base_loss(emg_grid_down.to(torch.float32), loss=loss, device=device) # get baseline loss
-
-        # Get baseline performance metrics before transform (mainly to evaluate initial decomp.)
-        pred_dts, sils_base = exp.get_silohuette(source_est.detach().cpu().numpy().T)
-        scores_base = exp.spike_scores(dts, pred_dts)
-
-        # Test 30 randomly sampled spatial transformations
         for opt in opts:
             # If in checklist, already run, continue to next condition
             if (fxmax, SNR, opt) in checklist:
                 continue
-            for trans_idx in range(30):
-                Tx, Ty = np.random.uniform(-3.0, 3.0), np.random.uniform(-3.0, 3.0)
-                theta = np.random.uniform(-20*np.pi/180, 20*np.pi/180)
-                xscale, yscale = np.random.uniform(0.8, 1.2), np.random.uniform(0.8, 1.2)
+            with torch.no_grad():
+                exp = SDAExperiment()
+                print('GENERATING MUAPS....')
+                muaps = exp.generate_gaussian_muaps(mu_count, H, W, L, fxmax / (fsx/2), sampfactor) # generate MUAPs
+                print('GENERATING SPIKE TRAINS...')
+                spts, dts = exp.generate_spike_trains(mu_count, duration, Tmean, ISV) # Generate spike trains
+                print('GENERATE EMG...')
+                emg = exp.generate_emg(spts, muaps, R=R) # make synthetic EMG from simulated MUAPs and spike trains
+                # Get separation vector
+                muaps_down = exp.downsample_muaps(muaps, sampfactor) # downsample MUAPs
+                B = exp.get_separation_vectors(muaps_down, R=R)
+
+                noisy_emg = exp.add_noise(emg, SNR) # add noise to synthetic signal
+                emg_grid = exp.make_grid(noisy_emg) # reshape into EMG grid
+                emg_grid_down = exp.downsample_grid(emg_grid, sampfactor) # downsample EMG grid
+
+                print('GET SEPARATION VECTORS & WHITENING...')
+                source_est = exp.process_sep_mat(emg_grid_down, B, R=R)
+                exp.get_base_loss(emg_grid_down.to(torch.float32), loss=loss, device=device) # get baseline loss
+
+                # Get baseline performance metrics before transform (mainly to evaluate initial decomp.)
+                pred_dts, sils_base = exp.get_silohuette(source_est.detach().cpu().numpy().T)
+                scores_base = exp.spike_scores(dts, pred_dts)
+
+            # Test 30 randomly sampled spatial transformations
+            for trans_idx in range(Nt):
+                Tx, Ty = float(Txs[trans_idx]), float(Tys[trans_idx])
+                theta = float(thetas[trans_idx])
+                xscale, yscale = float(xscales[trans_idx]), float(yscales[trans_idx])
 
                 # Start the wandb run
                 wandb.init(
                     # set the wandb project where this run will be logged
-                    project="sal-decomposition-simulations",
-                    name=f'{opt}-{mu_count}-{SNR}-{fxmax}',
+                    project="sal-decomposition-simulations5",
+                    name=f'{opt}-{SNR}-{fxmax}',
                     # mode='disabled',
                 )
             
                 # Keep track of experimental parameters of the run
-                params = {'opt': opt, 'mu_count': mu_count, 'SNR':SNR, 'fxmax': fxmax,
+                params = {'opt': opt, 'SNR':SNR, 'fxmax': fxmax,
                             'Tx': Tx, 'Ty': Ty, 'theta': theta, 'xscale': xscale, 'yscale': yscale}
                 params.update({
                     'sils_base_avg': np.mean(sils_base), 'sils_base_std': np.std(sils_base),
@@ -104,18 +111,31 @@ for fxmax in tqdm(fxmaxs):
 
                 with torch.no_grad():
                     print('APPLY TRANSFORM...')
-                    emg_grid_transform = exp.apply_affine(emg_grid, Tx, Ty, theta, xscale, yscale, sampfactor)
+                    emg_grid_transform = exp.apply_affine(emg_grid.detach().clone(), Tx, Ty, theta, xscale, yscale, sampfactor)
 
                     print('DOWNSAMPLING...')
                     emg_grid_transform = exp.downsample_grid(emg_grid_transform, sampfactor)
+
+                    print('CENTERING...')
+                    mean = (emg_grid_down.mean(dim=0, keepdim=True) + emg_grid_transform.mean(dim=0, keepdim=True))/2
+                    emg_grid_down, emg_grid_transform = emg_grid_down - mean, emg_grid_transform - mean 
+
+                    print('MINIMAL SOURCE ESTIMATE')
+                    sources_transform = exp.get_source_estimate(emg_grid_transform)
+                    pred_dts, sils_transform = exp.get_silohuette(sources_transform.detach().cpu().numpy().T)
+                    scores_transform = exp.spike_scores(dts, pred_dts)
+                    params.update({
+                    'sensitivity_transform_avg': np.mean(scores_transform['sensitivity']), 'sensitivity_transform_std': np.std(scores_transform['sensitivity']),
+                    'precision_transform_avg': np.mean(scores_transform['precision']), 'precision_transform_std': np.std(scores_transform['precision'])
+                    })
 
                 # Optimization
                 if opt == 'fit':
                     sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=0, nepochs=nepochs, lr=lr, device=device, loss=loss, plot=0)
                 elif opt == 'search_fit':
-                    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=3*nepochs//2, nepochs=nepochs//2, lr=lr, device=device, loss=loss, plot=0)
+                    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=2*nepochs//2, nepochs=nepochs//2, lr=lr, device=device, loss=loss, plot=0)
                 else: # search only
-                    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=3*nepochs, nepochs=0, lr=lr, device=device, loss=loss, plot=0)
+                    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=2*nepochs, nepochs=0, lr=lr, device=device, loss=loss, plot=0)
             
                 # Get learned transformations
                 Tx_opt, Ty_opt = W*exp.sda.sal.xshift.item()/2, H*exp.sda.sal.yshift.item()/2
@@ -139,4 +159,6 @@ for fxmax in tqdm(fxmaxs):
                 # Finish wandb run with all scores and parameters of the system
                 wandb.log(params)
                 wandb.finish()
+
+            del exp, params, muaps, dts, spts, emg, emg_grid, emg_grid_transform # delete params before next step of sims
             
