@@ -257,8 +257,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 plt.savefig('cfm.jpg')
                 plt.close()
                 # SAVE RESULTS
-                arr = np.array([subs, train_sessions, test_sessions, adapt_reps, accs, tuned_accs, maj_accs, maj_tuned_accs, xshifts, yshifts]).T
-                df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy', 'xshift', 'yshift'])
+                arr = np.array([subs, train_sessions, test_sessions, adapt_reps, accs, tuned_accs, maj_accs, maj_tuned_accs, xshifts, yshifts, rot_thetas, xscales, yscales, xshears, yshears]).T
+                df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy', 'xshift', 'yshift', 'rot_theta','xscale','yscale','xshear','yshear'])
                 df.to_csv(f"{name}.csv")
                 print(f'----------------------Affine learned params----------------------A')
                 print(f'The x shift is {adapted_model.spatial_adapt.xshift}')

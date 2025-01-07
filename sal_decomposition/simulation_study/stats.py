@@ -45,7 +45,7 @@ def get_transformed_grid(grid_shape, Tx=0, Ty=0, theta=0, xscale=1, yscale=1):
 
 def grid_distance(grid1, grid2, IED=4):
     '''Computes Euclidian distance between grid coordinates of true and learned transformations. Returns distance in mm.'''
-    dist = torch.sqrt((grid1*4 - grid2*4)**2).mean()
+    dist = torch.sqrt((grid1*IED - grid2*IED)**2).mean()
     return dist.item()
 
 if __name__ == '__main__':

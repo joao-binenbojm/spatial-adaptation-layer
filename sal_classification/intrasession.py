@@ -98,7 +98,9 @@ if __name__ == '__main__':
 
                 # Model/training set-up
                 Nv, Nh = emg_tensorizer.input_shape[0], emg_tensorizer.input_shape[1]
-                model = eval(exp['network'])(channels=np.prod((Nv, Nh)), input_shape=(Nv, Nh), num_classes=data['num_gestures']).to(device)
+                # model = eval(exp['network'])(channels=np.prod((Nv, Nh)), input_shape=(Nv, Nh), num_classes=data['num_gestures']).to(device)
+                model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_gestures'], 
+                            p_input=exp['p_input'], baseline=exp['learnable_baseline']).to(device)
                 num_epochs = exp['num_epochs']
                 criterion = nn.CrossEntropyLoss(reduction='sum')
                 # optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
@@ -109,11 +111,10 @@ if __name__ == '__main__':
                 warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
                 # Train the model
-                if exp['adaptation'] == 'shift-adaptation':
-                    model.shift.xshift.requires_grad = False
-                    model.shift.yshift.requires_grad = False
-                    if exp['learnable_baseline']:
-                        model.baseline.requires_grad = False
+                for param in model.sal.parameters():
+                    param.requires_grad = False
+                model.baseline.requires_grad = False
+                
                 train_model(model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                             warmup_scheduler=warmup_scheduler) # run training loop
         

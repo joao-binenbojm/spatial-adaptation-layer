@@ -95,7 +95,7 @@ for fxmax in tqdm(fxmaxs):
                 # Start the wandb run
                 wandb.init(
                     # set the wandb project where this run will be logged
-                    project="sal-decomposition-simulations5",
+                    project="sal-decomposition-simulations-freeze",
                     name=f'{opt}-{SNR}-{fxmax}',
                     # mode='disabled',
                 )
@@ -131,11 +131,11 @@ for fxmax in tqdm(fxmaxs):
 
                 # Optimization
                 if opt == 'fit':
-                    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=0, nepochs=nepochs, lr=lr, device=device, loss=loss, plot=0)
+                    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=0, nepochs=nepochs, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
                 elif opt == 'search_fit':
-                    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=2*nepochs//2, nepochs=nepochs//2, lr=lr, device=device, loss=loss, plot=0)
+                    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=2*nepochs//2, nepochs=nepochs//2, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
                 else: # search only
-                    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=2*nepochs, nepochs=0, lr=lr, device=device, loss=loss, plot=0)
+                    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=2*nepochs, nepochs=0, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
             
                 # Get learned transformations
                 Tx_opt, Ty_opt = W*exp.sda.sal.xshift.item()/2, H*exp.sda.sal.yshift.item()/2

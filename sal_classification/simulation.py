@@ -29,8 +29,59 @@ from emg_processing import majority_voting_segments, majority_voting_full_segmen
 from networks import CapgMyoNet, LogisticRegressor
 from networks_utils import median_pool_2d
 
-# from torch.utils.tensorboard import SummaryWriter
-# writer = SummaryWriter('runs/capgmyo')
+
+def get_transformed_grid(grid_shape, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, xshear=0, yshear=0):
+    '''Computes the transformed grid coordinates for euclidina distance comparison.'''
+
+    N, C, H, W = grid_shape
+    Tx, Ty = torch.tensor(2*Tx/W), torch.tensor(2*Ty/H) # Normalize translation values automatically
+    theta, xscale, yscale = torch.tensor(theta) / torch.pi, torch.tensor(xscale), torch.tensor(yscale)
+    xshear, yshear torch.tensor(xshear), torch.tensor(yshear)
+
+    T = torch.cat([ # Translation Matrix
+        torch.stack([torch.tensor(1.0), torch.tensor(0.0), Tx]).unsqueeze(0),
+        torch.stack([torch.tensor(0.0), torch.tensor(1.0), Ty]).unsqueeze(0),
+        torch.stack([torch.tensor(0.0), torch.tensor(0.0), torch.tensor(1.0)]).unsqueeze(0)
+    ], dim=0)
+    R = torch.cat([ # Rotation Matrix
+        torch.stack([torch.cos(theta), -torch.sin(theta), torch.tensor(0.0)]).unsqueeze(0),
+        torch.stack([torch.sin(theta), torch.cos(theta), torch.tensor(0.0)]).unsqueeze(0),
+        torch.stack([torch.tensor(0.0), torch.tensor(0.0), torch.tensor(1.0)]).unsqueeze(0)
+    ], dim=0)
+    Sc = torch.cat([ # Scaling Matrix
+        torch.stack([xscale, torch.tensor(0.0), torch.tensor(0.0)]).unsqueeze(0),
+        torch.stack([torch.tensor(0.0), yscale, torch.tensor(0.0)]).unsqueeze(0),
+        torch.stack([torch.tensor(0.0), torch.tensor(0.0), torch.tensor(1.0)]).unsqueeze(0)
+    ], dim=0)
+    Sh = torch.cat([ # Shear Matrix
+            torch.stack([torch.tensor(1.0), xshear, torch.tensor(0.0)]).unsqueeze(0),
+            torch.stack([yshear, torch.tensor(1.0), torch.tensor(0.0)]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0), torch.tensor(0.0), torch.tensor(1.0)]).unsqueeze(0)
+        ], dim=0)
+
+    # theta = Sc @ R @ T # learning order
+    theta = T @ R @ Sc @ Sh
+    theta = theta[0:2,:] # slice into submatrix expected by affine_grid
+    theta = theta.repeat(N,1,1)
+
+    # Obtain transformed grid in pixel units
+    grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=False)
+    grid[:,:,:,0] = W*(1 + grid[:,:,:,0])/2
+    grid[:,:,:,1] = H*(1 + grid[:,:,:,1])/2
+    return grid
+
+def apply_affine(data_grid, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, xshear=0, yshear=0):
+    '''Apply affine transformation to a given input grid.'''
+    N, C, H, W = data_grid.shape
+    grid = get_transformed_grid(data_grid, Tx=Tx, Ty=Ty, theta=theta, xscale=xscale, yscale=yscale, xshear=0, yshear=0)
+    grid_resamp = torch.nn.functional.grid_sample(data_grid, grid)
+    return grid_resamp
+
+def grid_distance(grid1, grid2, IED=1):
+    '''Computes Euclidian distance between grid coordinates of true and learned transformations. Returns distance in cm.'''
+    dist = torch.sqrt((grid1*IED - grid2*IED)**2).mean()
+    return dist.item()
+
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'expandable_segments:True'
 
 if __name__ == '__main__':
@@ -58,13 +109,16 @@ if __name__ == '__main__':
         # mode='disabled',
     )
 
-
     t0 = time()
 
     # Preinitialize metric arrays
     session_ids = ['session'+str(ses+1) for ses in data['sessions']]
     subs, sessions, test_reps = [], [], []
-    accs, maj_accs = [], [] # different metrics to be saved in csv from experiment
+    learned_params = {'xshifts':[], 'yshifts':[], 'rot_thetas':[], 'xscales':[], 'yscales':[], 'xshears':[], 'yshears':[]}
+    true_params = {f'{key}_true' : [] for key in learned_params.keys()} 
+    # xshifts, yshifts, rot_thetas, xscales, yscales, xshears, yshears = [], [], [], [], [], [], []
+    accs, tuned_accs = [], [] # different metrics to be saved in csv from experiment
+    maj_accs, maj_tuned_accs = [], []
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
     print('INTRASESSION:', data['dataset_name'])
@@ -90,6 +144,12 @@ if __name__ == '__main__':
 
                 X_train, Y_train, X_test, Y_test, test_durations = emg_tensorizer.get_tensors(test_session=session, rep_idx=test_idx)
 
+                # Apply randomly sampled affine transformation to test set
+                boundaries = [[-3.0, 3.0], [-3.0, 3.0], [-20*np.pi/180, 20*np.pi/180], [0.8, 1.2], [0.8, 1.2], [0.0, 0.2], [0.0, 0.2]]
+                samps = [torch.tensor(np.random.uniform(*bound)).to(torch.float32) for bound in boundaries] # sampled transformation parameters
+                X_test = apply_affine(X_test, *samps) # apply spatial transformation to test set to simulate a second electrode placement with identical ground truths
+                for idx, key in enumerate(true_params.keys()): true_params[key].append(samps[idx]) # track ground truth params
+
                 # Get PyTorch DataLoaders
                 train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=exp['norm'])
                 test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
@@ -109,12 +169,55 @@ if __name__ == '__main__':
                 warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
                 # Train the model
-                if exp['adaptation'] == 'shift-adaptation':
-                    model.shift.xshift.requires_grad = False
-                    model.shift.yshift.requires_grad = False
-                    if exp['learnable_baseline']:
-                        model.baseline.requires_grad = False
+                for param in model.sal.parameters():
+                    param.requires_grad = False
+                model.baseline.requires_grad = False
+
                 train_model(model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
+                            warmup_scheduler=warmup_scheduler) # run training loop
+
+                # Record performance drop after spatial perturbation (zero-shot)
+                print('TESTING...')
+                model.eval()
+                with torch.no_grad():
+                    all_labs, all_preds = test_model(model, test_loader)
+
+                acc = accuracy_score(all_labs, all_preds)
+                accs.append(acc)
+                print('Test Accuracy:', acc)
+
+                # Majority voting, with number of frames depending on dataset used
+                if exp['dataset'] == 'capgmyo':
+                    maj_all_preds = majority_voting_segments(all_preds, Mmj=75, durations=test_durations)
+                    maj_acc = accuracy_score(all_labs, maj_all_preds)
+                    maj_accs.append(maj_acc)
+                    print('Majority Voting Accuracy:', maj_acc)
+                
+                else: # if csl, compute one MJV predition for each test segment
+                    maj_all_preds, maj_all_labs = majority_voting_full_segment(all_preds, test_durations), majority_voting_full_segment(all_labs, test_durations)
+                    maj_acc = accuracy_score(maj_all_labs, maj_all_preds)
+                    maj_accs.append(maj_acc)
+                    print('Majority Voting Accuracy:', maj_acc)
+
+
+                # Spatially adapt the model's transformed position
+                adapted_model = deepcopy(model)
+                print('FINE-TUNING...')
+                for param in adapted_model.parameters():
+                    param.requires_grad = False
+                adapted_model.spatial_adapt.xshift.requires_grad = exp['adaptation_params']["xshift"]
+                adapted_model.spatial_adapt.yshift.requires_grad = exp['adaptation_params']["yshift"]
+                adapted_model.spatial_adapt.rot_theta.requires_grad = exp['adaptation_params']["rot_theta"]
+                adapted_model.spatial_adapt.xscale.requires_grad = exp['adaptation_params']["xscale"]
+                adapted_model.spatial_adapt.yscale.requires_grad = exp['adaptation_params']["yscale"]
+                adapted_model.spatial_adapt.xshear.requires_grad = exp['adaptation_params']["xshear"]
+                adapted_model.spatial_adapt.yshear.requires_grad = exp['adaptation_params']["yshear"]
+                    
+                if exp['learnable_baseline']:
+                    adapted_model.baseline.requires_grad = True
+
+                # Adapt to given test set
+                train_model(adapted_model, test_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
                             warmup_scheduler=warmup_scheduler) # run training loop
         
                 # Testing loop over test loader
@@ -140,45 +243,73 @@ if __name__ == '__main__':
                     maj_accs.append(maj_acc)
                     print('Majority Voting Accuracy:', maj_acc)
 
-                # # Plotting confusion matrix to understand what's going on
-                # # labs = np.arange(1, 27)
-                # labs = np.arange(data['num_gestures'])
-                # cf = confusion_matrix(all_labs, all_preds, labels=labs)
-                # disp = ConfusionMatrixDisplay(confusion_matrix=cf, display_labels=labs)
-                # disp.plot()
-                # plt.savefig('cfm.jpg')
-                # plt.close()
+                # Store learned params for later evaluation
+                params = [adapted_model.spatial_adapt.xshift.item(),
+                            adapted_model.spatial_adapt.yshift.item(),
+                            adapted_model.spatial_adapt.rot_thetaitem(),
+                            adapted_model.spatial_adapt.xscaleitem(),
+                            adapted_model.spatial_adapt.yscaleitem(),
+                            adapted_model.spatial_adapt.xshearitem(),
+                            adapted_model.spatial_adapt.yshearitem()]
+                
+                for idx, key in enumerate(learned_params.keys()): learned_params[key].append(params[idx]) # track ground truth params
+                
+                # Testing loop over test loader (K-shot)
+                print('TESTING...')
+                with torch.no_grad():
+                    all_labs, all_preds = test_model(adapted_model, test_loader)
 
-                # # Plotting a prediction-label stream
-                # plt.figure()
-                # plt.plot(all_labs)
-                # plt.plot(maj_all_preds)
-                # plt.legend(['Labels', 'Predictions'])
-                # plt.savefig('stream_maj.jpg')
-                # plt.close()
+                tuned_acc = accuracy_score(all_labs, all_preds)
+                tuned_accs.append(tuned_acc)
+                print('Tuned Test Accuracy:', tuned_acc)
 
-                # plt.figure()
-                # plt.plot(all_labs)
-                # plt.plot(all_preds)
-                # plt.legend(['Labels', 'Predictions'])
-                # plt.savefig('stream.jpg')
-                # plt.close()
+                # Majority voting, with number of frames depending on dataset used
+                if exp['dataset'] == 'capgmyo':
+                    maj_all_preds = majority_voting_segments(all_preds, Mmj=75, durations=test_durations)
+                    maj_tuned_acc = accuracy_score(all_labs, maj_all_preds)
+                    maj_tuned_accs.append(maj_tuned_acc)
+                    print('Majority Voting Tuned Accuracy:', maj_tuned_acc)
+                
+                else: # if csl, compute one MJV predition for each test segment
+                    maj_all_preds, maj_all_labs = majority_voting_full_segment(all_preds, test_durations), majority_voting_full_segment(all_labs, test_durations)
+                    maj_tuned_acc = accuracy_score(maj_all_labs, maj_all_preds)
+                    maj_tuned_accs.append(maj_tuned_acc)
+                    print('Majority Voting Tuned Accuracy:', maj_tuned_acc)
+
+                print(f'----------------------Affine learned params----------------------')
+                print(f'The x shift is {adapted_model.spatial_adapt.xshift.item()}')
+                print(f'The y shift is {adapted_model.spatial_adapt.yshift.item()}')
+                print(f'The rotation theta angle is {adapted_model.spatial_adapt.rot_theta.item()}')
+                print(f'The x scale is {adapted_model.spatial_adapt.xscale.item()}')
+                print(f'The y scale is {adapted_model.spatial_adapt.yscale.item()}')
+                print(f'The x shear is {adapted_model.spatial_adapt.xshear.item()}')
+                print(f'The y shear is {adapted_model.spatial_adapt.yshear.item()}')
+
+                # Get confusion matrix
+                labs = np.arange(data['num_gestures'])
+                cf = confusion_matrix(all_labs, all_preds, labels=labs)
+                disp = ConfusionMatrixDisplay(confusion_matrix=cf, display_labels=labs)
+                disp.plot()
+                plt.savefig('cfm.jpg')
+                plt.close()
 
                 # SAVE RESULTS
-                arr = np.array([subs, sessions, test_reps, accs, maj_accs]).T
-                df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy'])
-                df.to_csv(f"{name}.csv")
+                data = np.array([subs, sessions, test_reps, accs, tuned_accs, maj_accs, maj_tuned_accs] + list(true_params.values()) + list(learned_params.values())).T
+                cols = ['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy'] + list(true_params.keys()) + list(learned_params.keys())
+                df = pd.DataFrame(data=data, columns=cols)
+                df.to_csv(f"{name}.csv") 
 
-    # Save experiment data in .csv file
-    arr = np.array([subs, sessions, test_reps, accs, maj_accs]).T
-    df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Majority Voting Accuracy'])
-    df.to_csv(f"{name}.csv")
+    # Save final experiment data in .csv file
+    data = np.array([subs, sessions, test_reps, accs, tuned_accs, maj_accs, maj_tuned_accs] + list(true_params.values()) + list(learned_params.values())).T
+    cols = ['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy'] + list(true_params.keys()) + list(learned_params.keys())
+    df = pd.DataFrame(data=data, columns=cols)
+    df.to_csv(f"{name}.csv") 
 
     # Logging final results onto wandb 
     table = wandb.Table(dataframe=df)
     wandb.log({'complete_results': table})
-    wandb.log({'Accuracy': df['Accuracy'].mean()})
-    wandb.log({'Majority Voting Accuracy': df['Majority Voting Accuracy'].mean()})
+    wandb.log({'Tuned Accuracy': df['Tuned Accuracy'].mean()})
+    wandb.log({'Majority Voting Tuned Accuracy': df['Majority Voting Accuracy'].mean()})
 
 
     tf = time()
