@@ -82,6 +82,13 @@ def grid_distance(grid1, grid2, IED=1):
     dist = torch.sqrt((grid1*IED - grid2*IED)**2).mean()
     return dist.item()
 
+def get_grid_distance(grid_shape, true_params, learned_params, IED=1):
+    '''Given the shape of a specific grid, the true and learned params, compute the average distance in cm of between corresponding electrodes of the two grids.'''
+    true_grid = get_transformed_grid(grid_shape, *true_params)
+    learned_grid = get_transformed_grid(grid_shape, *learned_params)
+    dist = grid_distance(true_grid, learned_grid, IED=IED)
+    return dist
+
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'expandable_segments:True'
 
 if __name__ == '__main__':
@@ -116,6 +123,7 @@ if __name__ == '__main__':
     subs, sessions, test_reps = [], [], []
     learned_params = {'xshifts':[], 'yshifts':[], 'rot_thetas':[], 'xscales':[], 'yscales':[], 'xshears':[], 'yshears':[]}
     true_params = {f'{key}_true' : [] for key in learned_params.keys()} 
+    dists = []
     # xshifts, yshifts, rot_thetas, xscales, yscales, xshears, yshears = [], [], [], [], [], [], []
     accs, tuned_accs = [], [] # different metrics to be saved in csv from experiment
     maj_accs, maj_tuned_accs = [], []
@@ -293,15 +301,19 @@ if __name__ == '__main__':
                 plt.savefig('cfm.jpg')
                 plt.close()
 
+                # Compute average electrode distance between learned and true grid
+                dists.append(get_grid_distance(X_test.shape, samps, params))
+                print('AVERAGE ELECTRODE DISTANCE BETWEEN GRIDS (CM):', f'{dists[-1]} cm')
+
                 # SAVE RESULTS
-                data = np.array([subs, sessions, test_reps, accs, tuned_accs, maj_accs, maj_tuned_accs] + list(true_params.values()) + list(learned_params.values())).T
-                cols = ['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy'] + list(true_params.keys()) + list(learned_params.keys())
+                data = np.array([subs, sessions, test_reps, accs, tuned_accs, maj_accs, maj_tuned_accs, dists] + list(true_params.values()) + list(learned_params.values())).T
+                cols = ['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy', 'Distance (cm)'] + list(true_params.keys()) + list(learned_params.keys())
                 df = pd.DataFrame(data=data, columns=cols)
                 df.to_csv(f"{name}.csv") 
 
     # Save final experiment data in .csv file
-    data = np.array([subs, sessions, test_reps, accs, tuned_accs, maj_accs, maj_tuned_accs] + list(true_params.values()) + list(learned_params.values())).T
-    cols = ['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy'] + list(true_params.keys()) + list(learned_params.keys())
+    data = np.array([subs, sessions, test_reps, accs, tuned_accs, maj_accs, maj_tuned_accs, dists] + list(true_params.values()) + list(learned_params.values())).T
+    cols = ['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy', 'Tuned Accuracy', 'Majority Voting Accuracy', 'Majority Voting Tuned Accuracy', 'Distance (cm)'] + list(true_params.keys()) + list(learned_params.keys())
     df = pd.DataFrame(data=data, columns=cols)
     df.to_csv(f"{name}.csv") 
 
