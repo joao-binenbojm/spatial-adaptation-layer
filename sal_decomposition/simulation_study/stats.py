@@ -50,7 +50,7 @@ def grid_distance(grid1, grid2, IED=4):
 
 if __name__ == '__main__':
     grid_shape = (1,1,25,10)
-    df = pd.read_csv('sal_decomposition/simulation_study/experiments_free.csv')
+    df = pd.read_csv('sal_decomposition/simulation_study/experiments_freeze.csv')
     # df2 = pd.read_csv('sal_decomposition/simulation_study/experiments_freeze.csv')
     
     # # Filter out SNRs

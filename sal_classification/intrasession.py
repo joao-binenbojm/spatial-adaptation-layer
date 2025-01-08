@@ -35,14 +35,14 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'expandable_segments:True'
 
 if __name__ == '__main__':
 
-    exp_config = 'exp.json'
+    exp_config = './sal_classification/exp.json'
 
     # Experiment condition loading
     print('#'*40 + '\n\n' + 'RUNNING INTRASESSION EXPERIMENT' + '\n\n' + '#'*40)
 
     with open(exp_config) as f:
         exp = json.load(f)
-    with open('{}.json'.format(exp['dataset'])) as f:
+    with open(f"./sal_classification/{exp['dataset']}.json") as f:
         data = json.load(f)
     emg_tensorizer_def = eval(exp['emg_tensorizer'])
     name = exp['name']# keep experiment name
@@ -55,7 +55,7 @@ if __name__ == '__main__':
         project=exp.pop("project"),
         config=config,
         name=name,
-        # mode='disabled',
+        mode='disabled',
     )
 
 
@@ -76,7 +76,7 @@ if __name__ == '__main__':
         # Load EMG data in uniform format
         print('\nLOADING EMG TENSOR...')
         emg_tensorizer = emg_tensorizer_def(dataset=exp['dataset'], path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
-                                            input_shape=data['input_shape'], fs=data['fs'], sessions=session_ids, intrasession=True)
+                                            input_shape=data['input_shape'], fs=data['fs'], sessions=session_ids, intrasession=True, remove_baseline=exp['real_baseline'])
         emg_tensorizer.load_tensors()
 
         for session in tqdm(data['sessions']):
@@ -111,7 +111,7 @@ if __name__ == '__main__':
                 warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
                 # Train the model
-                for param in model.sal.parameters():
+                for param in model.spatial_adapt.parameters():
                     param.requires_grad = False
                 model.baseline.requires_grad = False
                 

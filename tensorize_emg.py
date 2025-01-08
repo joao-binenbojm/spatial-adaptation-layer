@@ -31,7 +31,7 @@ class EMGData:
         self.num_sessions = len(sessions)
         self.sub = sub
         self.current_session = 0 # to keep track of what session we are extracting from
-        self.remove_baseline=False
+        self.remove_baseline=remove_baseline
 
         # Preinitialize Data tensors
         self.X = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))

@@ -44,12 +44,9 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
             # TENSORBOARD
             running_loss += loss.item()
 
-            # weights.append(model.fc.weight.cpu().detach().numpy().ravel())
-            # baseline.append(model.baseline.cpu().detach().numpy().ravel())
-            # if 'model.shift' in locals():
-            # xshift.append(model.shift.xshift.cpu().detach().numpy())
-            # yshift.append(model.shift.yshift.cpu().detach().numpy())
-            # baseline.append(model.baseline.cpu().detach().numpy().ravel())
+            baseline.append(model.baseline.cpu().detach().numpy().ravel())
+            xshift.append(model.spatial_adapt.xshift.cpu().detach().numpy())
+            yshift.append(model.spatial_adapt.yshift.cpu().detach().numpy())
 
             _, predicted = torch.max(outputs.data, 1)
             running_correct += (predicted.squeeze() == labels.view(-1)).sum().item()
@@ -70,33 +67,33 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
         h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
         print('TOTAL TIME ELAPSED: {}h, {}min'.format(h, m))
     
-    # # Plot learnable shifts and baseline
-    # # if 'model.shift' in locals():
-    # plt.figure()
-    # plt.plot(xshift)
-    # plt.plot(yshift)
-    # plt.legend(['xshift', 'yshift'])
-    # plt.savefig('shifts.jpg')
-    # plt.close()
+    # Plot learnable shifts and baseline
+    # if 'model.shift' in locals():
+    plt.figure()
+    plt.plot(xshift)
+    plt.plot(yshift)
+    plt.legend(['xshift', 'yshift'])
+    plt.savefig('shifts.jpg')
+    plt.close()
 
-    # # if 'model.baseline' in locals():
-    # plt.figure()
-    # plt.plot(baseline)
-    # plt.title('Learned baseline')
-    # plt.savefig('baseline.jpg')
-    # plt.close()
-
-    # # plt.figure()
-    # # plt.plot(weights)
-    # # plt.title('Learned weights')
-    # # plt.savefig('weights{}.jpg'.format(optimizer.param_groups[0]['lr']))
-    # # plt.close()
+    # if 'model.baseline' in locals():
+    plt.figure()
+    plt.plot(baseline)
+    plt.title('Learned baseline')
+    plt.savefig('baseline.jpg')
+    plt.close()
 
     # plt.figure()
-    # plt.plot(running_losses)
-    # plt.title('TRAINING LOSS')
-    # plt.savefig('loss.jpg')
+    # plt.plot(weights)
+    # plt.title('Learned weights')
+    # plt.savefig('weights{}.jpg'.format(optimizer.param_groups[0]['lr']))
     # plt.close()
+
+    plt.figure()
+    plt.plot(running_losses)
+    plt.title('TRAINING LOSS')
+    plt.savefig('loss.jpg')
+    plt.close()
 
 def test_model(model, test_loader):
     ''' Takes given PyTorch model and test DataLoader, and returns all labels and corresponding model predictions.'''

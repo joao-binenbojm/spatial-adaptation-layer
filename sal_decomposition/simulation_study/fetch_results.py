@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 # Define your W&B project details
 entity = "jp2717-imperial-college-london"  # Replace with your W&B entity name
-project = "sal-decomposition-simulations5"  # Replace with your W&B project name
+project = "sal-decomposition-simulations-freeze"  # Replace with your W&B project name
 
 # Initialize an API object
 api = wandb.Api()
