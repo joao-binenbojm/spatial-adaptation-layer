@@ -1,8 +1,8 @@
 {
-    "name": "no-crop-results",
+    "name": "test_cnn",
     "project": "simulation",
     "K": 1,
-    "num_epochs": 2,
+    "num_epochs": 1,
     "norm": 0,
     "lr": 0.05,
     "p_input": 0.5,
@@ -14,10 +14,10 @@
             "gamma": 0.1
         }
     },
-    "batch_size": 1024,
+    "batch_size": 128,
     "momentum": 0,
     "weight_decay":0,
-    "network": "LogisticRegressor",
+    "network": "CapgMyoNet",
     "dataset": "csl",
     "emg_tensorizer": "CSLDataSegmentRMS",
     "Trms": 75,

@@ -20,7 +20,7 @@ for idx in range(1, N_runs+1):
 for exp in tqdm(exps):
 
     # Save dictionary as current condition to be tested
-    with open('exp.json', 'w') as file:
+    with open('./sal_classification/exp.json', 'w') as file:
         json.dump(exp, file, indent=4)
 
     # Run intersession script
