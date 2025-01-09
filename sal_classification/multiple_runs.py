@@ -2,10 +2,10 @@ import os
 import json
 from tqdm import tqdm
 
-N_runs = len(os.listdir('conditions'))
+N_runs = len(os.listdir('./sal_classification/conditions'))
 exps = []
 for idx in range(1, N_runs+1):
-    with open(f'conditions/{idx}.json', 'r') as file:
+    with open(f'./sal_classification/conditions/{idx}.json', 'r') as file:
         exps.append(json.load(file))
 
 for exp in tqdm(exps):
@@ -16,6 +16,6 @@ for exp in tqdm(exps):
 
     # Run intersession script
     try:
-        os.system('python intersession.py') # if you can run the intersession file with the given conditions do so, otherwise move onto the next conditions
+        os.system('python ./sal_classification/simulation.py') # if you can run the intersession file with the given conditions do so, otherwise move onto the next conditions
     except:
         continue
