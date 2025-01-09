@@ -1,4 +1,14 @@
 import os
+import sys
+
+# Set the working directory to the parent of the script's directory
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.abspath(os.path.join(script_dir, os.pardir))
+os.chdir(parent_dir)
+
+# Optional: Add the parent directory to sys.path for imports
+sys.path.insert(0, parent_dir)
+
 from time import time
 import json
 import gc

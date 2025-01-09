@@ -1,6 +1,15 @@
 import os
+import sys
 import json
 from tqdm import tqdm
+
+# Set the working directory to the parent of the script's directory
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.abspath(os.path.join(script_dir, os.pardir))
+os.chdir(parent_dir)
+
+# Optional: Add the parent directory to sys.path for imports
+sys.path.insert(0, parent_dir)
 
 N_runs = len(os.listdir('./sal_classification/conditions'))
 exps = []
