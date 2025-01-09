@@ -55,9 +55,8 @@ if __name__ == '__main__':
         project=exp.pop("project"),
         config=config,
         name=name,
-        mode='disabled',
+        # mode='disabled',
     )
-
 
     t0 = time()
 

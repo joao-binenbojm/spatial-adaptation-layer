@@ -1,11 +1,12 @@
 {
-    "name": "experiment1",
+    "name": "no-crop-results",
     "project": "simulation",
     "K": 1,
     "num_epochs": 2,
     "norm": 0,
     "lr": 0.05,
     "p_input": 0.5,
+    "crop": 0,
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
         "params": {
@@ -15,10 +16,10 @@
     },
     "batch_size": 1024,
     "momentum": 0,
-    "weight_decay": 0.0,
+    "weight_decay":0,
     "network": "LogisticRegressor",
     "dataset": "csl",
-    "emg_tensorizer": "CSLDataRMS",
+    "emg_tensorizer": "CSLDataSegmentRMS",
     "Trms": 75,
     "adaptation": "spatial-adaptation",
     "adaptation_params": {

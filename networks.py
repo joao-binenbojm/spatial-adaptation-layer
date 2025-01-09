@@ -108,14 +108,15 @@ class CapgMyoNet(nn.Module):
 
 class LogisticRegressor(nn.Module):
 
-    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, p_input=0.0, track_running_stats=True):
+    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, p_input=0.0, crop=2, track_running_stats=True):
         super(LogisticRegressor, self).__init__()
 
-        self.channels = channels
+        self.channels = channels - 2*crop*(input_shape[0] + input_shape[1] - 2*crop)
         self.kernel_sz = kernel_sz
 
         self.input_shape = input_shape
         self.num_classes = num_classes
+        self.crop = crop
         
         if baseline:
             self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
@@ -135,7 +136,8 @@ class LogisticRegressor(nn.Module):
         x = self.bn(x) # applies normalization procedure after usual filtering operations
         x = x - self.baseline # subtract baseline for baseline normalization
         x = self.spatial_adapt(x) # perform image resampling step
-        x = x.view(x.shape[0],-1) # flatten for determining classification
+        x = x[:,:,self.crop:x.shape[2]-self.crop, self.crop:x.shape[3]-self.crop] # apply cropping procedure to ensure dependency only on central region as to prevent overly depending on edges
+        x = x.reshape(x.shape[0],-1) # flatten for determining classification
         x = self.input_dropout(x)
         x = self.fc(x)
         # x = self.sm(x)

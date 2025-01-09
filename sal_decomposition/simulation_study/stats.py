@@ -145,33 +145,33 @@ if __name__ == '__main__':
     # sns.scatterplot(df, x='Distance (mm)', y='sensitivity_avg')
     # plt.savefig('perf_vs_dists.jpg')
 
-    # # EXPONENTIAL FIT
+    # EXPONENTIAL FIT
 
-    # # Linearized model
-    # log_b = np.log(df['sensitivity_avg'])
-    # X = sm.add_constant(df['Distance (mm)'])  # Add intercept for the regression
-    # model = sm.OLS(log_b, X).fit()
-    # b0_log, k = model.params  # Extract parameters (b0_log is log(b0))
-    # b0 = np.exp(b0_log)  # Convert log(b0) back to b0
+    # Linearized model
+    log_b = np.log(df['sensitivity_avg'])
+    X = sm.add_constant(df['Distance (mm)'])  # Add intercept for the regression
+    model = sm.OLS(log_b, X).fit()
+    b0_log, k = model.params  # Extract parameters (b0_log is log(b0))
+    b0 = np.exp(b0_log)  # Convert log(b0) back to b0
 
-    # # Generate fitted curve
-    # df['sensitivity_avg_fit'] = b0 * np.exp(k * df['Distance (mm)'])
+    # Generate fitted curve
+    df['sensitivity_avg_fit'] = b0 * np.exp(k * df['Distance (mm)'])
 
-    # # Plot with seaborn
-    # plt.figure(figsize=(8, 6))
-    # sns.scatterplot(x='Distance (mm)', y='sensitivity_avg', data=df, label='Data', color='blue', alpha=0.7)
-    # sns.lineplot(x='Distance (mm)', y='sensitivity_avg_fit', data=df, label='Exponential Fit', color='red', linewidth=2)
-    # plt.xlabel('Distance (mm)')
-    # plt.ylabel('Sensitivity')
-    # plt.title('Exponential Decay Fit')
-    # plt.legend()
+    # Plot with seaborn
+    plt.figure(figsize=(8, 6))
+    sns.scatterplot(x='Distance (mm)', y='sensitivity_avg', data=df, label='Data', color='blue', alpha=0.7)
+    sns.lineplot(x='Distance (mm)', y='sensitivity_avg_fit', data=df, label='Exponential Fit', color='red', linewidth=2)
+    plt.xlabel('Distance (mm)')
+    plt.ylabel('Sensitivity')
+    plt.title('Exponential Decay Fit')
+    plt.legend()
 
-    # # Annotate p-value
-    # p_value = model.pvalues[1]  # p-value for the decay rate
-    # print(p_value)
-    # plt.text(0.05, 0.95, f'$p$-value: {p_value:.3e}', transform=plt.gca().transAxes, 
-    #         fontsize=12, verticalalignment='top', bbox=dict(boxstyle="round", facecolor="white", alpha=0.7))
+    # Annotate p-value
+    p_value = model.pvalues[1]  # p-value for the decay rate
+    print(p_value)
+    plt.text(0.05, 0.95, f'$p$-value: {p_value:.3e}', transform=plt.gca().transAxes, 
+            fontsize=12, verticalalignment='top', bbox=dict(boxstyle="round", facecolor="white", alpha=0.7))
 
-    # plt.grid()
-    # plt.savefig('exponential_fit.jpg')
-    # 
+    plt.grid()
+    plt.savefig('exponential_fit.jpg')
+    
