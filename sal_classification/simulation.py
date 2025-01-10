@@ -1,14 +1,5 @@
 import os
 import sys
-
-# Set the working directory to the parent of the script's directory
-script_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.abspath(os.path.join(script_dir, os.pardir))
-os.chdir(parent_dir)
-
-# Optional: Add the parent directory to sys.path for imports
-sys.path.insert(0, parent_dir)
-
 from time import time
 import json
 import gc
@@ -128,7 +119,7 @@ if __name__ == '__main__':
         project=exp.pop("project"),
         config=config,
         name=name,
-        # mode='disabled',
+        mode='disabled',
     )
 
     t0 = time()
@@ -153,7 +144,7 @@ if __name__ == '__main__':
         # Load EMG data in uniform format
         print('\nLOADING EMG TENSOR...')
         emg_tensorizer = emg_tensorizer_def(dataset=exp['dataset'], path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
-                                            input_shape=data['input_shape'], fs=data['fs'], sessions=session_ids, intrasession=True, remove_baseline=exp['real_baseline'])
+                                            input_shape=data['input_shape'], fs=data['fs'], sessions=session_ids, Trms=exp['Trms'], intrasession=True, remove_baseline=exp['real_baseline'])
         emg_tensorizer.load_tensors()
 
         for session in tqdm(data['sessions']):
@@ -186,7 +177,7 @@ if __name__ == '__main__':
 
                 # Model/training set-up
                 Nv, Nh = emg_tensorizer.input_shape[0], emg_tensorizer.input_shape[1]
-                model = eval(exp['network'])(channels=np.prod((Nv, Nh)), input_shape=(Nv, Nh), num_classes=data['num_gestures'], crop=exp['crop']).to(device)
+                model = eval(exp['network'])(channels=np.prod((Nv, Nh)), input_shape=(Nv, Nh), num_classes=data['num_gestures'], p_input=exp['p_input']).to(device)
                 num_epochs = exp['num_epochs']
                 criterion = nn.CrossEntropyLoss(reduction='sum')
                 # optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
@@ -255,8 +246,8 @@ if __name__ == '__main__':
                 warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(test_loader)*data['num_repetitions'])
 
                 # Adapt to given test set
-                adapted_model.train()
-                adapted_model.input_dropout.eval()
+                # adapted_model.train()
+                # adapted_model.input_dropout.eval()
                 train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
                             warmup_scheduler=warmup_scheduler) # run training loop
 

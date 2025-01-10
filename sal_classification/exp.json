@@ -1,12 +1,12 @@
 {
-    "name": "test_cnn",
+    "name": "experiment16",
     "project": "simulation",
     "K": 1,
     "num_epochs": 1,
     "norm": 0,
     "lr": 0.05,
     "p_input": 0.5,
-    "crop": 0,
+    "crop": 2,
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
         "params": {
@@ -18,8 +18,8 @@
     "momentum": 0,
     "weight_decay":0,
     "network": "CapgMyoNet",
-    "dataset": "csl",
-    "emg_tensorizer": "CSLDataSegmentRMS",
+    "dataset": "capgmyo",
+    "emg_tensorizer": "CapgmyoData",
     "Trms": 75,
     "adaptation": "spatial-adaptation",
     "adaptation_params": {

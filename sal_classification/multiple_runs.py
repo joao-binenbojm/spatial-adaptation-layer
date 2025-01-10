@@ -3,13 +3,6 @@ import sys
 import json
 from tqdm import tqdm
 
-# Set the working directory to the parent of the script's directory
-script_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.abspath(os.path.join(script_dir, os.pardir))
-os.chdir(parent_dir)
-
-# Optional: Add the parent directory to sys.path for imports
-sys.path.insert(0, parent_dir)
 
 N_runs = len(os.listdir('./sal_classification/conditions'))
 exps = []
@@ -17,7 +10,7 @@ for idx in range(1, N_runs+1):
     with open(f'./sal_classification/conditions/{idx}.json', 'r') as file:
         exps.append(json.load(file))
 
-for exp in tqdm(exps):
+for exp in tqdm(exps[::-1]): # reverse order
 
     # Save dictionary as current condition to be tested
     with open('./sal_classification/exp.json', 'w') as file:

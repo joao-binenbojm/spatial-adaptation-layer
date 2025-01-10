@@ -30,14 +30,14 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'expandable_segments:True'
 
 # if __name__ == '__main__':
 
-exp_config = 'exp.json'
+exp_config = './sal_classification/exp.json'
 
 # Experiment condition loading
 print('#'*40 + '\n\n' + 'RUNNING INTERSESSION EXPERIMENT' + '\n\n' + '#'*40)
 
 with open(exp_config) as f:
     exp = json.load(f)
-with open('{}.json'.format(exp['dataset'])) as f:
+with open('./sal_classification/{}.json'.format(exp['dataset'])) as f:
     data = json.load(f)
 emg_tensorizer_def = eval(exp['emg_tensorizer'])
 name = exp['name'] # keep experiment name
@@ -122,16 +122,10 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
                     # Train the model
-                    # base_model.shift.xshift.requires_grad = False
-                    # base_model.shift.yshift.requires_grad = False
-                    base_model.spatial_adapt.xshift.requires_grad = False
-                    base_model.spatial_adapt.yshift.requires_grad = False
-                    base_model.spatial_adapt.rot_theta.requires_grad = False
-                    base_model.spatial_adapt.xscale.requires_grad = False
-                    base_model.spatial_adapt.yscale.requires_grad = False
-                    base_model.spatial_adapt.xshear.requires_grad = False
-                    base_model.spatial_adapt.yshear.requires_grad = False
+                    for param in base_model.spatial_adapt.parameters():
+                        param.requires_grad = False
                     base_model.baseline.requires_grad = False
+                    # base_model.train()
                     train_model(base_model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                                 warmup_scheduler=warmup_scheduler) # run training loop
                     
@@ -142,6 +136,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     base_model.eval()
                     with torch.no_grad():
                         all_labs, all_preds = test_model(base_model, test_loader)
+                        # all_labs, all_preds = test_model(base_model, train_loader)
+
 
                     acc = accuracy_score(all_labs, all_preds)
                     accs.append(acc)
@@ -169,6 +165,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
 
                 # Fine-tune to update model's shifting position
                 adapted_model = deepcopy(base_model)
+                # adapted_model.train()
+                # adapted_model.input_dropout.eval()
                 print('FINE-TUNING...')
                 if exp['adaptation'] == 'spatial-adaptation':
                     for param in adapted_model.parameters():
@@ -184,7 +182,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     adapted_model.spatial_adapt.xshear.requires_grad = exp['adaptation_params']["xshear"]
                     adapted_model.spatial_adapt.yshear.requires_grad = exp['adaptation_params']["yshear"]
                     
-                    adapted_model.input_dropout.train()
+                    # adapted_model.input_dropout.train()
                     if exp['learnable_baseline']:
                         adapted_model.baseline.requires_grad = True
 
@@ -197,10 +195,6 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 
                 optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
                                              lr=exp['lr'], weight_decay=exp['weight_decay'])
-                # optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, adapted_model.parameters()),
-                #                             lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
-                # for g in optimizer.param_groups:
-                    # g['lr'] = exp['lr']
                 scheduler_params = exp['scheduler']['params']
                 scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
                 scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
