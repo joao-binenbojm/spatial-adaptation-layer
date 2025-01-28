@@ -76,7 +76,7 @@ if __name__ == '__main__':
         # for fxmax in [62.5, 93.75, 125, 156.25, 187.5]:
 
     dists = []
-    df = df[df['SNR'] == 30].reset_index(drop=True)
+    df = df[df['SNR'] == 15].reset_index(drop=True)
     for idx in tqdm(range(df.shape[0])):
         Tx, Ty, theta, xscale, yscale = df.loc[idx, ['Tx', 'Ty', 'theta', 'xscale', 'yscale']]
         Tx_opt, Ty_opt, theta_opt, xscale_opt, yscale_opt = df.loc[idx, ['Tx_opt', 'Ty_opt', 'theta_opt', 'xscale_opt', 'yscale_opt']]
@@ -148,14 +148,14 @@ if __name__ == '__main__':
     # EXPONENTIAL FIT
 
     # Linearized model
-    log_b = np.log(df['sensitivity_avg'])
+    # log_b = np.log(df['sensitivity_avg'])
     X = sm.add_constant(df['Distance (mm)'])  # Add intercept for the regression
-    model = sm.OLS(log_b, X).fit()
-    b0_log, k = model.params  # Extract parameters (b0_log is log(b0))
-    b0 = np.exp(b0_log)  # Convert log(b0) back to b0
+    model = sm.OLS(df['sensitivity_avg'], X).fit()
+    b0, k = model.params  # Extract parameters (b0_log is log(b0))
+    # b0 = np.exp(b0_log)  # Convert log(b0) back to b0
 
     # Generate fitted curve
-    df['sensitivity_avg_fit'] = b0 * np.exp(k * df['Distance (mm)'])
+    df['sensitivity_avg_fit'] = b0  + k*df['Distance (mm)']
 
     # Plot with seaborn
     plt.figure(figsize=(8, 6))

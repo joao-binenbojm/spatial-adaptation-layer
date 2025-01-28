@@ -119,7 +119,7 @@ if __name__ == '__main__':
         project=exp.pop("project"),
         config=config,
         name=name,
-        mode='disabled',
+        # mode='disabled',
     )
 
     t0 = time()
@@ -235,8 +235,8 @@ if __name__ == '__main__':
                 adapted_model.spatial_adapt.xshear.requires_grad = exp['adaptation_params']["xshear"]
                 adapted_model.spatial_adapt.yshear.requires_grad = exp['adaptation_params']["yshear"]
                     
-                if exp['learnable_baseline']:
-                    adapted_model.baseline.requires_grad = True
+                # if exp['learnable_baseline']:
+                #     adapted_model.baseline.requires_grad = True
 
                 optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
                                     lr=exp['lr'], weight_decay=exp['weight_decay'])
@@ -246,7 +246,7 @@ if __name__ == '__main__':
                 warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(test_loader)*data['num_repetitions'])
 
                 # Adapt to given test set
-                # adapted_model.train()
+                # adapted_model.train() 
                 # adapted_model.input_dropout.eval()
                 train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
                             warmup_scheduler=warmup_scheduler) # run training loop

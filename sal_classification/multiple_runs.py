@@ -10,7 +10,7 @@ for idx in range(1, N_runs+1):
     with open(f'./sal_classification/conditions/{idx}.json', 'r') as file:
         exps.append(json.load(file))
 
-for exp in tqdm(exps[::-1]): # reverse order
+for exp in tqdm(exps): # reverse order
 
     # Save dictionary as current condition to be tested
     with open('./sal_classification/exp.json', 'w') as file:
