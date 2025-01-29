@@ -34,3 +34,7 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         extended_emg = self.extend_emg(emg_sal.reshape(emg_sal.shape[0], -1))
         sources = self.sep_mat(extended_emg)
         return sources
+    
+if __name__ == '__main__':
+    sda = SpatialDecompositionAdaptation((20,20), sep_mat=torch.zeros(20,20,20))
+    print(sda.sal.parameters())

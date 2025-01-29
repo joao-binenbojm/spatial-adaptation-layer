@@ -6,7 +6,9 @@ from tqdm import tqdm
 import torch
 import seaborn as sns
 from sklearn.cluster import KMeans
-from torch_pso import ParticleSwarmOptimizer
+# from torch_pso import ParticleSwarmOptimizer
+from optimizers import ParticleSwarmOptimizerCustom
+# from test import ParticleSwarmOptimizer
 
 from sal_decomposition.MUEdit.processing_tools import extend_emg, whiten_emg, get_silohuette, maxk
 # from sal_decomposition.MUEdit.processing_tools import batch_process_filters as get_pulse_trains
@@ -338,7 +340,7 @@ class SDAExperiment:
         sources = final_outputs.detach().cpu()
         return sources, losses
 
-    def particle_swarm_sda(self, emg_grid_transform, nepochs=100, n_particles=5, w=0.8, c1=0.1, c2=0.1, max_param=1.0, min_param=-1.0, device='cpu', loss='kurtosis', plot=1):
+    def particle_swarm_sda(self, emg_grid_transform, nepochs=100, n_particles=5, w=0.8, c1=0.1, c2=0.1, device='cpu', loss='kurtosis', plot=1):
         ''' Fit SDA to emg_grid data to find optimal affine parameters. If plot, plot learning of all parameters and loss over iterations.'''
         params = {'nepochs': nepochs, 'lr': lr}
         self.params.update(params)# keep track of chosing experimental parameter
@@ -349,9 +351,14 @@ class SDAExperiment:
             ica_loss = KurtosisLoss()
         else:
             ica_loss = NegentropyLoss()
-        optimizer = ParticleSwarmOptimizer(self.sda.sal.parameters(), inertial_weight=w,
+        print('INITIALIZING OPTIMIZER...')
+
+        # Initializing optimizer
+        max_params = [3.0/W, 3.0/H, 20/180, 1.2, 1.2, 0.0, 0.0]
+        min_params = [-3.0/W, -3.0/H, -20/180, 1/1.2, 1/1.2, 0.0, 0.0]
+        optimizer = ParticleSwarmOptimizerCustom(self.sda.sal.parameters(), inertial_weight=w,
                                             num_particles=n_particles, cognitive_coefficient=c1,
-                                            social_coefficient=c2, max_param_value=max_param, min_param_value=min_param)             
+                                            social_coefficient=c2, max_param_values=max_params, min_param_values=min_params)             
         # Collect output tensors
         output_list = []
         losses = []
@@ -373,7 +380,7 @@ class SDAExperiment:
                     optimizer.zero_grad()
                     return ica_loss(outputs)
                 
-                optimizer.step(closure)
+                loss = optimizer.step(closure)
                 # loss = ica_loss(outputs)
                 # optimizer.zero_grad()
                 # loss.backward()
@@ -384,7 +391,7 @@ class SDAExperiment:
                 print(f'PARAMS:\n xshift: {W*self.sda.sal.xshift.item()/2}, yshift: {H*self.sda.sal.yshift.item()/2}, theta: {self.sda.sal.rot_theta.item()} ')
                 print(f'xscale: {self.sda.sal.xscale.item()}, yscale: {self.sda.sal.yscale.item()}')
                 # Collect outputs and loss
-                output_list.append(outputs)
+                # output_list.append(outputs)
                 losses.append(loss.item())
                 xshifts.append(self.sda.sal.xshift.item())
                 yshifts.append(self.sda.sal.yshift.item())
@@ -544,14 +551,14 @@ if __name__ == '__main__':
     H, W, L = 25, 10, 50
     R = 16
     fxmax=125 / 125 # normalized spatial cutoff frequency
-    sampfactor=15
+    sampfactor=2
 
     duration = 20000 # number of time samples in EMG, equivalent of 10s with fs=2000Hz
     Tmean, ISV = 60, 0.2 # sample statistics of spikes # equivalent of 30Hz with fs=2000Hz
-    SNR = 1 # SNR for synthetic EMG
+    SNR = 5 # SNR for synthetic EMG
 
-    Tx, Ty, theta, xscale, yscale = -1.5, 2.5, 15*np.pi/180, 1.15, 0.85 # affine parameters applied
-    # Tx, Ty, theta, xscale, yscale = -1.5, 2.5, 0, 1, 1 # affine parameters applied
+    # Tx, Ty, theta, xscale, yscale = -1.5, 2.5, 15*np.pi/180, 1.15, 0.85 # affine parameters applied
+    Tx, Ty, theta, xscale, yscale = -1.5, 2.5, 0, 1, 1 # affine parameters applied
     # Tx, Ty, theta, xscale, yscale = -1.5, 2.2, 8*np.pi/180, 1.0, 1.0
     # Training params
     nepochs=120
@@ -613,7 +620,8 @@ if __name__ == '__main__':
     with torch.no_grad():
         print('TRAINING SDA MODULE...')
         exp.get_base_loss(emg_grid.to(torch.float32), loss=loss, device=device)
-    sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=nepochs, nepochs=nepochs//2, lr=lr, device=device, loss=loss, frozen_sep_mat=True)
+    # sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=nepochs, nepochs=nepochs//2, lr=lr, device=device, loss=loss, frozen_sep_mat=True)
+    sources, losses = exp.particle_swarm_sda(emg_grid_transform.to(torch.float32), nepochs=100, n_particles=100, w=1.2, c1=2.5, c2=0.0)
     print()
 
     # Performance metrics based on output losses
