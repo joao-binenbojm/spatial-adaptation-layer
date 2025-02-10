@@ -9,7 +9,7 @@ class KurtosisLoss(torch.nn.Module):
         
         # Calculate the mean and variance of each component along the batch dimension
         mean_Y = Y.mean(dim=0, keepdim=True)
-        centered_Y = Y - mean_Y
+        centered_Y = (Y - mean_Y) / (Y.std(dim=0, keepdim=True) + 1e-8)
 
         # Calculate kurtosis for each component
         # Fourth moment: E[Y_i^4]
@@ -19,10 +19,10 @@ class KurtosisLoss(torch.nn.Module):
         second_moment = torch.mean(centered_Y ** 2, dim=0)
         
         # Kurtosis for each component: (E[Y_i^4] / (E[Y_i^2])^2) - 3
-        kurtosis = fourth_moment / (second_moment ** 2) - 3
+        kurtosis = fourth_moment / (second_moment ** 2 + 1e-8) - 3
         
         # Loss as negative absolute kurtosis to maximize independence
-        loss = -torch.mean(torch.abs(kurtosis))
+        loss = -torch.mean(kurtosis)
         
         return loss
 
@@ -32,7 +32,7 @@ class NegentropyLoss(torch.nn.Module):
 
     def forward(self, y):
         # Enforce input y is zero-mean and unit variance
-        y = (y - y.mean(dim=0, keepdim=True)) / (y.std(dim=0, keepdim=True) + 1e-9)
+        y = (y - y.mean(dim=0, keepdim=True)) / (y.std(dim=0, keepdim=True) + 1e-8)
         
         # Log-cosh contrast function
         G_y_logcosh = torch.log(torch.cosh(y))

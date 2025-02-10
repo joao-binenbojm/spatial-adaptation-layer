@@ -7,7 +7,7 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         super(SpatialDecompositionAdaptation, self).__init__()
         self.grid_shape = grid_shape
         self.nchans = torch.prod(torch.tensor(grid_shape))
-        self.sal = SpatialAdaptation(input_shape=grid_shape, T=True, R=True, Sc=True, Sh=False)
+        self.sal = SpatialAdaptation(input_shape=grid_shape, T=True, R=True, Sc=False, Sh=False)
         self.bn = torch.nn.BatchNorm2d(1)
         # self.ycrop = ycrop
         # self.xcrop = xcrop
@@ -29,8 +29,9 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
 
     # Extend, whiten and separate sources
     def forward(self, emg):
-        emg = self.bn(emg) # apply batch norm
+        # emg = self.bn(emg) # apply batch norm
         emg_sal = self.sal(emg).squeeze()
+        
         extended_emg = self.extend_emg(emg_sal.reshape(emg_sal.shape[0], -1))
         sources = self.sep_mat(extended_emg)
         return sources
