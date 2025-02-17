@@ -1,6 +1,7 @@
 import torch
 from networks_utils import SpatialAdaptation
 
+
 class SpatialDecompositionAdaptation(torch.nn.Module):    
     # build the constructor
     def __init__(self, grid_shape, sep_mat, ycrop=0, xcrop=0, extension_factor=17):
@@ -9,8 +10,8 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         self.nchans = torch.prod(torch.tensor(grid_shape))
         self.sal = SpatialAdaptation(input_shape=grid_shape, T=True, R=True, Sc=False, Sh=False)
         self.bn = torch.nn.BatchNorm2d(1)
-        # self.ycrop = ycrop
-        # self.xcrop = xcrop
+        self.ycrop = ycrop
+        self.xcrop = xcrop
 
         self.sep_mat = torch.nn.Linear(sep_mat.shape[1], sep_mat.shape[0], bias=False)
         with torch.no_grad():
@@ -31,11 +32,31 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
     def forward(self, emg):
         # emg = self.bn(emg) # apply batch norm
         emg_sal = self.sal(emg).squeeze()
-        
+        emg_sal = emg_sal[:, self.ycrop:emg_sal.shape[1]-self.ycrop, self.xcrop:emg_sal.shape[2]-self.xcrop]
         extended_emg = self.extend_emg(emg_sal.reshape(emg_sal.shape[0], -1))
         sources = self.sep_mat(extended_emg)
         return sources
+
+    def get_extended_emg(self, emg):
+        '''Get the SAL, cropped + extended EMG from the original EMG.'''
+        emg_sal = self.sal(emg).squeeze()
+        emg_sal = emg_sal[:, self.ycrop:emg_sal.shape[1]-self.ycrop, self.xcrop:emg_sal.shape[2]-self.xcrop]
+        extended_emg = self.extend_emg(emg_sal.reshape(emg_sal.shape[0], -1))
+        return extended_emg
     
+    def refine_sep_mat(self, emg, dts, inv_cov):
+        '''Refine the separation vectors using the EMG and the estimated sources.'''
+        emg_sal = self.sal(emg).squeeze()
+        emg_sal = emg_sal[:, self.ycrop:emg_sal.shape[1]-self.ycrop, self.xcrop:emg_sal.shape[2]-self.xcrop]
+        extended_emg = self.extend_emg(emg_sal.reshape(emg_sal.shape[0], -1))
+        
+        new_sep_mat = torch.zeros(len(dts), extended_emg.shape[1])
+        for mu_idx in range(len(dts)):
+            new_sep_mat[mu_idx, :] = extended_emg[dts[mu_idx], :].mean(dim=0)
+        new_sep_mat = new_sep_mat @ inv_cov
+        self.sep_mat.weight = torch.nn.Parameter(new_sep_mat.to(self.sep_mat.weight.device))
+    
+
 if __name__ == '__main__':
     sda = SpatialDecompositionAdaptation((20,20), sep_mat=torch.zeros(20,20,20))
     print(sda.sal.parameters())

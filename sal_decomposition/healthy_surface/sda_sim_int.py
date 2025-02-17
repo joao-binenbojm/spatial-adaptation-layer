@@ -183,8 +183,8 @@ def loss_sampling(emg_grid_transform, sda, base_loss=1.0, T=(0.0, 0.0), batch_si
 
     # Getting torch meshgrid
     Tx, Ty = T
-    x = torch.linspace(-torch.tensor(7.5), torch.tensor(7.5), num_points)
-    y = torch.linspace(-torch.tensor(7.5), torch.tensor(7.5), num_points)
+    x = torch.linspace(-torch.tensor(5.0), torch.tensor(5.0), num_points)
+    y = torch.linspace(-torch.tensor(5.0), torch.tensor(5.0), num_points)
     loss_arr = torch.zeros(y.shape[0], x.shape[0])
 
     # Sample parameters
@@ -373,6 +373,15 @@ def get_sep_mat_torch(extended_emg, dts):
         sep_mat[idx, :] = (extended_emg[:, dts[idx].astype(int)]).mean(dim=1)
     return sep_mat
 
+def get_sep_mat_pseudo_inv(extended_emg, dts):
+    '''Takes in extended EMG and dischage times from different MUs and returns separation matrix all in PyTorch.'''
+    N = len(dts) # number of MUs
+    y_inv = torch.linalg.pinv(extended_emg, rcond=1e-2)
+    spike_trains = torch.zeros((N, extended_emg.shape[1])).to(torch.float64)
+    for idx in range(N):
+        spike_trains[idx, dts[idx]] = 1.0
+    sep_mat = spike_trains @ y_inv
+    return sep_mat
 
 def kurt_filt_sources(Y):
     # Y is assumed to have shape (batch_size, num_components)
@@ -390,7 +399,8 @@ def kurt_filt_sources(Y):
     
     # Kurtosis for each component: (E[Y_i^4] / (E[Y_i^2])^2) - 3
     kurtosis = fourth_moment / (second_moment ** 2) - 3
-    filt_kurt = kurtosis > kurtosis.median()
+    # filt_kurt = kurtosis > kurtosis.median()
+    # _, filt_kurt = torch.topk(kurtosis, 3)
     
     return filt_kurt
 
@@ -497,7 +507,7 @@ if __name__ == '__main__':
     # Apply filters to data and reshape into desired shape
     print('FILTER DATA...')
     emg = signal['data'][:, start:end]
-    emg = (emg - emg.mean(axis=1, keepdims=True)) / (emg.std() + 1e-9) # centering emg
+    emg = (emg - emg.mean(axis=1, keepdims=True)) / (emg.std() + 1e-12) # centering emg
     emg = bandpass_filter(notch_filter(emg, fsamp=fsamp), fsamp=fsamp)
     emg_grid = make_grid(emg, index_matrix)
     Nch = emg_grid.shape[2]*emg_grid.shape[3]
@@ -510,85 +520,78 @@ if __name__ == '__main__':
     # Get inverse covariance matrix
     # extended_emg_template = np.zeros((R*Nch, emg.shape[1] + R - 1))
     # extended_emg = torch.tensor(extend_emg(extended_emg_template, emg, R))#.to(torch.float32)
-    extended_emg = extend_emg_torch(emg_grid.squeeze().reshape(emg_grid.shape[0], -1), R).T
-    # inv_cov = get_inv_cov(extended_emg, explained_var=1.0-1e-14)
-    # inv_cov = get_inv_cov_torch(extended_emg, explained_var=1.0-1e-10)
-    inv_cov = get_inv_cov_tikhonov(extended_emg, reg=1e-7)
+    # extended_emg = extend_emg_torch(emg_grid.squeeze().reshape(emg_grid.shape[0], -1), R).T
+    # # inv_cov = get_inv_cov(extended_emg, explained_var=1.0-1e-14)
+    # inv_cov = get_inv_cov_torch(extended_emg, explained_var=1.0-1e-8)
 
     # Get separation matrix
     dts = edition['Dischargetimes']
     mu_dts = squeeze_dts(dts)
     mu_dts = filter_dts(mu_dts, start, end)
-    # mu_dts = [mu_dts[idx] for idx in np.random.choice(len(mu_dts), size=20, replace=False)]
-    # sep_mat = get_sep_mat(extended_emg, mu_dts) # get separation matrix and test for each dimension it is working
-    sep_mat = get_sep_mat_torch(extended_emg, mu_dts)
-    # sep_mat = torch.tensor(sep_mat @ inv_cov).to(torch.float32)
-    sep_mat = sep_mat @ inv_cov
+    # # mu_dts = [mu_dts[idx] for idx in np.random.choice(len(mu_dts), size=20, replace=False)]
+    # # sep_mat = get_sep_mat(extended_emg, mu_dts) # get separation matrix and test for each dimension it is working
+    # sep_mat = get_sep_mat_torch(extended_emg, mu_dts)
+    # # sep_mat = torch.tensor(sep_mat @ inv_cov).to(torch.float32)
+    # sep_mat = sep_mat @ inv_cov
 
     # Test that separation matrix is working
-    source_est = sep_mat @ extended_emg
+    # source_est = sep_mat @ extended_emg
+    # plt.figure()
+    # plt.plot(source_est[0,:1000]/source_est[0,:1000].max())
+    # plt.plot(edition['Pulsetrain'][0,0][0,start:start+1000] / edition['Pulsetrain'][0,0][0,start:start+1000].max())
+    # plt.legend(['Source Estimate', 'Extended EMG'])
+    # plt.savefig('test_sep_mat')
+
+    # # Get discharge times and compare with ground truth
+    # pred_dts, sils = get_silohuette(source_est.T)
+    # scores = spike_scores(mu_dts, pred_dts)
+    # print(scores)
+
+    # Crop observations and get new sep_mat
+    xcrop, ycrop = 2, 2
+    emg_grid_crop_train = emg_grid[:, :, xcrop:emg_grid.shape[2]-xcrop, ycrop:emg_grid.shape[3]-ycrop].clone()
+    Tx, Ty = 1, -1 # test integer shifts
+    emg_grid_crop_test = emg_grid[:, :, xcrop-Tx:emg_grid.shape[2]-xcrop-Tx, ycrop-Ty:emg_grid.shape[3]-ycrop-Ty].clone()
+
+    # Get crop sep_mat
+    extended_emg_crop_train = extend_emg_torch(emg_grid_crop_train.squeeze().reshape(emg_grid_crop_train.shape[0], -1), R).T
+    # sep_mat_crop_train = get_sep_mat_pseudo_inv(extended_emg_crop_train, mu_dts)
+    inv_cov = get_inv_cov_torch(extended_emg_crop_train, explained_var=1.0-1e-13)
+    # inv_cov = get_inv_cov_tikhonov(extended_emg_crop_train, reg=1e-7)
+    sep_mat_crop_train = get_sep_mat_torch(extended_emg_crop_train, mu_dts)
+    sep_mat_crop_train = sep_mat_crop_train @ inv_cov
+
+    # plt.figure()
+    # sns.heatmap(inv_cov)
+    # plt.savefig('inv_cov')
+
+    # Test that separation matrix is working
+    source_est_crop = sep_mat_crop_train @ extended_emg_crop_train
     plt.figure()
-    plt.plot(source_est[0,:1000]/source_est[0,:1000].max())
+    plt.plot(source_est_crop[0,:1000]/source_est_crop[0,:1000].max())
     plt.plot(edition['Pulsetrain'][0,0][0,start:start+1000] / edition['Pulsetrain'][0,0][0,start:start+1000].max())
-    plt.legend(['Source Estimate', 'Extended EMG'])
+    plt.legend(['Source Estimate', 'Pulse Trains'])
     plt.savefig('test_sep_mat')
 
-    # Get discharge times and compare with ground truth
-    pred_dts, sils = get_silohuette(source_est.T)
-    scores = spike_scores(mu_dts, pred_dts)
-    print(scores)
-
-    # Filter Sources based on kurtosis
-    filt_kurt = kurt_filt_sources(source_est.T)
-    sep_mat = sep_mat[filt_kurt, :] # remove MUs with below median kurtosis
+    # Filter sources based on kurtosis
+    print('Filtering sources based on kurtosis...')
+    filt_kurt = kurt_filt_sources(source_est_crop.T)
+    mu_dts = [mu_dts[idx] for idx in np.where(filt_kurt)[0]]
+    sep_mat_crop_train = sep_mat_crop_train[filt_kurt, :] # remove MUs with below median kurtosis
+    print(f'SOURCES KEPT: {filt_kurt.sum().item()}')
 
     # Initialize SDA module
-    ica_loss = KurtosisLoss()
-    H, W = emg_grid.shape[2:]
-    sda = SpatialDecompositionAdaptation(grid_shape=(H, W), sep_mat=sep_mat, extension_factor=R)
-    base_loss = get_base_loss(emg_grid.to(torch.float64), sda, batch_size=batch_size, loss='kurtosis', device='cpu')
+    H, W = emg_grid_crop_train.shape[2:]
+    sda = SpatialDecompositionAdaptation(grid_shape=(H, W), sep_mat=sep_mat_crop_train, extension_factor=R)
+    base_loss = get_base_loss(emg_grid_crop_train.to(torch.float64), sda, batch_size=batch_size, loss='kurtosis', device='cpu')
 
-    with torch.no_grad():
-        source_est = sda(emg_grid.to(torch.float64))
-    # for idx in range(source_est.shape[1]):
-    #     spktrain = np.zeros_like(source_est[:,idx].squeeze())
-    #     spktrain[mu_dts[idx].astype(int)] = 1
-    #     plt.figure()
-    #     plt.plot(spktrain[:1000])
-    #     plt.plot(source_est[:1000, idx]/source_est[:, idx].max())
-    #     plt.legend(['Spike Train', 'Source Estimate'])
-    #     # plt.show()
-    #     plt.savefig(f'spikes{idx+1}')
-
-    # LOADING SECOND EMG SIGNAL
-    file2 = 'S1_25_2mm_Session2_MUEdit_edited.mat'
-    signal2, edition2 = open_mat_output(DIR, file2)
-
-    # Apply filters to data and reshape into desired shape
-    print('FILTER DATA...')
-    emg2 = signal2['data']
-    start2, end2 = get_target_boundaries(signal2['target'].squeeze())
-    emg2 = emg2[:, start2:end2]
-    emg2 = (emg2 - emg2.mean(axis=1, keepdims=True)) / (emg2.std() + 1e-9) # centering emg
-    emg2 = bandpass_filter(notch_filter(emg2, fsamp=fsamp), fsamp=fsamp)
-    emg_grid2 = make_grid(emg2, index_matrix)
-
-    # Preprocess discharge times    
-    dts2 = edition2['Dischargetimes']
-    mu_dts2 = squeeze_dts(dts2)
-    mu_dts2 = filter_dts(mu_dts2, start2, end2)
-
-    plt.figure()
-    plt.imshow(emg_grid2.std(dim=[0,1]))
-    # plt.show()
-    plt.savefig('grid2')
-
-    # sda, sources, losses = search_fit_sda(emg_grid2, sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=200, nepochs=100, lr=1e-4, device='cuda')
-    loss_arr = loss_sampling(emg_grid2.to(torch.float64), sda.to(device), base_loss=base_loss, batch_size=batch_size, num_points=20, loss='kurtosis', device=device)
+    loss_arr = loss_sampling(emg_grid_crop_test.to(torch.float64), sda.to(device), base_loss=base_loss, T=(Tx, Ty), batch_size=batch_size, num_points=20, loss='kurtosis', device=device)
+    # sda, sources, losses = search_fit_sda(emg_grid_crop_test, sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=400, nepochs=50, lr=1e-3, device='cuda')
     # Get scores based on estimates sources after adaptation
     # pred_dts, sils = get_silohuette(sources)
 
-    # matches, match_scores = spike_matching(mu_dts2, pred_dts)
+    # matches, match_scores = spike_matching(mu_dts, pred_dts)
+    # print(match_scores)
     # # scores = spike_scores([dts for dts, filt in zip(mu_dts2, filt_kurt) if filt], pred_dts)
     # # print(scores)
     # print(match_scores)
