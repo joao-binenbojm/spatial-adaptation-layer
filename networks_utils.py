@@ -27,11 +27,12 @@ class Shift(torch.nn.Module):
 
 
 class SpatialAdaptation(torch.nn.Module):
-    def __init__(self, input_shape, T = True, R = True, Sc = True, Sh = True):
+    def __init__(self, input_shape, T = True, R = True, Sc = True, Sh = True, mode='bilinear'):
         super().__init__()
         self.Nv, self.Nh = input_shape
         self.register_buffer('yreg', torch.arange(self.Nv)) # original coordinates
         self.register_buffer('xreg', torch.arange(self.Nh)) # original coordinates
+        self.mode = mode
         # make the scaling...
         self.xshift = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) 
         self.yshift = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) 
@@ -73,7 +74,7 @@ class SpatialAdaptation(torch.nn.Module):
         theta = theta[0:2,:] # slice into submatrix expected by affine_grid
         theta = theta.repeat(N,1,1)
         grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=False)
-        xresamp = torch.nn.functional.grid_sample(x, grid)
+        xresamp = torch.nn.functional.grid_sample(x, grid, mode=self.mode)
         
         return xresamp
     

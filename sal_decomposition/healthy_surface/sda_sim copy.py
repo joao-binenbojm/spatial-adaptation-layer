@@ -12,7 +12,177 @@ from scipy.interpolate import griddata
 from sal_decomposition.MUEdit.processing_tools import bandpass_filter, notch_filter
 from sal_decomposition.sda import SpatialDecompositionAdaptation
 from sal_decomposition.utils import utils
-from sal_decomposition.utils.grid_indexing import index_matrix4
+from loss_functions import KurtosisLoss, NegentropyLoss
+from sklearn.cluster import KMeans
+from scipy.optimize import linear_sum_assignment
+from scipy.spatial import ConvexHull, Delaunay
+
+
+# 2mm grid index matrix: make each subgrid individually, then concatenate them
+grid1 = np.array([[48,40,43,44,45],
+         [47,49,33,34,45], 
+         [41,42,52,53,46],
+         [51,50,54,35,36],
+         [55,56,64,26,37],
+         [63,62,61,38,27],
+         [60,59,58,39,28],
+         [57,1,2,29,19],
+         [3,4,5,30,31],
+         [6,7,8,32,20],
+         [16,15,14,21,22],
+         [11,12,13,23,24],
+         [17,9,10,25,18]]) - 1
+
+grid2 = np.array([[61,55,53,62,63],
+         [61,56,54,52,64],
+         [57,43,49,50,51],
+         [60,58,44,42,41], # replaced 443 with 44
+         [34,59,47,46,45],
+         [25,33,39,40,48],
+         [27,26,36,37,38],
+         [1,28,30,29,35],
+         [3,2,24,32,31],
+         [16,14,21,22,23],
+         [7,8,18,19,20],
+         [5,6,10,9,17],
+         [4,15,13,12,11]]) + 64 - 1 # replaced 14 with 4
+
+grid3 = np.array([[62,53,52,51,50], # replaced 53 with 52
+         [54,55,49,41,42],
+         [56,64,43,44,45],
+         [63,57,46,47,48],
+         [58,59,40,39,38],
+         [60,61,37,36,35],
+         [34,33,29,30,31],
+         [25,26,32,24,23],
+         [27,28,22,21,20],
+         [1,19,17,10,12],
+         [2,18,9,11,13], # replaced 19 with 9
+         [3,4,7,15,14],
+         [3,6,8,5,16]]) + 64*2 - 1 # replaced 15 with 5 
+
+grid4 = np.array([[42,41,49,43,40],
+         [50,51,52,45,44],
+         [55,54,53,47,46],
+         [63,64,56,35,48],
+         [60,61,62,37,36],
+         [57,58,59,39,38],
+         [3,2,1,33,34],
+         [6,5,4,29,28],
+         [16,8,7,31,30],
+         [12,11,15,23,32],
+         [9,17,13,14,22],
+         [10,19,26,24,21],
+         [20,18,27,25,21]]) + 64*3 - 1
+
+# from collections import Counter
+# counts = Counter(list(grid2.flatten()))
+# dups = {key: counts[key] for key in counts.keys() if counts[key]>1}
+# missed = set(list(range(1,65))).difference(list(grid2.flatten()))
+# print()
+index_matrix2 = np.vstack((np.hstack((grid2, grid1)), np.hstack((grid3, grid4))))
+print()
+
+                 
+
+# Arnault's matrix reshaping
+index_matrix4 = np.array([[63, 38, 37, 12, 11, 63, 38, 37, 12, 11], # ankle
+                [62, 39, 36, 13, 10, 62, 39, 36, 13, 10],
+                [61, 40, 35, 14,  9, 61, 40, 35, 14,  9],
+                [60, 41, 34, 15,  8, 60, 41, 34, 15,  8],
+                [59, 42, 33, 16,  7, 59, 42, 33, 16,  7],
+                [58, 43, 32, 17,  6, 58, 43, 32, 17,  6],
+                [57, 44, 31, 18,  5, 57, 44, 31, 18,  5],
+                [56, 45, 30, 19,  4, 56, 45, 30, 19,  4],
+                [55, 46, 29, 20,  3, 55, 46, 29, 20,  3],
+                [54, 47, 28, 21,  2, 54, 47, 28, 21,  2],
+                [53, 48, 27, 22,  1, 53, 48, 27, 22,  1],
+                [52, 49, 26, 23,  0, 52, 49, 26, 23,  0],
+                [51, 50, 25, 24,  0, 51, 50, 25, 24,  0],
+                [0, 24, 25, 50, 51,  0, 24, 25, 50, 51],
+                [0, 23, 26, 49, 52,  0, 23, 26, 49, 52],
+                [1, 22, 27, 48, 53,  1, 22, 27, 48, 53],
+                [2, 21, 28, 47, 54,  2, 21, 28, 47, 54],
+                [3, 20, 29, 46, 55,  3, 20, 29, 46, 55],
+                [4, 19, 30, 45, 56,  4, 19, 30, 45, 56],
+                [5, 18, 31, 44, 57,  5, 18, 31, 44, 57],
+                [6, 17, 32, 43, 58,  6, 17, 32, 43, 58],
+                [7, 16, 33, 42, 59,  7, 16, 33, 42, 59],
+                [8, 15, 34, 41, 60,  8, 15, 34, 41, 60],
+                [9, 14, 35, 40, 61,  9, 14, 35, 40, 61],
+                [10, 13, 36, 39, 62, 10, 13, 36, 39, 62],
+                [11, 12, 37, 38, 63, 11, 12, 37, 38, 63]]) # knee
+
+# In the order of the cables, it is
+# GRID 4    GRID 3
+# GRID 1    GRID 2
+# So taking the 256 signals in signal.data as input, one must reshape in
+# the following way:
+
+index_matrix4[13:26,5:10] =  index_matrix4[13:26,5:10] + 64 
+index_matrix4[0:13,5:10] = index_matrix4[0:13,5:10] + 64 + 64 
+index_matrix4[0:13,0:5] = index_matrix4[0:13,0:5] + 64 + 64 + 64   
+
+# Make random index matrix for comparison purposes
+index_matrix_rand = np.r_[np.arange(256), np.array([0, 100, 121, 72])]
+np.random.shuffle(index_matrix_rand)
+index_matrix_rand = index_matrix_rand.reshape(26, 10)
+
+
+def average_cv(spike_trains):
+    """
+    Computes the average coefficient of variation (CV) across motor unit spike trains.
+
+    Parameters:
+    - spike_trains (list of np.array): List where each element is an array of spike times (in samples) for a motor unit.
+
+    Returns:
+    - float: Average coefficient of variation (CV) across motor units.
+    """
+    cvs = []
+
+    for spikes in spike_trains:
+        if len(spikes) < 2:
+            continue  # Skip motor units with fewer than 2 spikes
+
+        # Compute inter-spike intervals (ISI)
+        isi = np.diff(spikes)
+
+        # Calculate coefficient of variation (std / mean)
+        cv = np.std(isi) / np.mean(isi)
+        cvs.append(cv)
+
+    if not cvs:
+        raise ValueError("No valid motor units with at least two spikes.")
+
+    return np.mean(cvs)
+
+def handle_outliers(emg_grid):
+    '''Determine outlier channels, and replace them with average of neighbours.'''
+    # Determine coordinates of outliers
+    H, W = emg_grid.shape[2:]
+    emg_grid_var = emg_grid.var(dim=[0,1])
+    Q1, Q3 = torch.quantile(emg_grid_var.flatten(), 0.25), torch.quantile(emg_grid_var.flatten(), 0.75)
+    IQR = Q3 - Q1
+    lower, upper = Q1 -3.0*IQR, Q3 + 3.0*IQR
+    y, x = torch.where(torch.logical_or(emg_grid_var >= upper, emg_grid_var <= lower)) # only keep non-noisy channel
+    y, x = y.tolist(), x.tolist()
+
+    idx = 0
+    while idx < len(y): # for each outlier
+        l,r,b,t = x[idx] != 0, x[idx] != W-1, y[idx] != H-1, y[idx] != 0
+        subgrid = emg_grid[:, :, y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten(start_dim=2, end_dim=3)
+        subgridvar = emg_grid_var[y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten()
+        subgrid = subgrid[:, :, torch.logical_and(subgridvar < upper, subgridvar > lower)] # remove outlier channels included
+        if subgrid.shape[2] < 3: # if less than 3 valid neighbours, try again after filling in more channels
+            y.append(y[idx])
+            x.append(x[idx])
+        else:
+            emg_grid[:,:,y[idx], x[idx]] = subgrid.mean(dim=2) # compute as average of neighbours
+        idx += 1
+
+    return emg_grid
+
 
 if __name__ == '__main__':
 
@@ -25,6 +195,8 @@ if __name__ == '__main__':
     fsamp = 2048
     batch_size = 16384
     Tx_max, Ty_max, theta_max  = 2, 2, 10*np.pi/180
+    # Tx_max, Ty_max,   
+    # _max  = 0,0,0
     signal, edition = utils.open_mat_output(DIR, file)
     start, end = utils.get_target_boundaries(signal['target'].squeeze())
     torch.set_default_dtype(torch.float64)
@@ -38,9 +210,16 @@ if __name__ == '__main__':
     H, W = emg_grid.shape[2], emg_grid.shape[3]
     Nch = H*W
 
+    # Zero out outlier channels
+    # emg_grid_var = emg_grid.var(dim=[0,1])
+    # Q1, Q3 = torch.quantile(emg_grid_var.flatten(), 0.25), torch.quantile(emg_grid_var.flatten(), 0.75)
+    # IQR = Q3 - Q1
+    # threshold = Q3 + 1.5*IQR
+    # emg_grid[:, :, emg_grid_var > threshold] = 0.0 # set noisy channels to zero
+
     # Compute outliers as channels average of neighbours
     print('HANDLING OUTLIER CHANNELS...')
-    emg_grid = utils.handle_outliers(emg_grid)
+    emg_grid = handle_outliers(emg_grid)
     emg_grid = emg_grid / (emg_grid.std() + 1e-12)
 
     # Get separation matrix
@@ -48,11 +227,18 @@ if __name__ == '__main__':
     mu_dts = utils.squeeze_dts(dts)
     mu_dts = utils.filter_dts(mu_dts, start, end)
 
-    R = '1000/ch'
+    R = 16
+    # tikhonov = 1e-2
     explained_var = 1-1e-3
     Tx, Ty, theta = -1.25, 0.75, 0.0 #10*np.pi/180 # test integer shift
     delta_width, delta_height = utils.out_of_bounds_pixels(H, W, theta_max)
     xcrop, ycrop = Tx_max + floor(delta_width + 0.5), Ty_max + floor(delta_height + 0.5)
+
+    # for rdx, R in enumerate([8, 16, 32, '1000/ch']):
+    #     for tikhonov in [1e-6, 1e-4, 1e-2]:
+
+    # Apply gaussian blur to emg_grid
+    # emg_grid = gaussian_blur(emg_grid, kernel_size=3, sigma=sigma)
 
     # Crop observations and get new sep_mat
     print(f'CROPS: XCROP: {xcrop}, YCROP: {ycrop}')
@@ -69,18 +255,33 @@ if __name__ == '__main__':
     print(f'MIN DISTANCE: {min_distance} pixels')
 
     # Create mask based on transformed coordinates being within convex 
-    original_grid, transformed_grid, min_distance = utils.get_min_distance((H, W), Tx, Ty, theta)
-    print(f'MIN DISTANCE: {min_distance} pixels')
+    transformed_coordinates = transformed_grid[0, :, :, :2].cpu().numpy().reshape(-1, 2)
+    original_coordinates = original_grid[0, :, :, :2].cpu().numpy().reshape(-1, 2)
+    hull = ConvexHull(transformed_coordinates)
+    delaunay = Delaunay(transformed_coordinates[hull.vertices])
+    inside = delaunay.find_simplex(original_coordinates) >= 0
+    mask = torch.tensor(inside.reshape(H, W))
+    
+    # Find most conservative crop
+    lcrop, rcrop, bcrop, tcrop = W//2 - 1, W//2 - 1, H//2 - 1, H//2 - 1
+    min_crop = False
+    while not min_crop:
+        crop_sum = lcrop + rcrop + bcrop + tcrop
+        if mask[tcrop:H-bcrop, lcrop-1:W-rcrop].all() and lcrop > 0:
+            lcrop -= 1
+        if mask[tcrop:H-bcrop, lcrop:W-(rcrop-1)].all() and rcrop > 0:
+            rcrop -= 1
+        if mask[tcrop-1:H-bcrop, lcrop:W-rcrop].all() and tcrop > 0:
+            tcrop -= 1
+        if mask[tcrop:H-(bcrop-1), lcrop:W-rcrop].all() and bcrop > 0:
+            bcrop -= 1
+        if crop_sum == lcrop + rcrop + bcrop + tcrop: # if no more changes, we have found the minimum crop
+            min_crop = True
 
-    # Create mask based on transformed coordinates being within convex 
-    lcrop, rcrop, bcrop, tcrop = utils.get_min_conservative_crop((H, W), transformed_grid, original_grid)
 
     # Test that masking channels is a valid solution
     print('TESTING MASKING CHANNELS...')
     emg_grid_valid = emg_grid[:, :, tcrop:H-bcrop, lcrop:W-rcrop]
-    if R == '1000/ch':
-        R = 1000//(emg_grid_valid.shape[2]*emg_grid_valid.shape[3])
-
     extended_emg_valid = utils.extend_emg_torch(emg_grid_valid.squeeze().reshape(emg_grid_valid.shape[0], -1), R).T
     # inv_cov_valid = get_inv_cov_tikhonov(extended_emg_valid, reg=tikhonov)
     inv_cov_valid = utils.get_inv_cov_torch(extended_emg_valid, explained_var=explained_var)
@@ -157,20 +358,25 @@ if __name__ == '__main__':
     # plt.savefig('test_sep_mat')
 
     sda.sal.mode = 'bilinear'
-    loss_arr = utils.loss_sampling(emg_grid_test, sda.to(device), base_loss=base_loss, T=(Tx, Ty), bounds=(2.0, 2.0), batch_size=batch_size, num_points=20, loss='kurtosis', device=device)
+    # loss_arr = loss_sampling(emg_grid_test, sda.to(device), base_loss=base_loss, T=(Tx, Ty), bounds=(2.0, 2.0), batch_size=batch_size, num_points=20, loss='kurtosis', device=device)
     losses = utils.search_fit_sda(emg_grid_test, sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=500, nepochs=50, lr=5e-3, boundaries=(2.5, 2.5, 10.0*np.pi/180), device='cuda')
     
     # Get new inverse covariance
     sda = sda.to('cpu')
     sda.sal.mode = 'bicubic'
 
+    # # Initial performance
+    # with torch.no_grad():
+    #     sources = sda(emg_grid_test)
+    # pred_dts, sils = get_silohuette(sources)
+    # matches, f1_scores, sensitivities, precisions = spike_matching(mu_dts, pred_dts, fs=fsamp)
+    # print(f1_scores)
+
     # Obtain new separation matrix with all valid channels
     print('Obtaining new separation matrix...')
     sda.lcrop, sda.rcrop = lcrop, rcrop
     sda.bcrop, sda.tcrop = bcrop, tcrop
     emg_grid_valid = emg_grid[:, :, tcrop:H-bcrop, lcrop:W-rcrop]
-    if R == '1000/ch':
-        R = 1000/(emg_grid_valid.shape[2]*emg_grid_valid.shape[3])
     # emg_grid_valid = emg_grid * mask # mask out channels that are out of bounds
     extended_emg_valid = utils.extend_emg_torch(emg_grid_valid.squeeze().reshape(emg_grid_valid.shape[0], -1), R).T
     # inv_cov_valid = get_inv_cov_tikhonov(extended_emg_valid, reg=tikhonov)
@@ -188,13 +394,17 @@ if __name__ == '__main__':
     matches, f1_scores, sensitivities, precisions = utils.spike_matching(mu_dts, pred_dts, fs=fsamp)
     print(f1_scores)
 
+    # # Get initial source estimates
+    # with torch.no_grad():
+    #     sources = sda(emg_grid_test)
+    # pred_dts, sils = get_silohuette(sources)
 
     # Get new covariance matrix
     print('Getting new inverse covariance...')
     sda.lcrop, sda.rcrop, sda.bcrop, sda.tcrop = 0, 0, 0, 0
-    if R == '1000/ch':
-        R = 1000/(emg_grid_test.shape[2]*emg_grid_test.shape[3])
+    # extended_emg_sal = sda.get_extended_emg(emg_grid_test).T
     extended_emg_test = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T
+    # inv_cov_test = get_inv_cov_tikhonov(extended_emg_sal, reg=1e-12)
     inv_cov_test = utils.get_inv_cov_torch(extended_emg_test, explained_var=1-1e-12)
     sep_mat_test = utils.get_sep_mat_torch(extended_emg_test, pred_dts)
     sep_mat_test = sep_mat_test @ inv_cov_test

@@ -14,9 +14,10 @@ from sal_decomposition.sda import SpatialDecompositionAdaptation
 from loss_functions import KurtosisLoss, NegentropyLoss
 from sklearn.cluster import KMeans
 from scipy.optimize import linear_sum_assignment
+from scipy.spatial import ConvexHull, Delaunay
 
 
-def apply_affine(emg_grid, Tx=0, Ty=0, theta=0, xscale=1, yscale=1):
+def apply_affine(emg_grid, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, mode='bilinear'):
     '''Applies an affine transformation to grid coordinates prior to downsampling to simulate a near-perfect interpolation.'''
 
     N, C, H, W = emg_grid.shape
@@ -44,7 +45,7 @@ def apply_affine(emg_grid, Tx=0, Ty=0, theta=0, xscale=1, yscale=1):
     theta = theta[0:2,:] # slice into submatrix expected by affine_grid
     theta = theta.repeat(N,1,1)
     grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=False)
-    xresamp = torch.nn.functional.grid_sample(emg_grid, grid)
+    xresamp = torch.nn.functional.grid_sample(emg_grid, grid, mode=mode)
     
     return xresamp
 
@@ -214,7 +215,10 @@ def loss_sampling(emg_grid_transform, sda, base_loss=1.0, T=(0.0, 0.0), bounds=(
         ica_loss = NegentropyLoss()
 
     # Getting torch meshgrid
-    Tx, Ty = T
+    if not T:
+        Tx, Ty = W//2, H//2
+    else:
+        Tx, Ty = T
     xbounds, ybounds = bounds
     x = torch.linspace(-torch.tensor(xbounds), torch.tensor(xbounds), num_points)
     y = torch.linspace(-torch.tensor(ybounds), torch.tensor(ybounds), num_points)
@@ -251,7 +255,7 @@ def loss_sampling(emg_grid_transform, sda, base_loss=1.0, T=(0.0, 0.0), bounds=(
                     sda.sal.xshift.copy_(xshift)
                     sda.sal.yshift.copy_(yshift)
                     batch_output = sda(emg_batch)
-                    batch_outputs.append(ica_loss(batch_output).item())
+                    batch_outputs.append(ica_loss(batch_output))
                 
                 batch_losses.append(batch_outputs)
             
@@ -265,8 +269,9 @@ def loss_sampling(emg_grid_transform, sda, base_loss=1.0, T=(0.0, 0.0), bounds=(
     plt.figure()
     ax = sns.heatmap(np.array(loss_arr.cpu())/base_loss)
     ax.set(xlabel='Circumferential Shifts (mm)', ylabel='Longitudinal Shifts (mm)')
-    ax.text(np.where(np.array(x.cpu())>=-Tx)[0][0] + 0.5, 
-            np.where(y.cpu()>=-Ty)[0][0]+0.5, 'X', 
+    if T:
+        ax.text(np.where(np.array(x.cpu())>=-Tx)[0][0] + 0.5, 
+                np.where(y.cpu()>=-Ty)[0][0]+0.5, 'X', 
             color='green', ha='center', va='center', fontsize=16)
     
     plt.savefig('loss_landscape.jpg')
@@ -600,3 +605,180 @@ def out_of_bounds_pixels(height: int, width: int, theta: float):
     delta_height = (new_height - height) / 2
     
     return delta_width, delta_height
+
+def handle_outliers(emg_grid):
+    '''Determine outlier channels, and replace them with average of neighbours.'''
+    # Determine coordinates of outliers
+    H, W = emg_grid.shape[2:]
+    emg_grid_var = emg_grid.var(dim=[0,1])
+    Q1, Q3 = torch.quantile(emg_grid_var.flatten(), 0.25), torch.quantile(emg_grid_var.flatten(), 0.75)
+    IQR = Q3 - Q1
+    lower, upper = Q1 -3.0*IQR, Q3 + 3.0*IQR
+    y, x = torch.where(torch.logical_or(emg_grid_var >= upper, emg_grid_var <= lower)) # only keep non-noisy channel
+    y, x = y.tolist(), x.tolist()
+
+    idx = 0
+    while idx < len(y): # for each outlier
+        l,r,b,t = x[idx] != 0, x[idx] != W-1, y[idx] != H-1, y[idx] != 0
+        subgrid = emg_grid[:, :, y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten(start_dim=2, end_dim=3)
+        subgridvar = emg_grid_var[y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten()
+        subgrid = subgrid[:, :, torch.logical_and(subgridvar < upper, subgridvar > lower)] # remove outlier channels included
+        if subgrid.shape[2] < 3: # if less than 3 valid neighbours, try again after filling in more channels
+            y.append(y[idx])
+            x.append(x[idx])
+        else:
+            emg_grid[:,:,y[idx], x[idx]] = subgrid.mean(dim=2) # compute as average of neighbours
+        idx += 1
+
+    return emg_grid
+
+
+def get_min_distance(grid_shape, Tx, Ty, theta):
+    '''Obtain minimum distance of a given electrode in transformed grid to an electrode in the old grid coordiantes, averaged across electrodes.'''
+    H, W = grid_shape
+    original_grid = get_transformed_grid((1, 1, H, W))
+    transformed_grid = get_transformed_grid((1, 1, H, W), Tx, Ty, theta)
+    center = transformed_grid[0:1, H//2:H//2 + 1, W//2:W//2 + 1, :]
+    distances = torch.linalg.norm(original_grid - center, dim=3)
+    min_distance = torch.min(distances)
+    return original_grid, transformed_grid, min_distance
+
+def get_min_conservative_crop(grid_shape, transformed_grid, original_grid):
+    '''Given a transformed grid and original grid coordinates, find the smallest crop for each side such that no dead channels are included.'''
+    H, W = grid_shape
+    transformed_coordinates = transformed_grid[0, :, :, :2].cpu().numpy().reshape(-1, 2)
+    original_coordinates = original_grid[0, :, :, :2].cpu().numpy().reshape(-1, 2)
+    hull = ConvexHull(transformed_coordinates)
+    delaunay = Delaunay(transformed_coordinates[hull.vertices])
+    inside = delaunay.find_simplex(original_coordinates) >= 0
+    mask = torch.tensor(inside.reshape(H, W))
+    
+    # Find most conservative crop
+    lcrop, rcrop, bcrop, tcrop = W//2 - 1, W//2 - 1, H//2 - 1, H//2 - 1
+    min_crop = False
+    while not min_crop:
+        crop_sum = lcrop + rcrop + bcrop + tcrop
+        if mask[tcrop:H-bcrop, lcrop-1:W-rcrop].all() and lcrop > 0:
+            lcrop -= 1
+        if mask[tcrop:H-bcrop, lcrop:W-(rcrop-1)].all() and rcrop > 0:
+            rcrop -= 1
+        if mask[tcrop-1:H-bcrop, lcrop:W-rcrop].all() and tcrop > 0:
+            tcrop -= 1
+        if mask[tcrop:H-(bcrop-1), lcrop:W-rcrop].all() and bcrop > 0:
+            bcrop -= 1
+        if crop_sum == lcrop + rcrop + bcrop + tcrop: # if no more changes, we have found the minimum crop
+            min_crop = True
+    return lcrop, rcrop, bcrop, tcrop
+
+
+def refine_sep_mat(emg_grid_transform, sda, base_loss=1.00, nepochs=50, batch_size=2048, lr=1e-4, device='cpu', loss='kurtosis', R=16):
+    ''' Fit SDA to emg_grid data to find optimal affine parameters. If plot, plot learning of all parameters and loss over iterations.'''
+    
+    N, C, H, W = emg_grid_transform.shape
+    if loss == 'kurtosis':
+        ica_loss = KurtosisLoss()
+    else:
+        ica_loss = NegentropyLoss()
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, sda.parameters()),
+                                                lr=lr)                 
+
+    # Collect output tensors
+    output_list = []
+    losses = []
+    xshifts,yshifts,angles,xscales,yscales = [], [], [], [], []
+
+    # Freeze all parameters except for SAL parameters
+    for param in sda.parameters():
+        param.requires_grad = False
+    
+    # Searching through initial conditions
+    print('SAMPLING AND EVALUATING INITIAL CONDITIONS...')
+    losses = torch.zeros(npoints)
+    # engine = scipy.stats.qmc.LatinHypercube(d=5)
+    engine = scipy.stats.qmc.LatinHypercube(d=3)
+    init_params = 2*torch.tensor(engine.random(n=npoints)).to(torch.float64)-1 # scale from [0,1] to [-1, 1]
+    init_params[:,0], init_params[:,1], init_params[:, 2] = 2*boundaries[0]*init_params[:,0]/W, 2*boundaries[1]*init_params[:,1]/H, boundaries[2]*init_params[:, 2]/np.pi
+    # init_params[:, 3] = torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) ) # generates scalings appropriately
+    # init_params[:, 4] = torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
+
+    init_params = init_params.to(device)
+    sda.train() # leave batch norm parameters adaptive
+    with torch.no_grad():
+        
+        for npoint in tqdm(range(npoints)):
+            # Set initial conditions
+            sda.sal.xshift.data, sda.sal.yshift.data, sda.sal.rot_theta.data = init_params[npoint, :3]
+            # sda.sal.xscale.data, sda.sal.yscale.data = init_params[npoint, 3:]
+
+            # Evaluate loss function at given condition across batches
+            n_batches = emg_grid_transform.shape[0] // batch_size
+            total_loss = 0
+            
+            for batch_idx in range(n_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min((batch_idx + 1) * batch_size, emg_grid_transform.shape[0])
+                batch = emg_grid_transform[start_idx:end_idx]
+                
+                # Get source estimates for this batch
+                source_est = sda(batch.to(device))
+                total_loss += ica_loss(source_est).item()
+            
+            # Average loss across batches
+            avg_loss = total_loss / n_batches
+            losses[npoint] = avg_loss
+
+        if npoints > 0:
+            losses = losses / base_loss # normalize by baseline loss
+            sda.sal.xshift.data, sda.sal.yshift.data, sda.sal.rot_theta.data = init_params[losses.argmax(), :3] # get best initialization
+            # sda.sal.xscale.data, sda.sal.yscale.data = init_params[losses.argmax(), 3:]
+            print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=torch.min(torch.tensor([npoints, 5])))}')
+
+    # Make SAL parameters learnable
+    # for param in sda.sal.parameters():
+    if frozen_sep_mat:
+        for param in sda.sal.parameters():
+            param.requires_grad = True        
+    else:
+        for param in sda.parameters():
+            param.requires_grad = True
+
+    # Loop through the DataLoader
+    print('TRAINING FROM BEST INIT. CONDITION...')
+    losses = []
+    for ne in tqdm(range(nepochs)):
+        # Forward pass through the model
+        n_batches = emg_grid_transform.shape[0] // batch_size
+        epoch_loss = 0
+        
+        for batch_idx in range(n_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min((batch_idx + 1) * batch_size, emg_grid_transform.shape[0])
+            batch = emg_grid_transform[start_idx:end_idx]
+            
+            # Get source estimates for this batch
+            source_est = sda(batch.to(device))
+            batch_loss = ica_loss(source_est)
+            
+            # Backprop for this batch
+            optimizer.zero_grad()
+            batch_loss.backward()
+            optimizer.step()
+            
+            epoch_loss += batch_loss.item()
+        
+        # Average loss for the epoch
+        epoch_loss = epoch_loss / n_batches
+
+        print('LOSS:', epoch_loss/base_loss)
+        optimizer.step()
+        print(f'PARAMS:\n xshift: {W*sda.sal.xshift.item()/2}, yshift: {H*sda.sal.yshift.item()/2}, theta: {sda.sal.rot_theta.item()} ')
+        # print(f'xscale: {sda.sal.xscale.item()}, yscale: {sda.sal.yscale.item()}')
+        # Collect outputs and loss
+        losses.append(epoch_loss)
+        xshifts.append(sda.sal.xshift.item())
+        yshifts.append(sda.sal.yshift.item())
+        angles.append(sda.sal.rot_theta.item())
+        # xscales.append(sda.sal.xscale.item())
+        # yscales.append(sda.sal.yscale.item())
+
+    return losses
