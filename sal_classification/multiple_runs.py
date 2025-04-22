@@ -18,6 +18,6 @@ for exp in tqdm(exps): # reverse order
 
     # Run intersession script
     try:
-        os.system('python ./sal_classification/simulation.py') # if you can run the intersession file with the given conditions do so, otherwise move onto the next conditions
+        os.system('python ./sal_classification/intersession_new.py') # if you can run the intersession file with the given conditions do so, otherwise move onto the next conditions
     except:
         continue

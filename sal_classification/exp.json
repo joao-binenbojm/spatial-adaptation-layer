@@ -1,10 +1,10 @@
 {
-    "name": "experiment4",
+    "name": "cnn-test-newlr",
     "project": "classification-simulation",
     "K": 1,
-    "num_epochs": 1,
+    "num_epochs": 10,
     "norm": 0,
-    "lr": 0.05,
+    "lr": 0.01,
     "p_input": 0.5,
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
@@ -16,10 +16,10 @@
     "batch_size": 128,
     "momentum": 0,
     "weight_decay": 0,
-    "network": "CapgMyoNet",
+    "network": "LogisticRegressor",
     "dataset": "csl",
-    "emg_tensorizer": "CSLDataSegmentRMS",
-    "Trms": 75,
+    "emg_tensorizer": "CSLData",
+    "Trms": 0.25,
     "adaptation": "spatial-adaptation",
     "adaptation_params": {
         "xshift": true,
@@ -31,6 +31,7 @@
         "yshear": true
     },
     "real_baseline": false,
-    "learnable_baseline": false,
-    "adabatch": false
+    "learnable_baseline": true,
+    "adabatch": false,
+    "gest_subset": [7, 8, 9, 10, 11, 12, 13, 14, 15]
 }

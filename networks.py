@@ -22,7 +22,8 @@ class CapgMyoNet(nn.Module):
         self.spatial_adapt = SpatialAdaptation(input_shape)
 
         if baseline:
-            self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
+            # self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
+            self.baseline = torch.nn.parameter.Parameter(torch.randn(1, 1, input_shape[0], input_shape[1])) # makes random inputs
         else:
             self.register_buffer('baseline', torch.zeros(1, 1, input_shape[0], input_shape[1])) # original coordinates
 
@@ -129,7 +130,6 @@ class LogisticRegressor(nn.Module):
         self.fc = nn.Linear(self.channels, self.num_classes)
         # self.sm = nn.Softmax(dim=1)
 
-
     def forward(self, x):
         # x = median_pool_2d(x, kernel_size=(3,1), padding=(1,0)) # perform median filtering step
         x = self.bn(x) # applies normalization procedure after usual filtering operations
@@ -142,87 +142,152 @@ class LogisticRegressor(nn.Module):
         return x.reshape(x.shape[0], self.num_classes)
 
 
-class ImageClassifier(nn.Module):
-    def __init__(self, num_classes=8, channels=64, in_channels=1, inter_channels=16, input_shape=(7, 24), conv_kernel_size=[3, 3], pool_kernel_size=[2, 2],
-                  baseline=True, p_input=0.0, track_running_stats=True):
-        super(ImageClassifier, self).__init__()
+class SpatialAdaptationHyser(nn.Module): # uses two sub Spatial Adaptation modules
+    def __init__(self, input_shape):
+        super(SpatialAdaptationHyser, self).__init__()
+        self.input_shape = input_shape
+        self.input_shape_split = (input_shape[0]//2, input_shape[1])
+        self.spatial_adapt1 = SpatialAdaptation(self.input_shape_split)
+        self.spatial_adapt2 = SpatialAdaptation(self.input_shape_split)
+    
+    # @property
+    # def xshift(self):
+    #     return torch.stack([self.spatial_adapt1.xshift, self.spatial_adapt2.xshift])
+    
+    # @property
+    # def yshift(self):
+    #     return torch.stack([self.spatial_adapt1.yshift, self.spatial_adapt2.yshift])
+    
+    # @property
+    # def rot_theta(self):
+    #     return torch.stack([self.spatial_adapt1.rot_theta, self.spatial_adapt2.rot_theta])
 
+    def forward(self, x):
+        xtop = x[:, :, :self.input_shape[0]//2, :] # top half
+        xbot = x[:, :, self.input_shape[0]//2:, :] # bottom half
+        xtop = self.spatial_adapt1(xtop) # perform image resampling step
+        xbot = self.spatial_adapt2(xbot)
+        x = torch.cat((xtop, xbot), dim=2) # concatenate the two halves
+        return x
 
-        # Parameters to log for optimization
-        self.inter_channels = inter_channels
-        self.conv_kernel_size = conv_kernel_size
-        self.pool_kernel_size = pool_kernel_size
+class LogisticRegressorHyser(nn.Module):
 
-        self.spatial_adapt = SpatialAdaptation(input_shape)
+    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, p_input=0.0, track_running_stats=True):
+        super(LogisticRegressorHyser, self).__init__()
 
+        self.channels = channels
+        self.kernel_sz = kernel_sz
+
+        self.input_shape = input_shape
+        self.num_classes = num_classes
+        
         if baseline:
             self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
         else:
             self.register_buffer('baseline', torch.zeros(1, 1, input_shape[0], input_shape[1])) # original coordinates
 
         self.input_dropout = nn.Dropout(p=p_input)
+        self.bn = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
+        # self.shift = Shift(input_shape)
+        # self.spatial_adapt1 = SpatialAdaptation(input_shape_split)
+        # self.spatial_adapt2 = SpatialAdaptation(input_shape_split)
+        self.spatial_adapt = SpatialAdaptationHyser(input_shape)
 
-        self.batchnorm0 = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
-
-        kernel_sz_1 = (conv_kernel_size[0], conv_kernel_size[0]*2)
-        # First convolution block with BatchNorm and MaxPooling
-        self.conv1 = FactorizedDepthwiseSeparableConv(in_channels=in_channels, 
-                                                      out_channels=inter_channels, 
-                                                      kernel_size=kernel_sz_1, 
-                                                      padding=1)
-
-        pool_kernel_size_1 = (pool_kernel_size[0], pool_kernel_size[0])
-        self.bn1 = nn.BatchNorm2d(inter_channels)
-        self.pool1 = nn.MaxPool2d(kernel_size=pool_kernel_size_1, stride=2)  # Pooling with a customizable kernel size
-
-        kernel_sz_2 = (conv_kernel_size[1], conv_kernel_size[1]*2)
-        # Second convolution block with BatchNorm and MaxPooling
-        self.conv2 = FactorizedDepthwiseSeparableConv(in_channels=inter_channels, 
-                                                      out_channels=inter_channels * 2, 
-                                                      kernel_size=kernel_sz_2, 
-                                                      padding=1)
-
-        pool_kernel_size_2 = (pool_kernel_size[1], pool_kernel_size[1])                                      
-        self.bn2 = nn.BatchNorm2d(inter_channels * 2)
-        self.pool2 = nn.MaxPool2d(kernel_size=pool_kernel_size_2, stride=2)  # Pooling with a customizable kernel size
-
-        # Calculate the flattened size after the two convolutions and pooling operations
-        conv_output_size = self._get_conv_output_size(input_shape, in_channels)
-
-        # Fully connected layer for classification
-        self.fc = nn.Linear(conv_output_size, num_classes)
-
-    def _get_conv_output_size(self, shape, in_channels):
-        """Calculate the flattened size after convolutions and pooling."""
-        # Create a dummy input with the given input shape to pass through conv layers
-        with torch.no_grad():
-            dummy_input = torch.zeros(1, in_channels, *shape)
-            x = self.pool1(F.relu(self.bn1(self.conv1(dummy_input))))
-            x = self.pool2(F.relu(self.bn2(self.conv2(x))))
-            output_size = x.view(1, -1).size(1)  # Flatten and get the size
-        return output_size
+        self.fc = nn.Linear(self.channels, self.num_classes)
+        # self.sm = nn.Softmax(dim=1)
 
     def forward(self, x):
-
-        # Data prepration
-        x = self.batchnorm0(x)
-        x = x - self.baseline # perform baseline normalization
+        # x = median_pool_2d(x, kernel_size=(3,1), padding=(1,0)) # perform median filtering step
+        x = self.bn(x) # applies normalization procedure after usual filtering operations
+        x = x - self.baseline # subtract baseline for baseline normalization
         x = self.spatial_adapt(x) # perform image resampling step
+        x = x.reshape(x.shape[0],-1) # flatten for determining classification
         x = self.input_dropout(x)
-
-
-        # First convolution block
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = self.pool1(x)
-
-        # Second convolution block
-        x = F.relu(self.bn2(self.conv2(x)))
-        x = self.pool2(x)
-
-        # Flatten the feature map before the linear layer
-        x = x.view(x.size(0), -1)
-
-        # Fully connected layer for classification
         x = self.fc(x)
+        # x = self.sm(x)
+        return x.reshape(x.shape[0], self.num_classes)
 
-        return x
+# class ImageClassifier(nn.Module):
+#     def __init__(self, num_classes=8, channels=64, in_channels=1, inter_channels=16, input_shape=(7, 24), conv_kernel_size=[3, 3], pool_kernel_size=[2, 2],
+#                   baseline=True, p_input=0.0, track_running_stats=True):
+#         super(ImageClassifier, self).__init__()
+
+
+#         # Parameters to log for optimization
+#         self.inter_channels = inter_channels
+#         self.conv_kernel_size = conv_kernel_size
+#         self.pool_kernel_size = pool_kernel_size
+
+#         self.spatial_adapt = SpatialAdaptation(input_shape)
+
+#         if baseline:
+#             self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
+#         else:
+#             self.register_buffer('baseline', torch.zeros(1, 1, input_shape[0], input_shape[1])) # original coordinates
+
+#         self.input_dropout = nn.Dropout(p=p_input)
+
+#         self.batchnorm0 = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
+
+#         kernel_sz_1 = (conv_kernel_size[0], conv_kernel_size[0]*2)
+#         # First convolution block with BatchNorm and MaxPooling
+#         self.conv1 = FactorizedDepthwiseSeparableConv(in_channels=in_channels, 
+#                                                       out_channels=inter_channels, 
+#                                                       kernel_size=kernel_sz_1, 
+#                                                       padding=1)
+
+#         pool_kernel_size_1 = (pool_kernel_size[0], pool_kernel_size[0])
+#         self.bn1 = nn.BatchNorm2d(inter_channels)
+#         self.pool1 = nn.MaxPool2d(kernel_size=pool_kernel_size_1, stride=2)  # Pooling with a customizable kernel size
+
+#         kernel_sz_2 = (conv_kernel_size[1], conv_kernel_size[1]*2)
+#         # Second convolution block with BatchNorm and MaxPooling
+#         self.conv2 = FactorizedDepthwiseSeparableConv(in_channels=inter_channels, 
+#                                                       out_channels=inter_channels * 2, 
+#                                                       kernel_size=kernel_sz_2, 
+#                                                       padding=1)
+
+#         pool_kernel_size_2 = (pool_kernel_size[1], pool_kernel_size[1])                                      
+#         self.bn2 = nn.BatchNorm2d(inter_channels * 2)
+#         self.pool2 = nn.MaxPool2d(kernel_size=pool_kernel_size_2, stride=2)  # Pooling with a customizable kernel size
+
+#         # Calculate the flattened size after the two convolutions and pooling operations
+#         conv_output_size = self._get_conv_output_size(input_shape, in_channels)
+
+#         # Fully connected layer for classification
+#         self.fc = nn.Linear(conv_output_size, num_classes)
+
+#     def _get_conv_output_size(self, shape, in_channels):
+#         """Calculate the flattened size after convolutions and pooling."""
+#         # Create a dummy input with the given input shape to pass through conv layers
+#         with torch.no_grad():
+#             dummy_input = torch.zeros(1, in_channels, *shape)
+#             x = self.pool1(F.relu(self.bn1(self.conv1(dummy_input))))
+#             x = self.pool2(F.relu(self.bn2(self.conv2(x))))
+#             output_size = x.view(1, -1).size(1)  # Flatten and get the size
+#         return output_size
+
+#     def forward(self, x):
+
+#         # Data prepration
+#         x = self.batchnorm0(x)
+#         x = x - self.baseline # perform baseline normalization
+#         x = self.spatial_adapt(x) # perform image resampling step
+#         x = self.input_dropout(x)
+
+
+#         # First convolution block
+#         x = F.relu(self.bn1(self.conv1(x)))
+#         x = self.pool1(x)
+
+#         # Second convolution block
+#         x = F.relu(self.bn2(self.conv2(x)))
+#         x = self.pool2(x)
+
+#         # Flatten the feature map before the linear layer
+#         x = x.view(x.size(0), -1)
+
+#         # Fully connected layer for classification
+#         x = self.fc(x)
+
+#         return x

@@ -23,7 +23,7 @@ class EMGFrameLoader(Dataset):
                 self.std = stats['std']
             self.stats['mean'] = self.mean
             self.stats['std'] = self.std
-            self.X = (self.X - self.mean)/(self.std + 1.e-12)
+            self.X = (self.X - self.mean)/(self.std + 1e-12)
 
         elif norm == -1: # scale between [-1, 1]
             if train:

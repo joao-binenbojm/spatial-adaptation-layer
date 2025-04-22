@@ -78,12 +78,10 @@ if __name__ == '__main__':
                 H, W = emg_grid.shape[2], emg_grid.shape[3]
                 Nch = H*W
 
-                # Zero out outlier channels --> refactor into function
-                emg_grid_var = emg_grid.var(dim=[0,1])
-                Q1, Q3 = torch.quantile(emg_grid_var.flatten(), 0.25), torch.quantile(emg_grid_var.flatten(), 0.75)
-                IQR = Q3 - Q1
-                threshold = Q3 + 1.5*IQR
-                emg_grid[:, :, emg_grid_var > threshold] = 0.0 # set noisy channels to zero
+                # Compute outliers as channels average of neighbours
+                print('HANDLING OUTLIER CHANNELS...')
+                emg_grid = utils.handle_outliers(emg_grid)
+                emg_grid = emg_grid / (emg_grid.std() + 1e-12)
 
                 # Get separation matrix
                 dts = edition['Dischargetimes']
@@ -213,17 +211,18 @@ if __name__ == '__main__':
                             wandb.log({'f1_test': np.mean(f1_scores)})
                             wandb.log({'#mu_test': sum([f1_score > 0.8 for f1_score in f1_scores])})
 
-                            # Update separation matrix based on estimated spikes and transformed EMG data
-                            print('Getting new inverse covariance...')
+                            # Get sep mat based on real test data
+                            print('Getting separation matrix based on real test data...')
                             sda.lcrop, sda.rcrop, sda.bcrop, sda.tcrop = 0, 0, 0, 0
-                            extended_emg_sal = sda.get_extended_emg(emg_grid_test).T
-                            # inv_cov_test = get_inv_cov_tikhonov(extended_emg_sal, reg=1e-12)
-                            inv_cov_test = utils.get_inv_cov_torch(extended_emg_sal, explained_var=1-1e-12)
-                            sep_mat_test = utils.get_sep_mat_torch(extended_emg_sal, pred_dts)
+                            if R == '1000/ch':
+                                R = 1000/(emg_grid_test.shape[2]*emg_grid_test.shape[3])
+                            extended_emg_test = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T
+                            inv_cov_test = utils.get_inv_cov_torch(extended_emg_test, explained_var=1-1e-12)
+                            sep_mat_test = utils.get_sep_mat_torch(extended_emg_test, pred_dts)
                             sep_mat_test = sep_mat_test @ inv_cov_test
-                            sda.sep_mat.weight = torch.nn.Parameter(sep_mat_test) # initialize separation matrix
                             with torch.no_grad():
-                                sources = sda(emg_grid_test)
+                                sources = (sep_mat_test @ extended_emg_test).T
+
                             pred_dts, sils = utils.get_silohuette(sources)
                             matches, f1_scores, sensitivities, precisions = utils.spike_matching(mu_dts, pred_dts, fs=fsamp)
                             print(f1_scores)
