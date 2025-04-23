@@ -78,39 +78,71 @@ class SpatialAdaptation(torch.nn.Module):
         
         return xresamp
     
-    # def get_grid(self, x):
-    #     '''Regrids input image based on affine shift parameters.'''
-    #     dev = x.device # assuming x and model are on the same device
-    #     N, C, _, _ = x.shape
-    #     H, W = self.Nv, self.Nh
-    #     # xshift_std, yshift_std = 2*self.xshift/(W), 2*self.yshift/(H) # scale shifts in the range (-1 to 1) to keep xshift and yshift in pixel coords
-    #     xshift_std, yshift_std = self.xshift, self.yshift # scale shifts in the range (-1 to 1) to keep xshift and yshift in pixel coords
-    #     T = torch.cat([ # Translation Matrix
-    #         torch.stack([torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev), xshift_std]).unsqueeze(0),
-    #         torch.stack([torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev), yshift_std]).unsqueeze(0),
-    #         torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
-    #     ], dim=0)
-    #     R = torch.cat([ # Rotation Matrix
-    #         torch.stack([torch.cos(self.rot_theta), -torch.sin(self.rot_theta), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-    #         torch.stack([torch.sin(self.rot_theta), torch.cos(self.rot_theta), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-    #         torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
-    #     ], dim=0)
-    #     Sc = torch.cat([ # Scaling Matrix
-    #         torch.stack([self.xscale, torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-    #         torch.stack([torch.tensor(0.0).to(dev), self.yscale, torch.tensor(0.0).to(dev)]).unsqueeze(0),
-    #         torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
-    #     ], dim=0)
-    #     Sh = torch.cat([ # Shear Matrix
-    #         torch.stack([torch.tensor(1.0).to(dev), self.xshear, torch.tensor(0.0).to(dev)]).unsqueeze(0),
-    #         torch.stack([self.yshear, torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-    #         torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
-    #     ], dim=0)
 
-    #     theta = Sh @ Sc @ R @ T
-    #     theta = theta[0:2,:] # slice into submatrix expected by affine_grid
-    #     theta = theta.repeat(N,1,1)
-    #     grid = torch.nn.functional.affine_grid(theta, size = (N,C,H,W), align_corners=False)
-    #     return grid[0,:,:,:] # same grid for all time steps
+class SpatialAdaptationHyser(torch.nn.Module):
+    def __init__(self, input_shape, T = True, R = True, Sc = True, Sh = True, mode='bilinear'):
+        super().__init__()
+        self.Nv, self.Nh = input_shape
+        self.register_buffer('yreg', torch.arange(self.Nv)) # original coordinates
+        self.register_buffer('xreg', torch.arange(self.Nh)) # original coordinates
+        self.mode = mode
+        # make the scaling...
+        self.xshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T),
+                                              torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T)]) 
+        self.yshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T),
+                                              torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T)]) 
+        self.rot_theta = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=R),
+                                              torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=R)]) 
+        self.xscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc),
+                                              torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc)]) 
+        self.yscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc),
+                                              torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc)])
+        self.xshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh),
+                                              torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh)])
+        self.yshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh),
+                                              torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh)])
+  
+    def apply_sal(self, x, idx):
+        '''Same as in the main '''
+        dev = x.device # assuming x and model are on the same device
+        N, C, _, _ = x.shape
+        H, W = self.Nv//2, self.Nh
+        T = torch.cat([ # Translation Matrix
+            torch.stack([torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev), self.xshift[idx]]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev), self.yshift[idx]]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
+        ], dim=0)
+        R = torch.cat([ # Rotation Matrix
+            torch.stack([torch.cos(self.rot_theta[idx]), -torch.sin(self.rot_theta[idx]), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.sin(self.rot_theta[idx]), torch.cos(self.rot_theta[idx]), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
+        ], dim=0)
+        Sc = torch.cat([ # Scaling Matrix
+            torch.stack([self.xscale[idx], torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), self.yscale[idx], torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
+        ], dim=0)
+        Sh = torch.cat([ # Shear Matrix
+            torch.stack([torch.tensor(1.0).to(dev), self.xshear[idx], torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([self.yshear[idx], torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
+        ], dim=0)
+
+        theta = Sh @ Sc @ R @ T
+        theta = theta[0:2,:] # slice into submatrix expected by affine_grid
+        theta = theta.repeat(N,1,1)
+        grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=False)
+        xresamp = torch.nn.functional.grid_sample(x, grid, mode=self.mode)
+        
+        return xresamp
+    
+    def forward(self, x):
+        xtop = x[:, :, :self.Nv//2, :] # top half
+        xbot = x[:, :, self.Nv//2:, :] # bottom half
+        xtop = self.apply_sal(xtop, 0) # perform image resampling step
+        xbot = self.apply_sal(xbot, 1) # perform image resampling step
+        x = torch.cat((xtop, xbot), dim=2) # concatenate the two halves   
+        return x
 
 ## Median pooling utils and function
 def unpack_param_2d(param):

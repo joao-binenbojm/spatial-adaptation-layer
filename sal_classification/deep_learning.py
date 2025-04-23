@@ -21,6 +21,7 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
     running_correct = 0
     xshift, yshift, baseline = [], [], []
+    xshift2, yshift2 = [], []
     weights = []
     running_losses = []
 
@@ -43,10 +44,11 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
 
             # TENSORBOARD
             running_loss += loss.item()
-
             baseline.append(model.baseline.cpu().detach().numpy().ravel())
-            xshift.append(model.spatial_adapt.xshift.cpu().detach().numpy())
-            yshift.append(model.spatial_adapt.yshift.cpu().detach().numpy())
+
+            # if 'spatial' in model.input_transform.name:
+            #     xshift.append(model.input_transform.xshift.cpu().detach().numpy())
+            #     yshift.append(model.input_transform.yshift.cpu().detach().numpy())
 
             _, predicted = torch.max(outputs.data, 1)
             running_correct += (predicted.squeeze() == labels.view(-1)).sum().item()
@@ -68,13 +70,17 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
         print('TOTAL TIME ELAPSED: {}h, {}min'.format(h, m))
     
     # Plot learnable shifts and baseline
+    # xshift, yshift = 
     # if 'model.shift' in locals():
-    plt.figure()
-    plt.plot(xshift)
-    plt.plot(yshift)
-    plt.legend(['xshift', 'yshift'])
-    plt.savefig('shifts.jpg')
-    plt.close()
+    # plt.figure()
+    # plt.plot(xshift)
+    # plt.plot(yshift)
+    # if 'spatial_adapt1' in dir(model):
+    #     plt.plot(xshift2)
+    #     plt.plot(yshift2)
+    # plt.legend(['xshift', 'yshift', 'xshift2', 'yshift2'])
+    # plt.savefig('shifts.jpg')
+    # plt.close()
 
     # if 'model.baseline' in locals():
     plt.figure()

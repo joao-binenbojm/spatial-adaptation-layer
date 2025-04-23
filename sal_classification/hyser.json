@@ -1,11 +1,11 @@
 {
-    "DIR": "../datasets/hyser/pr_dataset",
+    "DIR": "../datasets/hyser2/pr_dataset",
     "num_gestures": 34,
     "num_repetitions": 2,
     "input_shape": [32, 8],
     "dataset_name": "hyser",
     "fs": 2048,
     "rep_duration": 4,
-    "subs": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20],
+    "subs": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19],
     "sessions": [0,1]
 }

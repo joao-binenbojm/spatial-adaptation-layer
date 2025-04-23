@@ -727,10 +727,10 @@ class HyserData(EMGData):
         subset_func = lambda x: labels[int(x.split('sample')[1].split('.')[0])]-1 in self.gest_subset # checks if gesture is in subset
         filenames = list(filter(subset_func, filenames)) # filter out gestures not in subset
         for gdx, gest in enumerate(self.gest_subset):
-            label_keys = [key for key in labels.keys() if labels[key] == str(gest+1)]
+            label_keys = [key for key in labels.keys() if labels[key] == gest+1]
             for rep_idx, label_key in enumerate(label_keys): # for each of the two trials per gesture
                 record = wfdb.rdrecord(os.path.join(SESSION_DIR, f"maintenance_raw_sample{label_key}"))
-                signal = record.p_signal
+                emg = record.p_signal
                 emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
                 if self.rms:
                     emg = get_rms_signal(emg, Mrms=self.Mrms)

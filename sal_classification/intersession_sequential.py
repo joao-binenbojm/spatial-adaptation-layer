@@ -21,9 +21,10 @@ import matplotlib.pyplot as plt
 from tensorize_emg import CapgmyoData, CSLData, HyserData #CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS
 from torch_loaders import EMGFrameLoader
 from sal_classification.deep_learning import train_model, test_model, init_adabn
-from networks import CapgMyoNet, LogisticRegressor #, LogisticRegressorHyser
+from networks import CapgMyoNet, LogisticRegressor, LogisticRegressorHyser
 from networks_utils import median_pool_2d
 from emg_processing import majority_voting_full_segment, majority_voting_segments
+
 
 def handle_outliers(emg_grid):
     '''Determine outlier channels, and replace them with average of neighbours.'''
@@ -50,6 +51,7 @@ def handle_outliers(emg_grid):
         idx += 1
 
     return emg_grid
+
 
 # from torch.utils.tensorboard import SummaryWriter
 # writer = SummaryWriter('runs/capgmyo')
@@ -126,9 +128,9 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                                                                                 test_session=test_idx,
                                                                                 train_session=train_idx,
                                                                                 rep_idx=adapt_rep)
-                
+
                 # Handle outliers
-                # X_train, X_adapt, X_test = handle_outliers(X_train), handle_outliers(X_adapt), handle_outliers(X_test)
+                X_train, X_adapt, X_test = handle_outliers(X_train), handle_outliers(X_adapt), handle_outliers(X_test)
 
                 # Get PyTorch DataLoaders
                 train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=exp['norm'])
@@ -142,24 +144,25 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 num_epochs = exp['num_epochs']
                 criterion = nn.CrossEntropyLoss()
                 if not is_model_trained:
-                    
-                    # Set input transformation for adaptation in case of the Hyser dataset
-                    if exp['dataset'] == 'hyser': 
-                        input_transform_name = exp['adaptation'] + '-hyser'
-                    else: 
-                        input_transform_name = exp['adaptation']
 
-                    base_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=len(exp['gest_subset']),#data['num_gestures'], 
-                                                        p_input=exp['p_input'], baseline=exp['learnable_baseline'], input_transform_name=input_transform_name).to(device)
+                    base_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_gestures'], 
+                                                        p_input=exp['p_input'], baseline=exp['learnable_baseline']).to(device)
+                    # optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, base_model.parameters()),
+                    #                        lr=exp['lr'], momentum=exp['momentum'], weight_decay=exp['weight_decay'])
                     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, base_model.parameters()),
                                                 lr=exp['lr'], weight_decay=exp['weight_decay'])
                     scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
                     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
                     # Train the model
-                    # for param in base_model.input_transform.parameters():
-                    #     param.requires_grad = False
-                    # base_model.baseline.requires_grad = False
+                    if exp['dataset'] == 'hyser':
+                        for param1, param2 in zip(base_model.spatial_adapt1.parameters(), base_model.spatial_adapt2.parameters()):
+                            param1.requires_grad, param2.requires_grad = False, False
+                    else:
+                        for param in base_model.spatial_adapt.parameters():
+                            param.requires_grad = False
+                    base_model.baseline.requires_grad = False
+                    base_model.scaling.requires_grad = False ## TESTING!! ## 
                     train_model(base_model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                                 warmup_scheduler=warmup_scheduler) # run training loop
                     
@@ -176,25 +179,45 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 accs.append(acc)
                 print('Test Accuracy:', acc)
 
+                    # # Majority voting, with number of frames depending on dataset used
+                    # if exp['dataset'] == 'capgmyo':
+                    #     maj_all_preds = majority_voting_segments(all_preds, Mmj=75, durations=test_durations)
+                    #     maj_acc = accuracy_score(all_labs, maj_all_preds)
+                    #     maj_accs.append(maj_acc)
+                    #     print('Majority Voting Accuracy:', maj_acc)
+                    
+                    # else: # if csl, compute one MJV predition for each test segment
+                    #     maj_all_preds, maj_all_labs = majority_voting_full_segment(all_preds, test_durations), majority_voting_full_segment(all_labs, test_durations)
+                    #     maj_acc = accuracy_score(maj_all_labs, maj_all_preds)
+                    #     maj_accs.append(maj_acc)
+                    #     print('Majority Voting Accuracy:', maj_acc)
+                    
+                # else:
+                #     print('Using previously trained model (same test accuracy as previously)...')
+                #     accs.append(acc)
+                #     maj_accs.append(maj_acc)
+                #     print('Test Accuracy:', acc)
+                #     print('Majority Voting Accuracy:', maj_acc)
+
                 # Fine-tune to update model's shifting position
                 adapted_model = deepcopy(base_model)
                 # adapted_model.train()
-                # adapted_model.input_dropout.train()
+                # adapted_model.input_dropout.eval()
                 print('FINE-TUNING...')
                 if exp['adaptation'] == 'spatial-adaptation':
                     for param in adapted_model.parameters():
                         param.requires_grad = False
+
                     for param_name in exp['adaptation_params'].keys():
-                        param = getattr(adapted_model.input_transform, param_name)
-                        if isinstance(param, nn.ParameterList):
-                            for p in param: p.requires_grad = exp['adaptation_params'][param_name]
+                        if exp['dataset'] == 'hyser': # if hyser, we get two of each
+                            param1 = getattr(adapted_model.spatial_adapt1, param_name)
+                            param1.requires_grad = exp['adaptation_params'][param_name]
+                            param2 = getattr(adapted_model.spatial_adapt2, param_name)
+                            param2.requires_grad = exp['adaptation_params'][param_name]
                         else:
+                            param = getattr(adapted_model.spatial_adapt, param_name)
                             param.requires_grad = exp['adaptation_params'][param_name]
 
-                elif exp['adaptation'] == 'linear-layer':
-                    for param in adapted_model.input_transform.parameters():
-                        param.requires_grad = True
-                    
                 elif exp['adaptation'] == 'fine-tuning':
                     adapted_model.train()
                     for param in adapted_model.parameters(): # make all parameters trainable
@@ -203,27 +226,61 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 if exp['adabatch']:
                     init_adabn(adapted_model)
 
-                if exp['learnable_baseline']:
-                    adapted_model.baseline.requires_grad = True
+                # if exp['learnable_baseline']:
+                #     adapted_model.baseline.requires_grad = True
                 
-                adapted_model.adaptation_phase = True # set model to adaptation phase
-                optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
-                                             lr=exp['lr'], weight_decay=exp['weight_decay'])
-                scheduler_params = exp['scheduler']['params']
-                scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
-                scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
-                warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(adapt_loader)*data['num_repetitions'])
-                train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
-                            warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
+                    # adapted_model.scaling.requires_grad = True
+                
+                # 2 independent optimization steps
+                # adapted_model.train()
+                print('SPATIAL ADAPTATION...')
+                for idx in range(4):
+                    if idx == 1:
+                        print('BASELINE ADAPTATION...')
+                        # After spatial adapt, adapt ONLY LBN
+                        for param in adapted_model.parameters(): # freeze all parameters
+                          param.requires_grad = False
+                        if exp['learnable_baseline']:
+                            adapted_model.baseline.requires_grad = True
+                    elif idx == 2: # adapt scalings
+                        print('SCALING ADAPTATION...')
+                        if exp['learnable_baseline']:
+                            adapted_model.baseline.requires_grad = False
+                        adapted_model.scaling.requires_grad = True
+                    elif idx == 3: # joint fine-tuning of both
+                        print('JOINT ADAPTATION...')
+                        # Final adaptation with all adaptable layers.
+                        for param_name in exp['adaptation_params'].keys():
+                            if exp['dataset'] == 'hyser': # if hyser, we get two of each
+                                param1 = getattr(adapted_model.spatial_adapt1, param_name)
+                                param1.requires_grad = exp['adaptation_params'][param_name]
+                                param2 = getattr(adapted_model.spatial_adapt2, param_name)
+                                param2.requires_grad = exp['adaptation_params'][param_name]
+                            else:
+                                param = getattr(adapted_model.spatial_adapt, param_name)
+                                param.requires_grad = exp['adaptation_params'][param_name]
+
+                    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
+                                                lr=exp['lr'], weight_decay=exp['weight_decay'])
+                    scheduler_params = exp['scheduler']['params']
+                    scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
+                    scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
+                    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(adapt_loader)*data['num_repetitions'])
+                
+                    # Adapt spatial layer 
+                    train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
+                                warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
 
                 # Fetch params
-                if exp['adaptation'] == 'spatial-adaptation':
-                    for param_name in exp['adaptation_params'].keys():
-                        param = getattr(adapted_model.input_transform, param_name)
-                        if isinstance(param, nn.ParameterList): learned_params[param_name].append([p.item() for p in param])
-                        else: learned_params[param_name].append(param.item())
-                else:
-                    for key in learned_params.keys(): learned_params[key].append(0.0) # set fetched parameters to 0 if no spatial adaptation
+                for param_name in exp['adaptation_params'].keys():
+                    if exp['dataset'] == 'hyser':
+                        param1 = getattr(adapted_model.spatial_adapt1, param_name).item()
+                        param2 = getattr(adapted_model.spatial_adapt2, param_name).item()
+                        param_vals = [param1, param2]
+                        learned_params[param_name].append(param_vals)
+                    else:
+                        param = getattr(adapted_model.spatial_adapt, param_name)
+                        learned_params[param_name].append(param.item())
 
                 # Testing loop over test loader (K-shot)
                 print('TESTING...')
@@ -234,6 +291,19 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 tuned_acc = accuracy_score(tuned_all_labs, tuned_all_preds)
                 tuned_accs.append(tuned_acc)
                 print('Tuned Test Accuracy:', tuned_acc)
+
+                # # Majority voting, with number of frames depending on dataset used
+                # if exp['dataset'] == 'capgmyo':
+                #     maj_all_preds = majority_voting_segments(all_preds, Mmj=75, durations=test_durations)
+                #     maj_tuned_acc = accuracy_score(all_labs, maj_all_preds)
+                #     maj_tuned_accs.append(maj_tuned_acc)
+                #     print('Majority Voting Tuned Accuracy:', maj_tuned_acc)
+                
+                # else: # if csl, compute one MJV predition for each test segment
+                #     maj_all_preds, maj_all_labs = majority_voting_full_segment(all_preds, test_durations), majority_voting_full_segment(all_labs, test_durations)
+                #     maj_tuned_acc = accuracy_score(maj_all_labs, maj_all_preds)
+                #     maj_tuned_accs.append(maj_tuned_acc)
+                #     print('Majority Voting Tuned Accuracy:', maj_tuned_acc)
 
                 # Get confusion matrix
                 labs = np.arange(data['num_gestures'])
@@ -246,12 +316,20 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 data_dict = {"Subject": subs, "Train Sessions": train_sessions, "Test Sessions": test_sessions, "Adaptation Repetitions": adapt_reps,
                              "Accuracy": accs, "Tuned Accuracy": tuned_accs}
                 data_dict.update(learned_params)
+                # arr = np.array([subs, train_sessions, test_sessions, adapt_reps, accs, tuned_accs, xshifts, yshifts, rot_thetas, xscales, yscales, xshears, yshears]).T
+                # df = pd.DataFrame(data=arr, columns=['Subjects', 'Train Sessions', 'Test Sessions', 'Adaptation Repetitions', 'Accuracy', 'Tuned Accuracy', 'xshift', 'yshift', 'rot_theta','xscale','yscale','xshear','yshear'])
                 df = pd.DataFrame(data_dict)
                 df.to_csv(f"{name}.csv")
                 print(f'----------------------Affine learned params----------------------A')
                 for param_key in learned_params.keys():
                     print(f'The {param_key} is {learned_params[param_key][-1]}')
-      
+                # print(f'The x shift is {adapted_model.spatial_adapt.xshift}')
+                # print(f'The y shift is {adapted_model.spatial_adapt.yshift}')
+                # print(f'The rotation theta angle is {adapted_model.spatial_adapt.rot_theta}')
+                # print(f'The x scale is {adapted_model.spatial_adapt.xscale}')
+                # print(f'The y scale is {adapted_model.spatial_adapt.yscale}')
+                # print(f'The x shear is {adapted_model.spatial_adapt.xshear}')
+                # print(f'The y shear is {adapted_model.spatial_adapt.yshear}')        
         is_model_trained = False
 
 # Save experiment data in .csv file
