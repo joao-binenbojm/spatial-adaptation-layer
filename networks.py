@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from networks_utils import Shift, SpatialAdaptation, SpatialAdaptationHyser, SpatialAdaptationGrabmyo, LocallyConnected2d, FactorizedDepthwiseSeparableConv
+from networks_utils import SpatialAdaptation, SpatialAdaptationHyser, SpatialAdaptationGrabmyo, LocallyConnected2d, FactorizedDepthwiseSeparableConv
 
 
 # Canonical EMG network from original capgmyo paper
@@ -67,8 +67,8 @@ class CapgMyoNet(nn.Module):
         # self.apply(CapMyoNet.init_weights)
 
         # Set input transformation method
+        self.adaptation_phase = False
         self.input_transform_name = input_transform_name
-
         if input_transform_name == 'spatial-adaptation':
             self.input_transform = SpatialAdaptation(input_shape)
         elif input_transform_name == 'spatial-adaptation-hyser':
@@ -104,8 +104,9 @@ class CapgMyoNet(nn.Module):
         # x = torch.transpose(x, 1, 2) # tranpose required as reshape is not the default ordering
 
         x = self.batchnorm0(x)
-        x = x - self.baseline # perform baseline normalization
-        x = self.input_transform(x) # perform image resampling step
+        if self.adaptation_phase:
+            x = x - self.baseline # perform baseline normalization
+            x = self.input_transform(x) # perform image resampling step
         x = self.input_dropout(x)
         # x = self.batchnorm0(x)
         x = self.relu1(self.batchnorm1(self.conv1(x)))
@@ -172,47 +173,6 @@ class LogisticRegressor(nn.Module):
         x = self.input_dropout(x)
         x = self.fc(x)
         return x.reshape(x.shape[0], self.num_classes)
-
-# class LogisticRegressorHyser(nn.Module):
-
-#     def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, p_input=0.0, track_running_stats=True):
-#         super(LogisticRegressorHyser, self).__init__()
-
-#         self.channels = channels
-#         self.kernel_sz = kernel_sz
-
-#         self.input_shape = input_shape
-#         self.num_classes = num_classes
-        
-#         if baseline:
-#             self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
-#         else:
-#             self.register_buffer('baseline', torch.zeros(1, 1, input_shape[0], input_shape[1])) # original coordinates
-
-#         self.input_dropout = nn.Dropout(p=p_input)
-#         self.bn = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
-#         # self.shift = Shift(input_shape)
-#         self.input_shape_split = (input_shape[0]//2, input_shape[1])
-#         self.spatial_adapt1 = SpatialAdaptation(self.input_shape_split)
-#         self.spatial_adapt2 = SpatialAdaptation(self.input_shape_split)
-
-#         self.fc = nn.Linear(self.channels, self.num_classes)
-#         # self.sm = nn.Softmax(dim=1)
-
-#     def forward(self, x):
-#         # x = median_pool_2d(x, kernel_size=(3,1), padding=(1,0)) # perform median filtering step
-#         x = self.bn(x) # applies normalization procedure after usual filtering operations
-#         x = x - self.baseline # subtract baseline for baseline normalization
-#         xtop = x[:, :, :self.input_shape[0]//2, :] # top half
-#         xbot = x[:, :, self.input_shape[0]//2:, :] # bottom half
-#         xtop = self.spatial_adapt1(xtop) # perform image resampling step
-#         xbot = self.spatial_adapt2(xbot)
-#         x = torch.cat((xtop, xbot), dim=2) # concatenate the two halves        x = x.reshape(x.shape[0],-1) # flatten for determining classification
-#         x = x.reshape(x.shape[0],-1) # flatten for determining classification
-#         x = self.input_dropout(x)
-#         x = self.fc(x)
-#         # x = self.sm(x)
-#         return x.reshape(x.shape[0], self.num_classes)
 
 # class ImageClassifier(nn.Module):
 #     def __init__(self, num_classes=8, channels=64, in_channels=1, inter_channels=16, input_shape=(7, 24), conv_kernel_size=[3, 3], pool_kernel_size=[2, 2],

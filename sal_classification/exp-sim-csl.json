@@ -19,7 +19,7 @@
     "network": "LogisticRegressor",
     "dataset": "csl",
     "emg_tensorizer": "CSLData",
-    "Trms": 0.25,
+    "Trms": 250,
     "adaptation": "spatial-adaptation",
     "adaptation_params": {
         "xshift": true,

@@ -5,7 +5,6 @@ import seaborn as sns
 import torch
 import os
 
-
 # Function to create column to combine dropout and baseline
 def create_intersession_cond_col(row):
     if row['p_input'] and row['real_baseline']:

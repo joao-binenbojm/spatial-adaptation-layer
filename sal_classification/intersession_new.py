@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 
 # from data_loaders import load_tensors, extract_frames_csl, extract_frames_capgmyo, EMGFrameLoader
 # from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CapgmyoDataSegmentRMS, CSLDataSegmentRMS
-from tensorize_emg import CapgmyoData, CSLData, HyserData #CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS
+from tensorize_emg import CapgmyoData, CSLData, HyserData, GrabmyoData #CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS
 from torch_loaders import EMGFrameLoader
 from sal_classification.deep_learning import train_model, test_model, init_adabn
 from networks import CapgMyoNet, LogisticRegressor #, LogisticRegressorHyser
@@ -100,7 +100,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
 
     # Load EMG data in uniform format
     print('\nLOADING EMG TENSOR...')
-    emg_tensorizer = emg_tensorizer_def(dataset=exp['dataset'], path=data['DIR'], sub=sub_id, num_gestures=len(exp['gest_subset']), num_repetitions=data['num_repetitions'],
+    emg_tensorizer = emg_tensorizer_def(dataset=exp['dataset'], path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
                                         input_shape=data['input_shape'], fs=data['fs'], rep_duration=data['rep_duration'], sessions=session_ids, intrasession=False, Trms=exp['Trms'], 
                                         remove_baseline=exp['real_baseline'], gest_subset=exp['gest_subset']) # 7-15 for capgmyo, 0-9 for csl)
     emg_tensorizer.load_tensors()
@@ -151,7 +151,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                         elif exp['dataset'] == 'grabmyo':
                             input_transform_name += '-grabmyo'
 
-                    base_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=len(exp['gest_subset']),#data['num_gestures'], 
+                    base_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=emg_tensorizer.num_gestures, 
                                                         p_input=exp['p_input'], baseline=exp['learnable_baseline'], input_transform_name=input_transform_name).to(device)
                     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, base_model.parameters()),
                                                 lr=exp['lr'], weight_decay=exp['weight_decay'])
@@ -159,9 +159,6 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
 
                     # Train the model
-                    # for param in base_model.input_transform.parameters():
-                    #     param.requires_grad = False
-                    # base_model.baseline.requires_grad = False
                     train_model(base_model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                                 warmup_scheduler=warmup_scheduler) # run training loop
                     
@@ -172,7 +169,6 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     base_model.eval()
                     with torch.no_grad():
                         all_labs, all_preds = test_model(base_model, test_loader)
-                        # all_labs, all_preds = test_model(base_model, train_loader)
                         acc = accuracy_score(all_labs, all_preds)
                 
                 accs.append(acc)
@@ -180,8 +176,6 @@ for idx, sub in tqdm(enumerate(data['subs'])):
 
                 # Fine-tune to update model's shifting position
                 adapted_model = deepcopy(base_model)
-                # adapted_model.train()
-                # adapted_model.input_dropout.train()
                 print('FINE-TUNING...')
                 if exp['adaptation'] == 'spatial-adaptation':
                     for param in adapted_model.parameters():

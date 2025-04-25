@@ -16,7 +16,8 @@ from networks_utils import median_pool_2d
 class EMGData:
     
     def __init__(self, dataset='csl', path='../datasets/capgmyo/dbb_csl', sub='subject1', transform=None, target_transform=None, norm=0,
-                  num_gestures=26, num_repetitions=10, input_shape=(8, 24), fs=2048, rep_duration=None, Trms=0.25, sessions='session1', intrasession=False, rms=True, remove_baseline=False):
+                  num_gestures=26, num_repetitions=10, input_shape=(8, 24), fs=2048, rep_duration=None, Trms=0.25, sessions='session1', 
+                  intrasession=False, rms=True, remove_baseline=False, gest_subset=None):
         # Store all appropriate data parameters
         self.dataset = dataset
         self.path = path
@@ -29,7 +30,12 @@ class EMGData:
         else:
             self.num_samples = fs
         self.norm = norm
-        self.num_gestures = num_gestures
+        if gest_subset is None:
+            self.gest_subset = list(range(num_gestures))
+            self.num_gestures = num_gestures
+        else:
+            self.num_gestures = len(gest_subset)
+            self.gest_subset = gest_subset
         self.num_repetitions = num_repetitions
         self.input_shape = input_shape
         self.sessions = sessions
@@ -57,9 +63,9 @@ class EMGData:
             images = np.flip(np.array(emg_segment).reshape(emg_segment.shape[0], 1, self.input_shape[0], self.input_shape[1]), axis=3) # two grids concatenated
         elif self.dataset == 'grabmyo':
             T = emg_segment.shape[0]
-            forearm = emg_segment[:,:16].reshape(T, 2, 8)
-            wrist = emg_segment[:,16:].reshape(T, 2, 6)
-            images = np.concatenate((forearm, wrist), axis=2) # concats grids as a horizontally long array
+            forearm = emg_segment[:,:16].reshape(T, 1, 2, 8)
+            wrist = emg_segment[:,16:].reshape(T, 1, 2, 6)
+            images = np.concatenate((forearm, wrist), axis=3) # concats grids as a horizontally long array
         else:
             raise Exception("No dataset specified.")
         return images 
@@ -93,6 +99,21 @@ class EMGData:
                 images = images.reshape(1, 1, *images.shape)
                 baseline += images[:,:, labels==0, :, :, :].mean(axis=2, keepdims=True)
             baseline / ngests
+        
+        elif self.dataset == 'grabmyo':
+            baseline = np.zeros((1, 1, 1, 1, self.input_shape[0], self.input_shape[1]))
+            subdir = os.path.basename(DIR) # get subject_dir
+            for idx in range(self.num_repetitions):
+                fname = f"{subdir}_gesture17_trial{idx+1}" # get given trial 
+                record = wfdb.rdrecord(os.path.join(DIR, fname))
+                emg = record.p_signal
+                emg = emg - emg.mean(axis=0, keepdims=True)
+                emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+                rms = get_rms_signal(emg, Mrms=self.Mrms)
+                images = self.get_images(rms)
+                images = images.reshape(1, 1, *images.shape)
+                baseline += images.mean(axis=2, keepdims=True)
+            baseline = baseline/self.num_repetitions
 
         else:
             raise Exception("No dataset specified.")
@@ -358,9 +379,10 @@ class CapgmyoData(EMGData):
             X, Y = self.oversample_repetitions(X, Y, cur_label, reps, missing)
 
         # Remove baseline activity
-        if self.remove_baseline:
-            baseline = self.get_baseline(DIR)
-            X = X - baseline
+        if self.rms:
+            if self.remove_baseline:
+                baseline = self.get_baseline(DIR)
+                X = X - baseline
 
         return X, Y
 
@@ -541,10 +563,8 @@ class CapgmyoData(EMGData):
 
 class CSLData(EMGData):
     
-    def __init__(self, gest_subset=list(range(26)), **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.gest_subset = gest_subset
-        self.num_gestures = len(gest_subset)
 
     def extract_frames(self, DIR):
         ''' Extract frames for the given subject/session for CSL dataset.'''
@@ -584,9 +604,10 @@ class CSLData(EMGData):
             X, Y = self.oversample_repetitions(X, Y, gdx, reps, missing)
 
         # Remove baseline activity
-        if self.remove_baseline:
-            baseline = self.get_baseline(SESSION_DIR)
-            X = X - baseline
+        if self.rms:
+            if self.remove_baseline:
+                baseline = self.get_baseline(SESSION_DIR)
+                X = X - baseline
 
         return X, Y
     
@@ -705,10 +726,8 @@ class CSLData(EMGData):
 
 class HyserData(EMGData):
     
-    def __init__(self, gest_subset=list(range(26)), **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.gest_subset = gest_subset
-        self.num_gestures = len(gest_subset)
 
     def extract_frames(self, DIR):
         ''' Extract frames for the given subject/session for CSL dataset.'''
@@ -757,10 +776,8 @@ class HyserData(EMGData):
 
 class GrabmyoData(EMGData):
     
-    def __init__(self, gest_subset=list(range(16)), **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.gest_subset = gest_subset
-        self.num_gestures = len(gest_subset)
 
     def extract_frames(self, DIR):
         ''' Extract frames for the given subject/session for CSL dataset.'''
@@ -774,7 +791,7 @@ class GrabmyoData(EMGData):
         Y = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples))
 
         for gdx, gest in enumerate(self.gest_subset):
-            for rep_idx in range(7): # 7 repetitions per gesture
+            for rep_idx in range(self.num_repetitions): # 7 repetitions per gesture
                 rec_name = f"{subdir}_gesture{gest+1}_trial{rep_idx+1}"
                 record = wfdb.rdrecord(os.path.join(SESSION_DIR, rec_name))
                 emg = record.p_signal
@@ -790,8 +807,9 @@ class GrabmyoData(EMGData):
                 Y[gdx, rep_idx, :] = np.array([gdx]*self.num_samples)  # add labels onto our label matrix
 
         # Remove baseline activity
-        if self.remove_baseline:
-            baseline = self.get_baseline(SESSION_DIR)
-            X = X - baseline
+        if self.rms:
+            if self.remove_baseline:
+                baseline = self.get_baseline(SESSION_DIR)
+                X = X - baseline
 
         return X, Y

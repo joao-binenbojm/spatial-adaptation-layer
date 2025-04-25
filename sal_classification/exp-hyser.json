@@ -1,5 +1,5 @@
 {
-    "name": "simulation-test",
+    "name": "hyser-test-refactor",
     "project": "classification-simulation",
     "K": 1,
     "num_epochs": 5,
@@ -17,8 +17,8 @@
     "momentum": 0,
     "weight_decay": 0,
     "network": "LogisticRegressor",
-    "dataset": "csl",
-    "emg_tensorizer": "CSLData",
+    "dataset": "hyser",
+    "emg_tensorizer": "HyserData",
     "Trms": 0.25,
     "adaptation": "spatial-adaptation",
     "adaptation_params": {
@@ -31,7 +31,7 @@
         "yshear": true
     },
     "real_baseline": false,
-    "learnable_baseline": false,
+    "learnable_baseline": true,
     "adabatch": false,
-    "gest_subset": [7, 8, 9, 10, 11, 12, 13, 14, 15]
+    "gest_subset": [5,6,7,8,9,10,13,14,15,16,17,18]
 }
