@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from networks_utils import Shift, SpatialAdaptation, SpatialAdaptationHyser, LocallyConnected2d, FactorizedDepthwiseSeparableConv
+from networks_utils import Shift, SpatialAdaptation, SpatialAdaptationHyser, SpatialAdaptationGrabmyo, LocallyConnected2d, FactorizedDepthwiseSeparableConv
 
 
 # Canonical EMG network from original capgmyo paper
@@ -73,6 +73,8 @@ class CapgMyoNet(nn.Module):
             self.input_transform = SpatialAdaptation(input_shape)
         elif input_transform_name == 'spatial-adaptation-hyser':
             self.input_transform = SpatialAdaptationHyser(input_shape)
+        elif input_transform_name == 'spatial-adaptation-grabmyo':
+            self.input_transform = SpatialAdaptationGrabmyo(input_shape)
         elif input_transform_name == 'linear-layer':
             self.input_transform =  nn.Sequential(
                 nn.Flatten(start_dim=1),  # Flatten from (B, 1, H, W) → (B, H*W)
@@ -118,7 +120,6 @@ class CapgMyoNet(nn.Module):
         x = self.dropout6(self.relu6(self.batchnorm6(self.fc6(x))))
         x = self.relu7(self.batchnorm7(self.fc7(x)))
         x = self.fc8(x)
-        # x = self.sm(x)
         return x.reshape(x.shape[0], self.num_classes)
     
 
@@ -151,6 +152,8 @@ class LogisticRegressor(nn.Module):
             self.input_transform = SpatialAdaptation(input_shape)
         elif input_transform_name == 'spatial-adaptation-hyser':
             self.input_transform = SpatialAdaptationHyser(input_shape)
+        elif input_transform_name == 'spatial-adaptation-grabmyo':
+            self.input_transform = SpatialAdaptationGrabmyo(input_shape)
         elif input_transform_name == 'linear-layer':
             self.input_transform =  nn.Sequential(
                 nn.Flatten(start_dim=1),  # Flatten from (B, 1, H, W) → (B, H*W)

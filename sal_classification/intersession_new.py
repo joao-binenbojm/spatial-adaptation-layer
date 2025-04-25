@@ -144,10 +144,12 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 if not is_model_trained:
                     
                     # Set input transformation for adaptation in case of the Hyser dataset
-                    if exp['dataset'] == 'hyser': 
-                        input_transform_name = exp['adaptation'] + '-hyser'
-                    else: 
-                        input_transform_name = exp['adaptation']
+                    input_transform_name = exp['adaptation']
+                    if exp['adaptation'] == 'spatial-adaptation':
+                        if exp['dataset'] == 'hyser': 
+                            input_transform_name += '-hyser'
+                        elif exp['dataset'] == 'grabmyo':
+                            input_transform_name += '-grabmyo'
 
                     base_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=len(exp['gest_subset']),#data['num_gestures'], 
                                                         p_input=exp['p_input'], baseline=exp['learnable_baseline'], input_transform_name=input_transform_name).to(device)

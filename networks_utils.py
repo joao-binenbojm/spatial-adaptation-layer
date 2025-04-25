@@ -30,8 +30,6 @@ class SpatialAdaptation(torch.nn.Module):
     def __init__(self, input_shape, T = True, R = True, Sc = True, Sh = True, mode='bilinear'):
         super().__init__()
         self.Nv, self.Nh = input_shape
-        self.register_buffer('yreg', torch.arange(self.Nv)) # original coordinates
-        self.register_buffer('xreg', torch.arange(self.Nh)) # original coordinates
         self.mode = mode
         # make the scaling...
         self.xshift = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) 
@@ -82,9 +80,9 @@ class SpatialAdaptation(torch.nn.Module):
 class SpatialAdaptationHyser(torch.nn.Module):
     def __init__(self, input_shape, T = True, R = True, Sc = True, Sh = True, mode='bilinear'):
         super().__init__()
-        self.Nv, self.Nh = input_shape
-        self.register_buffer('yreg', torch.arange(self.Nv)) # original coordinates
-        self.register_buffer('xreg', torch.arange(self.Nh)) # original coordinates
+        H, W = input_shape
+        self.H = [H//2, H//2]
+        self.W = [W, W]
         self.mode = mode
         # make the scaling...
         self.xshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T),
@@ -106,7 +104,7 @@ class SpatialAdaptationHyser(torch.nn.Module):
         '''Same as in the main '''
         dev = x.device # assuming x and model are on the same device
         N, C, _, _ = x.shape
-        H, W = self.Nv//2, self.Nh
+        H, W = self.H[idx], self.W[idx]
         T = torch.cat([ # Translation Matrix
             torch.stack([torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev), self.xshift[idx]]).unsqueeze(0),
             torch.stack([torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev), self.yshift[idx]]).unsqueeze(0),
@@ -137,13 +135,29 @@ class SpatialAdaptationHyser(torch.nn.Module):
         return xresamp
     
     def forward(self, x):
-        xtop = x[:, :, :self.Nv//2, :] # top half
-        xbot = x[:, :, self.Nv//2:, :] # bottom half
+        xtop = x[:, :, :self.H[0], :] # top half
+        xbot = x[:, :, self.H[1]:, :] # bottom half
         xtop = self.apply_sal(xtop, 0) # perform image resampling step
         xbot = self.apply_sal(xbot, 1) # perform image resampling step
         x = torch.cat((xtop, xbot), dim=2) # concatenate the two halves   
         return x
 
+# Inherits from Hyser module to have double SAL layer
+class SpatialAdaptationGrabmyo(SpatialAdaptationHyser):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.H = [2, 2]
+        self.W = [8, 6]
+
+    def forward(self, x):
+        xforearm = x[:, :, :, :self.W[0]] # top half
+        xwrist = x[:, :, :, self.W[1]:] # bottom half
+        xforearm = self.apply_sal(xforearm, 0) # perform image resampling step
+        xwrist = self.apply_sal(xwrist, 1) # perform image resampling step
+        x = torch.cat((xforearm, xwrist), dim=3) # concatenate the two halves   
+        return x
+    
+    
 ## Median pooling utils and function
 def unpack_param_2d(param):
 

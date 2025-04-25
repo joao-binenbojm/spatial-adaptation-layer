@@ -55,7 +55,11 @@ class EMGData:
             images = np.array(emg_segment).reshape(emg_segment.shape[0], 1, self.input_shape[0], self.input_shape[1], order='F')
         elif self.dataset == 'hyser':
             images = np.flip(np.array(emg_segment).reshape(emg_segment.shape[0], 1, self.input_shape[0], self.input_shape[1]), axis=3) # two grids concatenated
-
+        elif self.dataset == 'grabmyo':
+            T = emg_segment.shape[0]
+            forearm = emg_segment[:,:16].reshape(T, 2, 8)
+            wrist = emg_segment[:,16:].reshape(T, 2, 6)
+            images = np.concatenate((forearm, wrist), axis=2) # concats grids as a horizontally long array
         else:
             raise Exception("No dataset specified.")
         return images 
@@ -734,6 +738,51 @@ class HyserData(EMGData):
                 emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
                 if self.rms:
                     emg = get_rms_signal(emg, Mrms=self.Mrms)
+                images = self.get_images(emg)
+            
+                # Add data extracted from given repetition to our data matrix            
+                X[gdx, rep_idx, :, :, :, :] = images # add EMG surface images onto our data matrix
+                Y[gdx, rep_idx, :] = np.array([gdx]*self.num_samples)  # add labels onto our label matrix
+
+        # # Remove baseline activity
+        # if self.remove_baseline:
+        #     baseline = self.get_baseline(SESSION_DIR)
+        #     X = X - baseline
+
+        return X, Y
+    
+    
+############################################################## GRABMYO EMG TENSORIZERS #####################################################################
+
+
+class GrabmyoData(EMGData):
+    
+    def __init__(self, gest_subset=list(range(16)), **kwargs):
+        super().__init__(**kwargs)
+        self.gest_subset = gest_subset
+        self.num_gestures = len(gest_subset)
+
+    def extract_frames(self, DIR):
+        ''' Extract frames for the given subject/session for CSL dataset.'''
+
+        # Initialize data container for given session
+        sub_int = int(self.sub.replace('subject',''))
+        subdir = f"session{self.current_session+1}_participant{sub_int}"
+        session_sub_dir = os.path.join(f"Session{self.current_session+1}", subdir)
+        SESSION_DIR = os.path.join(DIR, session_sub_dir)
+        X = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
+        Y = np.zeros((self.num_gestures, self.num_repetitions, self.num_samples))
+
+        for gdx, gest in enumerate(self.gest_subset):
+            for rep_idx in range(7): # 7 repetitions per gesture
+                rec_name = f"{subdir}_gesture{gest+1}_trial{rep_idx+1}"
+                record = wfdb.rdrecord(os.path.join(SESSION_DIR, rec_name))
+                emg = record.p_signal
+                emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+                if self.rms:
+                    emg = get_rms_signal(emg, Mrms=self.Mrms)
+                keep_channels = ['U' not in name for name in record.sig_name] # drop redundant channels
+                emg = emg[:, keep_channels]
                 images = self.get_images(emg)
             
                 # Add data extracted from given repetition to our data matrix            

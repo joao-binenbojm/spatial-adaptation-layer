@@ -3,7 +3,6 @@ from scipy import signal
 from scipy.ndimage import median_filter
 import numpy as np
 
-
 def get_rms_signal(emg, Mrms=32, s=1):
     '''Computes the instantaneous estimate of RMS from a window of L samples. Returns a signal of the same length.'''
     emg_square = np.square(emg)
