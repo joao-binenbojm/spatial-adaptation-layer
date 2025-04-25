@@ -88,7 +88,7 @@ subs, test_sessions, train_sessions, adapt_reps = [], [], [], []
 # xshifts, yshifts, rot_thetas, xscales, yscales, xshears, yshears = [], [], [], [], [], [], []
 learned_params = {key: [] for key in ['xshift', 'yshift', 'rot_theta', 'xscale', 'yscale', 'xshear', 'yshear']}
 accs, tuned_accs = [], [] # different metrics to be saved in csv from experiment
-# maj_accs, maj_tuned_accs = [], [] 
+f1_scores, tuned_f1_scores = [], []
 is_model_trained = False
 device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 print('Device:', device)
@@ -170,9 +170,13 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     with torch.no_grad():
                         all_labs, all_preds = test_model(base_model, test_loader)
                         acc = accuracy_score(all_labs, all_preds)
+                        f1 = f1_score(all_labs, all_preds, average='macro')
                 
                 accs.append(acc)
+                f1_scores.append(f1)
                 print('Test Accuracy:', acc)
+                print('Test F1-Score:', f1)
+
 
                 # Fine-tune to update model's shifting position
                 adapted_model = deepcopy(base_model)
@@ -228,8 +232,11 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     tuned_all_labs, tuned_all_preds = test_model(adapted_model, test_loader)
 
                 tuned_acc = accuracy_score(tuned_all_labs, tuned_all_preds)
-                tuned_accs.append(tuned_acc)
+                tuned_f1 = f1_score(tuned_all_labs, tuned_all_preds, average='macro')
+                tuned_accs.append(tuned_acc)    
+                tuned_f1_scores.append(tuned_f1)
                 print('Tuned Test Accuracy:', tuned_acc)
+                print('Tuned Test F1-Score:', tuned_f1)
 
                 # Get confusion matrix
                 labs = np.arange(data['num_gestures'])
@@ -240,7 +247,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 plt.close()
                 # SAVE RESULTS
                 data_dict = {"Subject": subs, "Train Sessions": train_sessions, "Test Sessions": test_sessions, "Adaptation Repetitions": adapt_reps,
-                             "Accuracy": accs, "Tuned Accuracy": tuned_accs}
+                             "Accuracy": accs, "Tuned Accuracy": tuned_accs, 'F1-Score': f1_scores, 'Tuned F1-Score': tuned_f1_scores}
                 data_dict.update(learned_params)
                 df = pd.DataFrame(data_dict)
                 df.to_csv(f"{name}.csv")
@@ -252,7 +259,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
 
 # Save experiment data in .csv file
 data_dict = {"Subject": subs, "Train Sessions": train_sessions, "Test Sessions": test_sessions, "Adaptation Repetitions": adapt_reps,
-                             "Accuracy": accs, "Tuned Accuracy": tuned_accs}
+                             "Accuracy": accs, "Tuned Accuracy": tuned_accs, 'F1-Score': f1_scores, 'Tuned F1-Score': tuned_f1_scores}
 data_dict.update(learned_params)
 df = pd.DataFrame(data_dict)
 df.to_csv(f"{name}.csv")

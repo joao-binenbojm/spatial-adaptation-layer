@@ -14,7 +14,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 # from torchvision.transforms.v2 import RandomAffine, InterpolationMode, Compose
-from sklearn.metrics import  accuracy_score, confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import  accuracy_score, f1_score, confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 import psutil
 from copy import deepcopy
@@ -172,6 +172,7 @@ if __name__ == '__main__':
     true_params = {f'{key}_true' : [] for key in learned_params.keys()} 
     dists, corrected_dists = [], []
     accs, tuned_accs = [], [] # different metrics to be saved in csv from experiment
+    f1_scores, tuned_f1_scores = [], []
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
     print('SIMULATED SPATIAL PERTURBATIONS:', data['dataset_name'])
@@ -233,8 +234,11 @@ if __name__ == '__main__':
                     all_labs, all_preds = test_model(model, test_loader)
 
                 acc = accuracy_score(all_labs, all_preds)
+                f1 = f1_score(all_labs, all_preds, average='macro')
                 accs.append(acc)
+                f1_scores.append(f1)
                 print('Test Accuracy:', acc)
+                print('Test F1 Score:', f1)
 
                 # Compute distance before SAL correction
                 dists.append(get_grid_distance(X_test.shape, samps, [0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0]))
@@ -282,8 +286,11 @@ if __name__ == '__main__':
                     all_labs, all_preds = test_model(adapted_model, test_loader)
 
                 tuned_acc = accuracy_score(all_labs, all_preds)
+                tuned_f1 = f1_score(all_labs, all_preds, average='macro')
                 tuned_accs.append(tuned_acc)
+                tuned_f1_scores.append(tuned_f1)
                 print('Tuned Test Accuracy:', tuned_acc)
+                print('Tuned Test F1 Score:', tuned_f1)
 
                 print(f'----------------------Affine learned params----------------------')
                 for param_key in learned_params.keys():
@@ -302,14 +309,14 @@ if __name__ == '__main__':
                 print('AVERAGE ELECTRODE DISTANCE BETWEEN GRIDS (CM):', f'{corrected_dists[-1]} cm')
 
                 # SAVE RESULT
-                data_dict = {'Subjects': subs, 'Sessions':sessions, 'Test Repetitions':test_reps, 'Accuracy':accs, 'Tuned Accuracy':tuned_accs, 'Distance (cm)':dists, 'Tuned Distance (cm)':corrected_dists}
+                data_dict = {'Subjects': subs, 'Sessions':sessions, 'Test Repetitions':test_reps, 'Accuracy':accs, 'Tuned Accuracy':tuned_accs, 'F1-Score': f1_scores, 'Tuned F1-Score': tuned_f1_scores, 'Distance (cm)':dists, 'Tuned Distance (cm)':corrected_dists}
                 data_dict.update(true_params)
                 data_dict.update(learned_params)
                 df = pd.DataFrame(data_dict)
                 df.to_csv(f"{name}.csv")
 
     # Save final experiment data in .csv file
-    data_dict = {'Subjects': subs, 'Sessions':sessions, 'Test Repetitions':test_reps, 'Accuracy':accs, 'Tuned Accuracy':tuned_accs, 'Distance (cm)':dists, 'Tuned Distance (cm)':corrected_dists}
+    data_dict = {'Subjects': subs, 'Sessions':sessions, 'Test Repetitions':test_reps, 'Accuracy':accs, 'Tuned Accuracy':tuned_accs, 'F1-Score': f1_scores, 'Tuned F1-Score': tuned_f1_scores, 'Distance (cm)':dists, 'Tuned Distance (cm)':corrected_dists}
     data_dict.update(true_params)
     data_dict.update(learned_params)
     df = pd.DataFrame(data_dict)
