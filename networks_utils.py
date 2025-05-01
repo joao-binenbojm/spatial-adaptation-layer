@@ -84,7 +84,7 @@ class SpatialAdaptation(torch.nn.Module):
         theta = Sh @ Sc @ R @ T
         theta = theta[0:2,:] # slice into submatrix expected by affine_grid
         theta = theta.repeat(N,1,1)
-        grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=False)
+        grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=True)
         if self.circular:
             grid = wrap_grid_horizontally(grid) # wrap x coordinates if electrodes around arm
         xresamp = torch.nn.functional.grid_sample(x, grid, mode=self.mode)
@@ -134,7 +134,7 @@ class SpatialAdaptationHyser(SpatialAdaptation):
     
     def forward(self, x):
         xtop = x[:, :, :self.H[0], :] # top half
-        xbot = x[:, :, self.H[1]:, :] # bottom half
+        xbot = x[:, :, self.H[0]:, :] # bottom half
         xtop = super().forward(xtop) # perform image resampling step
         xbot = super().forward(xbot)
         x = torch.cat((xtop, xbot), dim=2) # concatenate the two halves   
@@ -149,7 +149,7 @@ class SpatialAdaptationGrabmyo(SpatialAdaptation):
 
     def forward(self, x):
         xforearm = x[:, :, :, :self.W[0]] # top half
-        xwrist = x[:, :, :, self.W[1]:] # bottom half
+        xwrist = x[:, :, :, self.W[0]:] # bottom half
         xforearm = super().forward(xforearm) # perform image resampling step
         xwrist = super().forward(xwrist) # perform image resampling step
         x = torch.cat((xforearm, xwrist), dim=3) # concatenate the two halves   

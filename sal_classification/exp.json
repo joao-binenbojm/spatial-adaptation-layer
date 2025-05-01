@@ -1,8 +1,8 @@
 {
-    "name": "simulation-test",
+    "name": "grabmyo-test",
     "project": "classification-simulation",
     "K": 1,
-    "num_epochs": 5,
+    "num_epochs": 1,
     "norm": 0,
     "lr": 0.001,
     "p_input": 0.5,
@@ -17,8 +17,8 @@
     "momentum": 0,
     "weight_decay": 0,
     "network": "LogisticRegressor",
-    "dataset": "csl",
-    "emg_tensorizer": "CSLData",
+    "dataset": "grabmyo",
+    "emg_tensorizer": "GrabmyoData",
     "Trms": 0.25,
     "adaptation": "spatial-adaptation",
     "adaptation_params": {
@@ -31,7 +31,7 @@
         "yshear": true
     },
     "real_baseline": false,
-    "learnable_baseline": false,
+    "learnable_baseline": true,
     "adabatch": false,
-    "gest_subset": [7, 8, 9, 10, 11, 12, 13, 14, 15]
+    "gest_subset": null
 }
