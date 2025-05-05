@@ -19,6 +19,11 @@ def init_adabn(model):
             module.momentum = None # keep track of simple cumulative mean
 
 ## TRAINING/TESTING
+def add_noise_input_transform(model, std=0.01):
+    with torch.no_grad():
+        for param in model.input_transform.parameters():
+            noise = torch.randn_like(param) * std
+            param.add_(noise)
 
 def initial_search(model, train_loader, boundaries, npoints=50):
     ''' Sample N initial spatial transformations and choose optimal as starting point'''

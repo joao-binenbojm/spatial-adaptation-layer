@@ -1,9 +1,20 @@
 from torch import nn
 import torch
 from tqdm import tqdm
+import sys
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt 
+
+
+def add_noise_input_transform(model, std=0.01):
+    with torch.no_grad():
+        noise = torch.randn_like(model.input_transform.xshift) * std
+        model.input_transform.xshift.add_(noise)
+        model.input_transform.yshift.add_(noise)
+        # for param in model.input_transform.parameters():
+        #     noise = torch.randn_like(param) * std
+        #     param.add_(noise)
 
 def loss_sampling(data_loader, trained_model, T=[0.0, 0.0], bounds=[0.0, 0.0], batch_size=128, num_points=20):
     ''' Method used to sample the loss landscape.'''
@@ -39,6 +50,7 @@ def loss_sampling(data_loader, trained_model, T=[0.0, 0.0], bounds=[0.0, 0.0], b
                 # Process EMG data in batches for each grid point
                 running_loss, it_count = 0.0, 0
                 for i, (signals, labels) in enumerate(data_loader):
+                    add_noise_input_transform(trained_model, std=0.0001) # Add noise
                     signals = signals.to(device)
                     labels = labels.view(-1).type(torch.LongTensor).to(device)
                     outputs = trained_model(signals).to(device)
@@ -96,7 +108,8 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'expandable_segments:True'
 
 if __name__ == '__main__':
 
-    exp_config = './sal_classification/exp.json'
+    exp_name = sys.argv[1]  # First argument after script name
+    exp_config = f'./sal_classification/{exp_name}.json'
 
     # Experiment condition loading
     print('#'*40 + '\n\n' + 'SIMULATED PERTURBATIONS LOSS LANDSCAPE' + '\n\n' + '#'*40)
@@ -122,7 +135,7 @@ if __name__ == '__main__':
     print('SIMULATED SPATIAL PERTURBATIONS:', data['dataset_name'])
     sub_id = 'subject1'
     train_idx = 0
-    test_idx = 2
+    test_idx = 1
     adapt_rep = 9
     # Load EMG data in uniform format
     print('\nLOADING EMG TENSOR...')

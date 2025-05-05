@@ -2,7 +2,7 @@ import os
 import sys
 from time import time
 import json
-import gc
+import sys
 import wandb
 
 import numpy as np
@@ -30,7 +30,8 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'expandable_segments:True'
 
 if __name__ == '__main__':
 
-    exp_config = './sal_classification/exp.json'
+    exp_name = sys.argv[1]  # First argument after script name
+    exp_config = f'./sal_classification/{exp_name}.json'
 
     # Experiment condition loading
     print('#'*40 + '\n\n' + 'RUNNING SIMULATED SPATIAL PERTURBATIONS' + '\n\n' + '#'*40)

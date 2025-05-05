@@ -2,6 +2,7 @@ import os
 from time import time
 import json
 from copy import deepcopy
+import sys
 
 import numpy as np
 import pandas as pd
@@ -57,7 +58,8 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'expandable_segments:True'
 
 # if __name__ == '__main__':
 
-exp_config = './sal_classification/exp.json'
+exp_name = sys.argv[1]  # First argument after script name
+exp_config = f'./sal_classification/{exp_name}.json'
 
 # Experiment condition loading
 print('#'*40 + '\n\n' + 'RUNNING INTERSESSION EXPERIMENT' + '\n\n' + '#'*40)

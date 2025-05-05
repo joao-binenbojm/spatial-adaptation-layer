@@ -108,6 +108,8 @@ class EMGData:
                 record = wfdb.rdrecord(os.path.join(DIR, fname))
                 emg = record.p_signal
                 emg = emg - emg.mean(axis=0, keepdims=True)
+                keep_channels = ['U' not in name for name in record.sig_name] # drop redundant channels
+                emg = emg[:, keep_channels]
                 emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
                 rms = get_rms_signal(emg, Mrms=self.Mrms)
                 images = self.get_images(rms)
