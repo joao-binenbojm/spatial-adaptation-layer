@@ -1,5 +1,5 @@
 {
-    "name": "initial-sampling-test-realbaseline",
+    "name": "csl-sim-nobaseline",
     "project": "classification-simulation",
     "K": 1,
     "num_epochs": 15,
@@ -33,5 +33,6 @@
     "real_baseline": false,
     "learnable_baseline": false,
     "adabatch": false,
-    "gest_subset": [7, 8, 9, 10, 11, 12, 13, 14, 15]
+    "gest_subset": [7, 8, 9, 10, 11, 12, 13, 14, 15],
+    "circular": false
 }

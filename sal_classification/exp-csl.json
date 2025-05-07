@@ -1,8 +1,8 @@
 {
-    "name": "linear-layer",
+    "name": "restart-test",
     "project": "classification-simulation",
     "K": 1,
-    "num_epochs": 1,
+    "num_epochs": 15,
     "norm": 0,
     "lr": 0.001,
     "p_input": 0.5,
@@ -13,14 +13,14 @@
             "gamma": 0.1
         }
     },
-    "batch_size": 1024,
+    "batch_size": 128,
     "momentum": 0,
     "weight_decay": 0,
     "network": "LogisticRegressor",
     "dataset": "csl",
     "emg_tensorizer": "CSLData",
     "Trms": 0.25,
-    "adaptation": "linear-layer",
+    "adaptation": "spatial-adaptation",
     "adaptation_params": {
         "xshift": true,
         "yshift": true,
@@ -30,8 +30,9 @@
         "xshear": true,
         "yshear": true
     },
-    "real_baseline": true,
-    "learnable_baseline": false,
+    "real_baseline": false,
+    "learnable_baseline": true,
     "adabatch": false,
-    "gest_subset": [7, 8, 9, 10, 11, 12, 13, 14, 15]
+    "gest_subset": [7, 8, 9, 10, 11, 12, 13, 14, 15],
+    "circular": false
 }

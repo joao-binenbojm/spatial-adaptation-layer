@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn.modules.utils import _pair
 import math
+import random
 
 def wrap_grid_horizontally(grid):
     """
@@ -90,6 +91,16 @@ class SpatialAdaptation(torch.nn.Module):
         xresamp = torch.nn.functional.grid_sample(x, grid, mode=self.mode)
         return xresamp
     
+    def restart(self):
+        '''Reinitialize the parameters of the affine transformation.'''
+        bnds = [2*2.5/(self.input_shape[1]-1), 2*2.5/(self.input_shape[0]-1), 15/180, 0.1, 0.1, 0.1, 0.1]
+        self.xshift.data = torch.tensor(random.uniform(-bnds[0], bnds[0])).to(self.xshift.device)
+        self.yshift.data = torch.tensor(random.uniform(-bnds[1], bnds[1])).to(self.yshift.device)
+        self.rot_theta.data = torch.tensor(random.uniform(-bnds[2], bnds[2])).to(self.rot_theta.device)
+        self.xscale.data = torch.tensor(random.uniform(1-bnds[3], 1+bnds[3])).to(self.xscale.device)
+        self.yscale.data = torch.tensor(random.uniform(1-bnds[4], 1+bnds[4])).to(self.yscale.device)
+        self.xshear.data = torch.tensor(random.uniform(-bnds[5], bnds[5])).to(self.xshear.device)
+        self.yshear.data = torch.tensor(random.uniform(-bnds[6], bnds[6])).to(self.yshear.device)   
     
 class SpatialAdaptationHyser(SpatialAdaptation):
     def __init__(self, *args, **kwargs):
@@ -139,6 +150,18 @@ class SpatialAdaptationHyser(SpatialAdaptation):
         xbot = super().forward(xbot)
         x = torch.cat((xtop, xbot), dim=2) # concatenate the two halves   
         return x
+    
+    # def restart(self):
+    #     '''Reinitialize the parameters of the affine transformation.'''
+    #     bnds = [2*1.0/(self.W[0]-1), 2*1.0/(self.H[0]-1), 10/180, 0.1, 0.1, 0.1, 0.1]
+    #     self.xshift.data = random.uniform(-bnds[0], bnds[0])
+    #     self.yshift.data = random.uniform(-bnds[1], bnds[1])
+    #     self.rot_theta.data = random.uniform(-bnds[2], bnds[2])
+    #     self.xscale.data = random.uniform(1-bnds[3], 1+bnds[3])
+    #     self.yscale.data = random.uniform(1-bnds[4], 1+bnds[4])
+    #     self.xshear.data = random.uniform(-bnds[5], bnds[5])
+    #     self.yshear.data = random.uniform(-bnds[6], bnds[6])
+
 
 # Inherits from Hyser module to have double SAL layer
 class SpatialAdaptationGrabmyo(SpatialAdaptation):

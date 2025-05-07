@@ -2,6 +2,7 @@ import os
 from time import time
 import json
 from copy import deepcopy
+import sys
 
 import numpy as np
 import pandas as pd
@@ -57,7 +58,8 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'expandable_segments:True'
 
 # if __name__ == '__main__':
 
-exp_config = './sal_classification/exp.json'
+exp_name = sys.argv[1]  # First argument after script name
+exp_config = f'./sal_classification/{exp_name}.json'
 
 # Experiment condition loading
 print('#'*40 + '\n\n' + 'RUNNING INTERSESSION EXPERIMENT' + '\n\n' + '#'*40)
@@ -193,8 +195,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                             param.requires_grad = exp['adaptation_params'][param_name]
                     
                     print('INITIAL CONDITION SAMPLING...')
-                    boundaries = torch.tensor([2.0, 2.0, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
-                    initial_search(adapted_model, adapt_loader, boundaries, npoints=50) # find optimal initial condition
+                    boundaries = torch.tensor([2.5, 2.5, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
+                    initial_search(adapted_model, adapt_loader, boundaries, npoints=100) # find optimal initial condition
 
                 elif exp['adaptation'] == 'linear-layer':
                     for param in adapted_model.input_transform.parameters():

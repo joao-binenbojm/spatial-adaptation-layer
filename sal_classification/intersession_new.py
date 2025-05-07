@@ -114,7 +114,10 @@ for idx, sub in tqdm(enumerate(data['subs'])):
             if test_session == train_session:
                 continue
             
+            rep_idxs = list(range(data['num_repetitions'])) # get all repetition numbers
             sample_reps = list(np.random.choice(list(range(data['num_repetitions'])), replace=False, size=exp['K'])) # sample repetition numbers, ensuring we don't sample the same rep twice
+            for rep in sample_reps: rep_idxs.remove(rep) # remove sampled repetitions from the list of all repetitions
+            
             for adapt_rep in sample_reps: # for each possible repetition we can use to adapt
                 subs.append(sub)
                 train_sessions.append(train_session)
@@ -124,11 +127,17 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 print('TEST SESSION #{}, TRAIN SESSION #{}'.format(test_session+1, train_session+1))
                 print('ADAPT REP #{}'.format(adapt_rep+1))
                 
-                X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations = emg_tensorizer.get_tensors(
+                val_idx = np.random.choice((rep_idxs), replace=False, size=1)[0] # sample a repetition for validation
+                # X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations = emg_tensorizer.get_tensors(
+                #                                                                 test_session=test_idx,
+                #                                                                 train_session=train_idx,
+                #                                                                 rep_idx=adapt_rep)
+                
+                X_train, Y_train, X_adapt, Y_adapt, X_adapt_val, Y_adapt_val, X_test, Y_test, test_durations = emg_tensorizer.get_tensors(
                                                                                 test_session=test_idx,
                                                                                 train_session=train_idx,
-                                                                                rep_idx=adapt_rep)
-                
+                                                                                rep_idx=adapt_rep,
+                                                                                val_idx=val_idx)
                 # Handle outliers
                 # X_train, X_adapt, X_test = handle_outliers(X_train), handle_outliers(X_adapt), handle_outliers(X_test)
 
@@ -139,6 +148,9 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 train_loader = DataLoader(train_data, batch_size=exp['batch_size'], shuffle=True)
                 adapt_loader = DataLoader(adapt_data, batch_size=exp['batch_size'], shuffle=True)
                 test_loader = DataLoader(test_data, batch_size=exp['batch_size'], shuffle=False)
+
+                val_data = EMGFrameLoader(X=X_adapt_val, Y=Y_adapt_val, train=False, norm=exp['norm'], stats=train_data.stats)
+                val_loader = DataLoader(val_data, batch_size=exp['batch_size'], shuffle=True)
 
                 # Model/training set-up (if it hasn't been trained before)
                 num_epochs = exp['num_epochs']
@@ -154,7 +166,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                             input_transform_name += '-grabmyo'
 
                     base_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=emg_tensorizer.num_gestures, 
-                                                        p_input=exp['p_input'], baseline=exp['learnable_baseline'], input_transform_name=input_transform_name).to(device)
+                                                        p_input=exp['p_input'], baseline=exp['learnable_baseline'], input_transform_name=input_transform_name, circular=exp["circular"]).to(device)
                     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, base_model.parameters()),
                                                 lr=exp['lr'], weight_decay=exp['weight_decay'])
                     scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
@@ -216,7 +228,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
                 warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(adapt_loader)*data['num_repetitions'])
                 train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
-                            warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
+                            warmup_scheduler=warmup_scheduler, verbose=False, val_loader=val_loader) # run training loop
 
                 # Fetch params
                 if exp['adaptation'] == 'spatial-adaptation':

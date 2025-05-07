@@ -141,7 +141,7 @@ class EMGData:
         self.X = torch.tensor(self.X)
         self.Y = torch.tensor(self.Y)
     
-    def get_tensors(self, train_session=None, test_session=None, rep_idx=None, gest_idxs=None):
+    def get_tensors(self, train_session=None, test_session=None, rep_idx=None, val_idx=None, gest_idxs=None):
         ''' Return data in desired format of surface images, with a leave-one-out approach for testing.
         '''
         if self.intrasession:
@@ -180,13 +180,19 @@ class EMGData:
             X_test = torch.flatten(self.X[[test_session], :, idxs, :, :, :, :], end_dim=-4) # get other session
             Y_test = torch.flatten(self.Y[[test_session], :, idxs, :], end_dim=-1) # get other session
 
-             # Return duration of each segment in test set, which are all 1s unless specified
+            # Return duration of each segment in test set, which are all 1s unless specified
             test_durations = self.num_samples*np.ones(self.Y.shape[1]*(self.Y.shape[2] - 1))
 
             # Convert to torch tensors of type float32
             X_train, X_adapt, X_test = X_train.to(torch.float32), X_adapt.to(torch.float32), X_test.to(torch.float32)
-            return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations
-    
+            
+            if val_idx is None:
+                return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations
+            else:
+                X_adapt_val = torch.flatten(self.X[[test_session], gest_idxs, val_idx, :, :, :, :], end_dim=-4).to(torch.float32)
+                Y_adapt_val = torch.flatten(self.Y[[test_session], gest_idxs, val_idx, :], end_dim=-1).to(torch.float32) # get train session labels
+                return X_train, Y_train, X_adapt, Y_adapt, X_adapt_val, Y_adapt_val, X_test, Y_test, test_durations
+
     def oversample_repetitions(self, X, Y, cur_label, reps, missing):
         ''' Used when there is a non-uniform number of repetitions across gestures for a given uer.
             Here, we oversample previous repetitions.

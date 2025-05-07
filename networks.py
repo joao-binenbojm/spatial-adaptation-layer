@@ -10,7 +10,7 @@ from networks_utils import SpatialAdaptation, SpatialAdaptationHyser, SpatialAda
 
 # Canonical EMG network from original capgmyo paper
 class CapgMyoNet(nn.Module):
-    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, input_transform_name='spatial-adaptation', p_input=0.0, track_running_stats=True):
+    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, input_transform_name='spatial-adaptation', p_input=0.0, track_running_stats=True, circular=False):
         super(CapgMyoNet, self).__init__()
 
         self.channels = channels
@@ -70,11 +70,11 @@ class CapgMyoNet(nn.Module):
         self.adaptation_phase = False
         self.input_transform_name = input_transform_name
         if input_transform_name == 'spatial-adaptation':
-            self.input_transform = SpatialAdaptation(input_shape)
+            self.input_transform = SpatialAdaptation(input_shape, circular=circular)
         elif input_transform_name == 'spatial-adaptation-hyser':
-            self.input_transform = SpatialAdaptationHyser(input_shape)
+            self.input_transform = SpatialAdaptationHyser(input_shape, circular=circular)
         elif input_transform_name == 'spatial-adaptation-grabmyo':
-            self.input_transform = SpatialAdaptationGrabmyo(input_shape)
+            self.input_transform = SpatialAdaptationGrabmyo(input_shape, circular=circular)
         elif input_transform_name == 'linear-layer':
             self.input_transform =  nn.Sequential(
                 nn.Flatten(start_dim=1),  # Flatten from (B, 1, H, W) → (B, H*W)
@@ -126,7 +126,7 @@ class CapgMyoNet(nn.Module):
 
 class LogisticRegressor(nn.Module):
 
-    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, p_input=0.0, input_transform_name='spatial-adaptation', track_running_stats=True):
+    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, p_input=0.0, input_transform_name='spatial-adaptation', track_running_stats=True, circular=False):
         super(LogisticRegressor, self).__init__()
 
         self.channels = channels
@@ -150,11 +150,11 @@ class LogisticRegressor(nn.Module):
         self.adaptation_phase = False
         self.input_transform_name = input_transform_name
         if input_transform_name == 'spatial-adaptation':
-            self.input_transform = SpatialAdaptation(input_shape)
+            self.input_transform = SpatialAdaptation(input_shape, circular=circular)
         elif input_transform_name == 'spatial-adaptation-hyser':
-            self.input_transform = SpatialAdaptationHyser(input_shape)
+            self.input_transform = SpatialAdaptationHyser(input_shape, circular=circular)
         elif input_transform_name == 'spatial-adaptation-grabmyo':
-            self.input_transform = SpatialAdaptationGrabmyo(input_shape)
+            self.input_transform = SpatialAdaptationGrabmyo(input_shape, circular=circular)
         elif input_transform_name == 'linear-layer':
             self.input_transform =  nn.Sequential(
                 nn.Flatten(start_dim=1),  # Flatten from (B, 1, H, W) → (B, H*W)

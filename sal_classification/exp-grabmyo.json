@@ -1,5 +1,5 @@
 {
-    "name": "grabmyo-test-realb-15epoch",
+    "name": "grabmyo-circular-lbaseline-test",
     "project": "classification-simulation",
     "K": 1,
     "num_epochs": 15,
@@ -30,8 +30,9 @@
         "xshear": true,
         "yshear": true
     },
-    "real_baseline": true,
-    "learnable_baseline": false,
+    "real_baseline": false,
+    "learnable_baseline": true,
     "adabatch": false,
-    "gest_subset": null
+    "gest_subset": null,
+    "circular": true
 }
