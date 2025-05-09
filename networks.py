@@ -126,11 +126,10 @@ class CapgMyoNet(nn.Module):
 
 class LogisticRegressor(nn.Module):
 
-    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, p_input=0.0, input_transform_name='spatial-adaptation', track_running_stats=True, circular=False):
+    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, baseline=True, p_input=0.0, input_transform_name='spatial-adaptation', track_running_stats=True, circular=False):
         super(LogisticRegressor, self).__init__()
 
         self.channels = channels
-        self.kernel_sz = kernel_sz
 
         self.input_shape = input_shape
         self.num_classes = num_classes
@@ -169,8 +168,8 @@ class LogisticRegressor(nn.Module):
         if self.adaptation_phase:
             x = x - self.baseline # subtract baseline for baseline normalization
             x = self.input_transform(x) # perform image resampling step
-        x = x.reshape(x.shape[0],-1) # flatten for determining classification
         x = self.input_dropout(x)
+        x = x.reshape(x.shape[0],-1) # flatten for determining classification
         x = self.fc(x)
         return x.reshape(x.shape[0], self.num_classes)
 

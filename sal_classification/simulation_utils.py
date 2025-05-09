@@ -51,7 +51,7 @@ def apply_affine(data_grid, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, xshear=0, y
     grid = torch.nn.functional.affine_grid(theta, size=data_grid.shape, align_corners=False)
     if circular: # if cicular, wrap the grid horizontally
         grid = wrap_grid_horizontally(grid, data_grid.shape[2], data_grid.shape[3])
-    data_resamp = torch.nn.functional.grid_sample(data_grid, grid, mode=mode)
+    data_resamp = torch.nn.functional.grid_sample(data_grid, grid, mode=mode, align_corners=False)
     return data_resamp
 
 # def apply_affine(data_grid, theta, mode='bilinear', circular=False):
@@ -77,7 +77,7 @@ def get_grid_distance(grid_shape, true_params, learned_params, IED=1, circular=F
     theta = torch.eye(3)
     theta = theta[0:2,:] # slice into submatrix expected by affine_grid
     theta = theta.repeat(N,1,1)
-    original_grid = torch.nn.functional.affine_grid(theta, size=grid_shape, align_corners=True)
+    original_grid = torch.nn.functional.affine_grid(theta, size=grid_shape, align_corners=False)
     if circular: original_grid = wrap_grid_horizontally(original_grid, H, W)
     original_grid[:,:,:,0] = (W-1)*(1 + original_grid[:,:,:,0])/2
     original_grid[:,:,:,1] = (H-1)*(1 + original_grid[:,:,:,1])/2
@@ -88,7 +88,7 @@ def get_grid_distance(grid_shape, true_params, learned_params, IED=1, circular=F
     net_theta = theta_learned @ theta_true # apply inverse transformation and get resulting grid
     net_theta = net_theta[0:2,:] # slice into submatrix expected by affine_grid
     net_theta = net_theta.repeat(N,1,1)
-    final_grid = torch.nn.functional.affine_grid(net_theta, size=grid_shape, align_corners=True)
+    final_grid = torch.nn.functional.affine_grid(net_theta, size=grid_shape, align_corners=False)
     final_grid[:,:,:,0] = (W-1)*(1 + final_grid[:,:,:,0])/2
     final_grid[:,:,:,1] = (H-1)*(1 + final_grid[:,:,:,1])/2
     dist = grid_distance(original_grid, final_grid, IED=IED)

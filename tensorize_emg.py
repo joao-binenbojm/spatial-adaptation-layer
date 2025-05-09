@@ -141,29 +141,35 @@ class EMGData:
         self.X = torch.tensor(self.X)
         self.Y = torch.tensor(self.Y)
     
-    def get_tensors(self, train_session=None, test_session=None, rep_idx=None, val_idx=None, gest_idxs=None):
+    def get_tensors(self, train_session=None, test_session=None, rep_idx=None, val_idx=None, gest_idxs=None, flatten=True):
         ''' Return data in desired format of surface images, with a leave-one-out approach for testing.
         '''
         if self.intrasession:
             idxs = list(range(self.num_repetitions))
-            test_idx = idxs.pop(rep_idx)
-            X_train = torch.flatten(self.X[[test_session], :, idxs, :, :, :, :], end_dim=-4) # get all but one repetition
-            Y_train = torch.flatten(self.Y[[test_session], :, idxs, :], end_dim=-1) # get all but one repetition
-            X_test = torch.flatten(self.X[[test_session], :, [test_idx], :, :, :, :], end_dim=-4) # get one repetition
-            Y_test = torch.flatten(self.Y[[test_session], :, [test_idx], :], end_dim=-1) # get one repetition
+            test_idx = [idxs.pop(rep_idx)]
+            X_train = self.X[[test_session], :, idxs, :, :, :, :] # get all but one repetition
+            Y_train = self.Y[[test_session], :, idxs, :]# get all but one repetition
+            X_test = self.X[[test_session], :, test_idx, :, :, :, :] # get one repetition
+            Y_test = self.Y[[test_session], :, test_idx, :]# get one repetition
             
             # Return duration of each segment in test set, which are all 1s unless specified
             test_durations = self.num_samples*np.ones(self.Y.shape[1])
 
             # Convert to torch tensors of type float32
             X_train, X_test = X_train.to(torch.float32), X_test.to(torch.float32)
+            if flatten:
+                X_train, Y_train = torch.flatten(X_train, end_dim=-4), torch.flatten(Y_train, end_dim=-1)
+                X_test, Y_test = torch.flatten(X_test, end_dim=-4), torch.flatten(Y_test, end_dim=-1)
             return X_train, Y_train, X_test, Y_test, test_durations
         
         else:
             idxs = list(range(self.num_repetitions))
             # If fine-tuning on a single repetition
+            adapt_idx = []
             if rep_idx is not None:
-                adapt_idx = [idxs.pop(rep_idx)]
+                if type(rep_idx) != list: rep_idx = [rep_idx]
+                for one_rep_idx in sorted(rep_idx, reverse=True):
+                    adapt_idx.append(idxs.pop(one_rep_idx))
             else: # else, fine-tune on all available test data
                 adapt_idx = idxs
 
@@ -173,24 +179,30 @@ class EMGData:
             else:
                 gest_idxs = np.arange(self.num_gestures)
 
-            X_train = torch.flatten(self.X[[train_session], :, :, :, :, :, :], end_dim=-4) # get train session labels
-            Y_train = torch.flatten(self.Y[[train_session], :, :, :], end_dim=-1) # get train session labels
-            X_adapt = torch.flatten(self.X[[test_session], gest_idxs, adapt_idx, :, :, :, :], end_dim=-4) # get all sessions but one
-            Y_adapt = torch.flatten(self.Y[[test_session], gest_idxs, adapt_idx, :], end_dim=-1) # get train session labels
-            X_test = torch.flatten(self.X[[test_session], :, idxs, :, :, :, :], end_dim=-4) # get other session
-            Y_test = torch.flatten(self.Y[[test_session], :, idxs, :], end_dim=-1) # get other session
+            X_train = self.X[[train_session], :, :, :, :, :, :] # get train session labels
+            Y_train = self.Y[[train_session], :, :, :] # get train session labels
+            X_adapt = self.X[[test_session], gest_idxs, adapt_idx, :, :, :, :] # get all sessions but one
+            Y_adapt = self.Y[[test_session], gest_idxs, adapt_idx, :] # get train session labels
+            X_test = self.X[[test_session], :, idxs, :, :, :, :] # get other session
+            Y_test = self.Y[[test_session], :, idxs, :] # get other session
 
             # Return duration of each segment in test set, which are all 1s unless specified
             test_durations = self.num_samples*np.ones(self.Y.shape[1]*(self.Y.shape[2] - 1))
 
             # Convert to torch tensors of type float32
             X_train, X_adapt, X_test = X_train.to(torch.float32), X_adapt.to(torch.float32), X_test.to(torch.float32)
-            
+            if flatten:
+                X_train, Y_train = torch.flatten(X_train, end_dim=-4), torch.flatten(Y_train, end_dim=-1)
+                X_adapt, Y_adapt = torch.flatten(X_adapt, end_dim=-4), torch.flatten(Y_adapt, end_dim=-1)
+                X_test, Y_test = torch.flatten(X_test, end_dim=-4), torch.flatten(Y_test, end_dim=-1)        
+
             if val_idx is None:
                 return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations
             else:
-                X_adapt_val = torch.flatten(self.X[[test_session], gest_idxs, val_idx, :, :, :, :], end_dim=-4).to(torch.float32)
-                Y_adapt_val = torch.flatten(self.Y[[test_session], gest_idxs, val_idx, :], end_dim=-1).to(torch.float32) # get train session labels
+                X_adapt_val = self.X[[test_session], gest_idxs, val_idx, :, :, :, :].to(torch.float32)
+                Y_adapt_val = self.Y[[test_session], gest_idxs, val_idx, :].to(torch.float32) # get train session labels
+                if flatten:
+                    X_adapt_val, Y_adapt_val = torch.flatten(X_adapt_val, end_dim=-4), torch.flatten(Y_adapt_val, end_dim=-1)
                 return X_train, Y_train, X_adapt, Y_adapt, X_adapt_val, Y_adapt_val, X_test, Y_test, test_durations
 
     def oversample_repetitions(self, X, Y, cur_label, reps, missing):
@@ -597,6 +609,7 @@ class CSLData(EMGData):
             # For each repetition available 
             for idx in range(reps):
                 emg = mat['gestures'][idx, 0].T
+                emg = emg - emg.mean(axis=0, keepdims=True) # centering each channel of EMG to remove baseline drifts
                 emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
                 if self.rms:
                     emg = get_rms_signal(emg, Mrms=self.Mrms)

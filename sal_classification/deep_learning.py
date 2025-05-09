@@ -37,12 +37,12 @@ def initial_search(model, train_loader, boundaries, npoints=50):
     # Searching through initial conditions
     print('SAMPLING AND EVALUATING INITIAL CONDITIONS...')
     losses = torch.zeros(npoints)
-    engine = scipy.stats.qmc.LatinHypercube(d=3)
+    engine = scipy.stats.qmc.LatinHypercube(d=7)
     init_params = 2*torch.tensor(engine.random(n=npoints)).to(torch.float32)-1 # scale from [0,1] to [-1, 1]
     init_params[:,0], init_params[:,1], init_params[:, 2] = 2*boundaries[0]*init_params[:,0]/(W-1), 2*boundaries[1]*init_params[:,1]/(H-1), boundaries[2]*init_params[:, 2]
-    # init_params[:, 3] = torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) ) # generates scalings appropriately
-    # init_params[:, 4] = torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
-    # init_params[:, 5], init_params[:, 6] = boundaries[5]*init_params[:, 5], boundaries[6]*init_params[:, 6] # shear
+    init_params[:, 3] = torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) ) # generates scalings appropriately
+    init_params[:, 4] = torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
+    init_params[:, 5], init_params[:, 6] = boundaries[5]*init_params[:, 5], boundaries[6]*init_params[:, 6] # shear
 
     init_params = init_params.to(device)
     with torch.no_grad():
@@ -52,10 +52,10 @@ def initial_search(model, train_loader, boundaries, npoints=50):
             model.input_transform.xshift.data = init_params[npoint, 0]
             model.input_transform.yshift.data = init_params[npoint, 1]
             model.input_transform.rot_theta.data = init_params[npoint, 2]
-            # model.input_transform.xscale.data = init_params[npoint, 3]
-            # model.input_transform.yscale.data = init_params[npoint, 4]
-            # model.input_transform.xshear.data = init_params[npoint, 5]
-            # model.input_transform.yshear.data = init_params[npoint, 6]
+            model.input_transform.xscale.data = init_params[npoint, 3]
+            model.input_transform.yscale.data = init_params[npoint, 4]
+            model.input_transform.xshear.data = init_params[npoint, 5]
+            model.input_transform.yshear.data = init_params[npoint, 6]
 
             # Get batch estimate of supervised loss
             total_loss = 0
@@ -75,10 +75,10 @@ def initial_search(model, train_loader, boundaries, npoints=50):
             model.input_transform.xshift.data = best_params[0]
             model.input_transform.yshift.data = best_params[1]
             model.input_transform.rot_theta.data = best_params[2]
-            # model.input_transform.xscale.data = best_params[3]
-            # model.input_transform.yscale.data = best_params[4]
-            # model.input_transform.xshear.data = best_params[5]
-            # model.input_transform.yshear.data = best_params[6]            # sda.sal.xscale.data, sda.sal.yscale.data = init_params[losses.argmax(), 3:]
+            model.input_transform.xscale.data = best_params[3]
+            model.input_transform.yscale.data = best_params[4]
+            model.input_transform.xshear.data = best_params[5]
+            model.input_transform.yshear.data = best_params[6]            # sda.sal.xscale.data, sda.sal.yscale.data = init_params[losses.argmax(), 3:]
 
 
 
@@ -145,52 +145,52 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
                 running_correct = 0
         epoch += 1
 
-        if val_loader:
-            with torch.no_grad():
-                val_loss = 0.0
-                for i, (signals, labels) in enumerate(val_loader):
-                    signals = signals.to(device)
-                    labels = labels.view(-1).type(torch.LongTensor).to(device)
-                    # Forward pass
-                    outputs = model(signals).to(device)
-                    loss = criterion(outputs, labels)
-                    val_loss += loss.item()
-                val_loss = val_loss / len(val_loader)
+        # if val_loader:
+        #     with torch.no_grad():
+        #         val_loss = 0.0
+        #         for i, (signals, labels) in enumerate(val_loader):
+        #             signals = signals.to(device)
+        #             labels = labels.view(-1).type(torch.LongTensor).to(device)
+        #             # Forward pass
+        #             outputs = model(signals).to(device)
+        #             loss = criterion(outputs, labels)
+        #             val_loss += loss.item()
+        #         val_loss = val_loss / len(val_loader)
 
-                if val_loss < model_tracker["val_loss"]:
-                    model_tracker["model"] = model.state_dict()
-                    model_tracker["val_loss"] = val_loss
-                    print('Model saved with validation loss: {}'.format(val_loss))
+        #         if val_loss < model_tracker["val_loss"]:
+        #             model_tracker["model"] = model.state_dict()
+        #             model_tracker["val_loss"] = val_loss
+        #             print('Model saved with validation loss: {}'.format(val_loss))
 
-                # Whether convergence was achieved at the appropriate model 
-                if val_loss >  min(val_losses) - 1e-6:
-                    all_labs, all_preds = test_model(model, val_loader)
-                    val_acc = accuracy_score(all_labs, all_preds)
-                    if val_acc > val_acc_threshold:
-                        print('Convergence achieved at epoch {} with accuracy {}'.format(epoch, val_acc))
-                        if model_tracker["model"]:
-                            model.load_state_dict(model_tracker["model"])
-                        break
-                    else:
-                        if n_restarts < 5:
-                            print('Model stuck at epoch {} with accuracy {}. \n Resetting...'.format(epoch, val_acc))
-                            epoch = 0
-                            val_losses = [1e10]
-                            model.input_transform.restart()
-                            n_restarts += 1
-                        else:
-                            print('5 Restarts reached. \n Finish adaptation..')
-                            if model_tracker["model"]:
-                                model.load_state_dict(model_tracker["model"])
-                            break
+        #         # Whether convergence was achieved at the appropriate model 
+        #         if val_loss >  min(val_losses) - 1e-6:
+        #             all_labs, all_preds = test_model(model, val_loader)
+        #             val_acc = accuracy_score(all_labs, all_preds)
+        #             if val_acc > val_acc_threshold:
+        #                 print('Convergence achieved at epoch {} with accuracy {}'.format(epoch, val_acc))
+        #                 if model_tracker["model"]:
+        #                     model.load_state_dict(model_tracker["model"])
+        #                 break
+        #             else:
+        #                 if n_restarts < 5:
+        #                     print('Model stuck at epoch {} with accuracy {}. \n Resetting...'.format(epoch, val_acc))
+        #                     epoch = 0
+        #                     val_losses = [1e10]
+        #                     model.input_transform.restart()
+        #                     n_restarts += 1
+        #                 else:
+        #                     print('5 Restarts reached. \n Finish adaptation..')
+        #                     if model_tracker["model"]:
+        #                         model.load_state_dict(model_tracker["model"])
+        #                     break
                 
-                else:
-                    val_losses.append(val_loss)
-                    print('Epoch {} / {}, validation loss = {:4f}'.format(epoch, num_epochs, val_loss))
-                    # writer.add_scalar('validation loss', val_loss, epoch * len(train_loader) + i)
-                    # writer.add_scalar('validation accuracy', val_acc, epoch * len(train_loader) + i)
-                    # if train: wandb.log({'Validation Loss': val_loss})
-                    # else: wandb.log({'Fine-tuning Loss': val_loss})
+        #         else:
+        #             val_losses.append(val_loss)
+        #             print('Epoch {} / {}, validation loss = {:4f}'.format(epoch, num_epochs, val_loss))
+        #             # writer.add_scalar('validation loss', val_loss, epoch * len(train_loader) + i)
+        #             # writer.add_scalar('validation accuracy', val_acc, epoch * len(train_loader) + i)
+        #             # if train: wandb.log({'Validation Loss': val_loss})
+        #             # else: wandb.log({'Fine-tuning Loss': val_loss})
                 
 
         # Update scheduler and calculate time taken after given epoch
