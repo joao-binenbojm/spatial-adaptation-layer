@@ -52,12 +52,6 @@ if __name__ == '__main__':
     # Log wandb conditions
     config = deepcopy(exp)
     config['scheduler'] = json.dumps(config['scheduler'])
-    wandb.init(
-        # set the wandb project where this run will be logged
-        project=exp.pop("project"),
-        config=config,
-        name=name,
-    )
 
     t0 = time()
 
@@ -180,13 +174,25 @@ if __name__ == '__main__':
     arr = np.array([subs, sessions, test_reps, accs]).T
     df = pd.DataFrame(data=arr, columns=['Subjects', 'Sessions', 'Test Repetitions', 'Accuracy'])
     df.to_csv(f"{name}.csv")
+    tf = time()
+
+    # Initialize wandb and make sure no other runs are active concurrently for interference
+    while wandb.run is not None and not wandb.run._is_finished():
+        time.sleep(3)
+
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project=exp.pop("project"),
+        config=config,
+        name=name
+        # mode='disabled'
+    )
 
     # Logging final results onto wandb 
     table = wandb.Table(dataframe=df)
     wandb.log({'complete_results': table})
     wandb.log({'Accuracy': df['Accuracy'].mean()})
 
-    tf = time()
     h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
     print('EXPERIMENT #{} - TOTAL TIME ELAPSED: {}h, {}min'.format(name, h, m))
     wandb.log({'Time Ellapsed':f'{h}h, {m}min'})
