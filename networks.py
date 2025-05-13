@@ -22,8 +22,7 @@ class CapgMyoNet(nn.Module):
         # self.spatial_adapt = SpatialAdaptation(input_shape)
 
         if baseline:
-            # self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
-            self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1])) # makes random inputs
+            self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
         else:
             self.register_buffer('baseline', torch.zeros(1, 1, input_shape[0], input_shape[1])) # original coordinates
 
@@ -161,7 +160,7 @@ class LogisticRegressor(nn.Module):
                 nn.Unflatten(dim=1, unflattened_size=(1, input_shape[0], input_shape[1]))  # Back to (B, 1, H, W)
             )
         else:
-            self.input_transform = lambda x: x  # No transformation
+            self.input_transform = lambda x: x  # No transformation        
 
     def forward(self, x):
         x = self.bn(x) # applies normalization procedure after usual filtering operations

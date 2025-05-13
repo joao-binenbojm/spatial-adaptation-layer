@@ -43,9 +43,9 @@ def get_transformation(grid_shape, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, xshe
     # return grid
 
 
-def apply_affine(data_grid, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, xshear=0, yshear=0, mode='bilinear', circular=False):
+def apply_affine(data_grid, Tx=0.0, Ty=0.0, theta=0.0, xscale=1.0, yscale=1.0, xshear=0.0, yshear=0.0, mode='bilinear', circular=False, inverse=False):
     '''Apply affine transformation to a given input grid.'''
-    theta = get_transformation(data_grid.shape, Tx=Tx, Ty=Ty, theta=theta, xscale=xscale, yscale=yscale, xshear=xshear, yshear=yshear)
+    theta = get_transformation(data_grid.shape, Tx=Tx, Ty=Ty, theta=theta, xscale=xscale, yscale=yscale, xshear=xshear, yshear=yshear, inverse=inverse)
     theta = theta[0:2,:] # slice into submatrix expected by affine_grid
     theta = theta.repeat(data_grid.shape[0],1,1)
     grid = torch.nn.functional.affine_grid(theta, size=data_grid.shape, align_corners=False)

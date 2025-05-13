@@ -21,36 +21,36 @@ import matplotlib.pyplot as plt
 # from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CapgmyoDataSegmentRMS, CSLDataSegmentRMS
 from tensorize_emg import CapgmyoData, CSLData, HyserData, GrabmyoData #CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS
 from torch_loaders import EMGFrameLoader
-from sal_classification.deep_learning import train_model, test_model, init_adabn
+from sal_classification.deep_learning import train_model, test_model, init_adabn, initial_search
 from networks import CapgMyoNet, LogisticRegressor #, LogisticRegressorHyser
 from networks_utils import median_pool_2d
 from emg_processing import majority_voting_full_segment, majority_voting_segments
 
-def handle_outliers(emg_grid):
-    '''Determine outlier channels, and replace them with average of neighbours.'''
-    # Determine coordinates of outliers
-    H, W = emg_grid.shape[2:]
-    emg_grid_var = emg_grid.mean(dim=[0,1])
-    Q1, Q3 = torch.quantile(emg_grid_var.flatten(), 0.25), torch.quantile(emg_grid_var.flatten(), 0.75)
-    IQR = Q3 - Q1
-    lower, upper = Q1 -1.5*IQR, Q3 + 1.5*IQR
-    y, x = torch.where(torch.logical_or(emg_grid_var >= upper, emg_grid_var <= lower)) # only keep non-noisy channel
-    y, x = y.tolist(), x.tolist()
+# def handle_outliers(emg_grid):
+#     '''Determine outlier channels, and replace them with average of neighbours.'''
+#     # Determine coordinates of outliers
+#     H, W = emg_grid.shape[2:]
+#     emg_grid_var = emg_grid.mean(dim=[0,1])
+#     Q1, Q3 = torch.quantile(emg_grid_var.flatten(), 0.25), torch.quantile(emg_grid_var.flatten(), 0.75)
+#     IQR = Q3 - Q1
+#     lower, upper = Q1 -1.5*IQR, Q3 + 1.5*IQR
+#     y, x = torch.where(torch.logical_or(emg_grid_var >= upper, emg_grid_var <= lower)) # only keep non-noisy channel
+#     y, x = y.tolist(), x.tolist()
 
-    idx = 0
-    while idx < len(y): # for each outlier
-        l,r,b,t = x[idx] != 0, x[idx] != W-1, y[idx] != H-1, y[idx] != 0
-        subgrid = emg_grid[:, :, y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten(start_dim=2, end_dim=3)
-        subgridvar = emg_grid_var[y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten()
-        subgrid = subgrid[:, :, torch.logical_and(subgridvar < upper, subgridvar > lower)] # remove outlier channels included
-        if subgrid.shape[2] < 1: # if less than 3 valid neighbours, try again after filling in more channels
-            y.append(y[idx])
-            x.append(x[idx])
-        else:
-            emg_grid[:,:,y[idx], x[idx]] = subgrid.mean(dim=2) # compute as average of neighbours
-        idx += 1
+#     idx = 0
+#     while idx < len(y): # for each outlier
+#         l,r,b,t = x[idx] != 0, x[idx] != W-1, y[idx] != H-1, y[idx] != 0
+#         subgrid = emg_grid[:, :, y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten(start_dim=2, end_dim=3)
+#         subgridvar = emg_grid_var[y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten()
+#         subgrid = subgrid[:, :, torch.logical_and(subgridvar < upper, subgridvar > lower)] # remove outlier channels included
+#         if subgrid.shape[2] < 1: # if less than 3 valid neighbours, try again after filling in more channels
+#             y.append(y[idx])
+#             x.append(x[idx])
+#         else:
+#             emg_grid[:,:,y[idx], x[idx]] = subgrid.mean(dim=2) # compute as average of neighbours
+#         idx += 1
 
-    return emg_grid
+#     return emg_grid
 
 # from torch.utils.tensorboard import SummaryWriter
 # writer = SummaryWriter('runs/capgmyo')
@@ -104,7 +104,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
     print('\nLOADING EMG TENSOR...')
     emg_tensorizer = emg_tensorizer_def(dataset=exp['dataset'], path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
                                         input_shape=data['input_shape'], fs=data['fs'], rep_duration=data['rep_duration'], sessions=session_ids, intrasession=False, Trms=exp['Trms'], 
-                                        remove_baseline=exp['real_baseline'], gest_subset=exp['gest_subset']) # 7-15 for capgmyo, 0-9 for csl)
+                                        remove_baseline=exp['real_baseline'], gest_subset=exp['gest_subset'], is_segment=True) # 7-15 for capgmyo, 0-9 for csl)
     emg_tensorizer.load_tensors()
 
     # Run code 5 times for every train/test session pair, except where same session is used for train and test
@@ -126,20 +126,15 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 print('\n SUBJECT #{}'.format(sub+1))
                 print('TEST SESSION #{}, TRAIN SESSION #{}'.format(test_session+1, train_session+1))
                 print('ADAPT REP #{}'.format(adapt_rep+1))
-                
-                val_idx = np.random.choice((rep_idxs), replace=False, size=1)[0] # sample a repetition for validation
-                # X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations = emg_tensorizer.get_tensors(
-                #                                                                 test_session=test_idx,
-                #                                                                 train_session=train_idx,
-                #                                                                 rep_idx=adapt_rep)
-                
-                X_train, Y_train, X_adapt, Y_adapt, X_adapt_val, Y_adapt_val, X_test, Y_test, test_durations = emg_tensorizer.get_tensors(
+                                
+                X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations = emg_tensorizer.get_tensors_intersession(
                                                                                 test_session=test_idx,
                                                                                 train_session=train_idx,
-                                                                                rep_idx=adapt_rep,
-                                                                                val_idx=val_idx)
-                # Handle outliers
-                # X_train, X_adapt, X_test = handle_outliers(X_train), handle_outliers(X_adapt), handle_outliers(X_test)
+                                                                                rep_idx=int(adapt_rep))
+                # Retry median filters
+                if exp['median-filter']:
+                    print('MEDIAN FILTERING...')
+                    X_train, X_test, X_adapt = median_pool_2d(X_train), median_pool_2d(X_test), median_pool_2d(X_adapt)
 
                 # Get PyTorch DataLoaders
                 train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=exp['norm'])
@@ -148,9 +143,6 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 train_loader = DataLoader(train_data, batch_size=exp['batch_size'], shuffle=True)
                 adapt_loader = DataLoader(adapt_data, batch_size=exp['batch_size'], shuffle=True)
                 test_loader = DataLoader(test_data, batch_size=exp['batch_size'], shuffle=False)
-
-                val_data = EMGFrameLoader(X=X_adapt_val, Y=Y_adapt_val, train=False, norm=exp['norm'], stats=train_data.stats)
-                val_loader = DataLoader(val_data, batch_size=exp['batch_size'], shuffle=True)
 
                 # Model/training set-up (if it hasn't been trained before)
                 num_epochs = exp['num_epochs']
@@ -220,6 +212,10 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 if exp['learnable_baseline']:
                     adapted_model.baseline.requires_grad = True
                 
+                print('INITIAL CONDITION SAMPLING...')
+                boundaries = torch.tensor([2.5, 2.5, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
+                initial_search(adapted_model, adapt_loader, boundaries, npoints=200) # find optimal initial condition
+
                 adapted_model.adaptation_phase = True # set model to adaptation phase
                 optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
                                              lr=exp['lr'], weight_decay=exp['weight_decay'])
@@ -228,7 +224,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
                 warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(adapt_loader)*data['num_repetitions'])
                 train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
-                            warmup_scheduler=warmup_scheduler, verbose=False, val_loader=val_loader) # run training loop
+                            warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
 
                 # Fetch params
                 if exp['adaptation'] == 'spatial-adaptation':
@@ -265,7 +261,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 data_dict.update(learned_params)
                 df = pd.DataFrame(data_dict)
                 df.to_csv(f"{name}.csv")
-                print(f'----------------------Affine learned params----------------------A')
+                print(f'----------------------Affine learned params----------------------')
                 for param_key in learned_params.keys():
                     print(f'The {param_key} is {learned_params[param_key][-1]}')
       

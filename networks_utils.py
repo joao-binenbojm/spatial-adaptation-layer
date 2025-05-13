@@ -63,7 +63,7 @@ class SpatialAdaptation(torch.nn.Module):
         self.xshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh)])
         self.yshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh)])
   
-    def forward(self, x, sal_idx=0):
+    def forward(self, x, sal_idx=0, inverse=True):
         '''Regrids input image based on affine transformation parameters.'''
         dev = x.device # assuming x and model are on the same device
         N, C, H, W = x.shape
@@ -89,7 +89,10 @@ class SpatialAdaptation(torch.nn.Module):
             torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
         ], dim=0)
 
-        theta = Sh @ Sc @ R @ T
+        if inverse:
+            theta = Sh @ Sc @ R @ T
+        else:
+            theta = T @ R @ Sc @ Sh
         theta = theta[0:2,:] # slice into submatrix expected by affine_grid
         theta = theta.repeat(N,1,1)
         grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=False)
@@ -98,17 +101,29 @@ class SpatialAdaptation(torch.nn.Module):
         xresamp = torch.nn.functional.grid_sample(x, grid, mode=self.mode, align_corners=False)
         return xresamp
     
-    def restart(self):
-        '''Reinitialize the parameters of the affine transformation.'''
-        bnds = [2*2.5/(self.input_shape[1]-1), 2*2.5/(self.input_shape[0]-1), 15/180, 0.1, 0.1, 0.1, 0.1]
-        for sal_idx in range(len(self.xshift)):
-            self.xshift[sal_idx].data = torch.tensor(random.uniform(-bnds[0], bnds[0])).to(self.xshift.device)
-            self.yshift[sal_idx].data = torch.tensor(random.uniform(-bnds[1], bnds[1])).to(self.yshift.device)
-            self.rot_theta[sal_idx].data = torch.tensor(random.uniform(-bnds[2], bnds[2])).to(self.rot_theta.device)
-            self.xscale[sal_idx].data = torch.tensor(random.uniform(1-bnds[3], 1+bnds[3])).to(self.xscale.device)
-            self.yscale[sal_idx].data = torch.tensor(random.uniform(1-bnds[4], 1+bnds[4])).to(self.yscale.device)
-            self.xshear[sal_idx].data = torch.tensor(random.uniform(-bnds[5], bnds[5])).to(self.xshear.device)
-            self.yshear[sal_idx].data = torch.tensor(random.uniform(-bnds[6], bnds[6])).to(self.yshear.device)   
+    def reset_params(self, Tx=torch.tensor(0.0), Ty=torch.tensor(0.0), rot_theta=torch.tensor(0.0), xscale=torch.tensor(1.0), yscale=torch.tensor(1.0), xshear=torch.tensor(0.0), yshear=torch.tensor(0.0)):
+        """Manually updates SAL parameters given a new set of parameters"""
+        with torch.no_grad():
+            for sal_idx in range(len(self.xshift)):
+                self.xshift[sal_idx].copy_(Tx)
+                self.yshift[sal_idx].copy_(Ty)
+                self.rot_theta[sal_idx].copy_(rot_theta)
+                self.xscale[sal_idx].copy_(xscale)
+                self.yscale[sal_idx].copy_(yscale)
+                self.xshear[sal_idx].copy_(xshear)
+                self.yshear[sal_idx].copy_(yshear)
+        
+    # def restart(self):
+    #     '''Reinitialize the parameters of the affine transformation.'''
+    #     bnds = [2*2.5/(self.input_shape[1]-1), 2*2.5/(self.input_shape[0]-1), 15/180, 0.1, 0.1, 0.1, 0.1]
+    #     for sal_idx in range(len(self.xshift)):
+    #         self.xshift[sal_idx].data = torch.tensor(random.uniform(-bnds[0], bnds[0])).to(self.xshift.device)
+    #         self.yshift[sal_idx].data = torch.tensor(random.uniform(-bnds[1], bnds[1])).to(self.yshift.device)
+    #         self.rot_theta[sal_idx].data = torch.tensor(random.uniform(-bnds[2], bnds[2])).to(self.rot_theta.device)
+    #         self.xscale[sal_idx].data = torch.tensor(random.uniform(1-bnds[3], 1+bnds[3])).to(self.xscale.device)
+    #         self.yscale[sal_idx].data = torch.tensor(random.uniform(1-bnds[4], 1+bnds[4])).to(self.yscale.device)
+    #         self.xshear[sal_idx].data = torch.tensor(random.uniform(-bnds[5], bnds[5])).to(self.xshear.device)
+    #         self.yshear[sal_idx].data = torch.tensor(random.uniform(-bnds[6], bnds[6])).to(self.yshear.device)   
         
         
 class SpatialAdaptationHyser(SpatialAdaptation):

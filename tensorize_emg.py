@@ -17,7 +17,7 @@ class EMGData:
     
     def __init__(self, dataset='csl', path='../datasets/capgmyo/dbb_csl', sub='subject1', transform=None, target_transform=None, norm=0,
                   num_gestures=26, num_repetitions=10, input_shape=(8, 24), fs=2048, rep_duration=None, Trms=0.25, sessions='session1', 
-                  intrasession=False, rms=True, remove_baseline=False, gest_subset=None):
+                  intrasession=False, rms=True, remove_baseline=False, gest_subset=None, is_segment=False):
         # Store all appropriate data parameters
         self.dataset = dataset
         self.path = path
@@ -43,6 +43,12 @@ class EMGData:
         self.sub = sub
         self.current_session = 0 # to keep track of what session we are extracting from
         self.remove_baseline=remove_baseline
+        self.is_segment = is_segment
+
+        # Mask that determines which EMG segments are active
+        self.active = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples), dtype=np.bool_)
+        self.durations = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions)) # durations of gesture segments
+
 
         # Preinitialize Data tensors
         self.X = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
@@ -120,6 +126,47 @@ class EMGData:
         else:
             raise Exception("No dataset specified.")
         return baseline
+    
+    def segment(self, emg, baseline):
+        ''' Segments a given EMG repetition based on CSL segmentation algorithm.'''
+        ksize, stride = int(0.0732*self.fs), int(0.0732*self.fs) # getting samples from fixed number of seconds
+
+        # Get RMS
+        emg = emg.T
+        emg_tensor = torch.tensor(emg).view(emg.shape[0], 1, emg.shape[1]) # convert to PyTorch for strided convolution functionality
+        weight = torch.ones(1, 1, ksize, dtype=torch.float64) / ksize # moving average filter
+        ms = torch.nn.functional.conv1d(emg_tensor**2, weight, stride=stride)
+        rms = torch.sqrt(ms).view(emg.shape[0], -1).T # convert to original shape (but of different length after conv.)
+
+        # Remove baseline and apply median filter
+        images = self.get_images(rms)
+        baseline = baseline[0,0,:,:,:,:] # remove first two singleton dimensions for easier baseline subtraction
+        bs_imgs = images - baseline # remove baseline activity from the images
+        bs_imgs = median_pool_2d(torch.tensor(bs_imgs), kernel_size=(3, 1), padding=(1, 0)) # vertical median pooling, along muscle fiber direction
+
+        # Compute threshold and threshold images
+        sum_rms = bs_imgs.sum(dim=(1, 2, 3)) # sum of RMS values of all channels for each given window
+        thrs = sum_rms.mean() # average summed RMS across windows
+        active = np.array(sum_rms > thrs) # get windows that are active
+        active = median_filter(active, size=3, mode='nearest') # doesn't remove the first and last active sub-segment
+ 
+        # Remove all segments found but the longest, and return the start and end in terms of original sampling rate
+        changes = np.diff(active, prepend=0)
+        start_indices, end_indices = np.where(changes > 0)[0], np.where(changes < 0)[0]
+
+        # If segment begins or ends active
+        if len(start_indices) == 0: start_indices = np.array([0])
+        if len(end_indices) == 0: end_indices = np.array([len(active) - 1])
+
+        min_len = min(len(start_indices), len(end_indices))
+        start_indices, end_indices = start_indices[:min_len], end_indices[:min_len]
+        max_idx = np.argmax(end_indices - start_indices)
+        start, end = start_indices[max_idx], end_indices[max_idx]
+
+        # Obtain start and end in samples in terms of original sampling rate
+        start, end = start*stride, end*stride
+
+        return start, end
 
     def extract_frames(self, DIR=None):
         ''' Placeholder function to be overriden by child classes.'''
@@ -141,69 +188,194 @@ class EMGData:
         self.X = torch.tensor(self.X)
         self.Y = torch.tensor(self.Y)
     
-    def get_tensors(self, train_session=None, test_session=None, rep_idx=None, val_idx=None, gest_idxs=None, flatten=True):
-        ''' Return data in desired format of surface images, with a leave-one-out approach for testing.
-        '''
-        if self.intrasession:
-            idxs = list(range(self.num_repetitions))
-            test_idx = [idxs.pop(rep_idx)]
-            X_train = self.X[[test_session], :, idxs, :, :, :, :] # get all but one repetition
-            Y_train = self.Y[[test_session], :, idxs, :]# get all but one repetition
-            X_test = self.X[[test_session], :, test_idx, :, :, :, :] # get one repetition
-            Y_test = self.Y[[test_session], :, test_idx, :]# get one repetition
+    # def get_tensors_standard(self, train_session=None, test_session=None, rep_idx=None, val_idx=None, gest_idxs=None, flatten=True):
+    #     ''' Return data in desired format of surface images, with a leave-one-out approach for testing.
+    #     '''
+    #     if self.intrasession:
+    #         idxs = list(range(self.num_repetitions))
+    #         test_idx = [idxs.pop(rep_idx)]
+    #         X_train = self.X[[test_session], :, idxs, :, :, :, :] # get all but one repetition
+    #         Y_train = self.Y[[test_session], :, idxs, :]# get all but one repetition
+    #         X_test = self.X[[test_session], :, test_idx, :, :, :, :] # get one repetition
+    #         Y_test = self.Y[[test_session], :, test_idx, :]# get one repetition
             
-            # Return duration of each segment in test set, which are all 1s unless specified
-            test_durations = self.num_samples*np.ones(self.Y.shape[1])
+    #         # Return duration of each segment in test set, which are all 1s unless specified
+    #         test_durations = self.num_samples*np.ones(self.Y.shape[1])
 
-            # Convert to torch tensors of type float32
-            X_train, X_test = X_train.to(torch.float32), X_test.to(torch.float32)
-            if flatten:
-                X_train, Y_train = torch.flatten(X_train, end_dim=-4), torch.flatten(Y_train, end_dim=-1)
-                X_test, Y_test = torch.flatten(X_test, end_dim=-4), torch.flatten(Y_test, end_dim=-1)
-            return X_train, Y_train, X_test, Y_test, test_durations
+    #         # Convert to torch tensors of type float32
+    #         X_train, X_test = X_train.to(torch.float32), X_test.to(torch.float32)
+    #         if flatten:
+    #             X_train, Y_train = torch.flatten(X_train, end_dim=-4), torch.flatten(Y_train, end_dim=-1)
+    #             X_test, Y_test = torch.flatten(X_test, end_dim=-4), torch.flatten(Y_test, end_dim=-1)
+    #         return X_train, Y_train, X_test, Y_test, test_durations
         
+    #     else:
+    #         idxs = list(range(self.num_repetitions))
+    #         # If fine-tuning on a single repetition
+    #         adapt_idx = []
+    #         if rep_idx is not None:
+    #             if type(rep_idx) != list: rep_idx = [rep_idx]
+    #             for one_rep_idx in sorted(rep_idx, reverse=True):
+    #                 adapt_idx.append(idxs.pop(one_rep_idx))
+    #         else: # else, fine-tune on all available test data
+    #             adapt_idx = idxs
+
+    #         # If fine-tuning on a single repetition of one or few gestures
+    #         if gest_idxs is not None:
+    #             if isinstance(gest_idxs, int): gest_idxs = [gest_idxs] # if single gesture for calibration selected
+    #         else:
+    #             gest_idxs = np.arange(self.num_gestures)
+
+    #         X_train = self.X[[train_session], :, :, :, :, :, :] # get train session labels
+    #         Y_train = self.Y[[train_session], :, :, :] # get train session labels
+    #         X_adapt = self.X[[test_session], gest_idxs, adapt_idx, :, :, :, :] # get all sessions but one
+    #         Y_adapt = self.Y[[test_session], gest_idxs, adapt_idx, :] # get train session labels
+    #         X_test = self.X[[test_session], :, idxs, :, :, :, :] # get other session
+    #         Y_test = self.Y[[test_session], :, idxs, :] # get other session
+
+    #         # Return duration of each segment in test set, which are all 1s unless specified
+    #         test_durations = self.num_samples*np.ones(self.Y.shape[1]*(self.Y.shape[2] - 1))
+
+    #         # Convert to torch tensors of type float32
+    #         X_train, X_adapt, X_test = X_train.to(torch.float32), X_adapt.to(torch.float32), X_test.to(torch.float32)
+    #         if flatten:
+    #             X_train, Y_train = torch.flatten(X_train, end_dim=-4), torch.flatten(Y_train, end_dim=-1)
+    #             X_adapt, Y_adapt = torch.flatten(X_adapt, end_dim=-4), torch.flatten(Y_adapt, end_dim=-1)
+    #             X_test, Y_test = torch.flatten(X_test, end_dim=-4), torch.flatten(Y_test, end_dim=-1)        
+
+    #         if val_idx is None:
+    #             return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations
+    #         else:
+    #             X_adapt_val = self.X[[test_session], gest_idxs, val_idx, :, :, :, :].to(torch.float32)
+    #             Y_adapt_val = self.Y[[test_session], gest_idxs, val_idx, :].to(torch.float32) # get train session labels
+    #             if flatten:
+    #                 X_adapt_val, Y_adapt_val = torch.flatten(X_adapt_val, end_dim=-4), torch.flatten(Y_adapt_val, end_dim=-1)
+    #             return X_train, Y_train, X_adapt, Y_adapt, X_adapt_val, Y_adapt_val, X_test, Y_test, test_durations
+
+    def get_tensors_intrasession(self, session, rep_idx=None, flatten=True):
+        """
+        Logic for intrasession case.
+        """
+        idxs = list(range(self.num_repetitions))
+        test_idx = [idxs.pop(rep_idx)]
+
+        # Get train and test splits
+        X_train = self.X[[session], :, idxs, :, :, :, :]
+        Y_train = self.Y[[session], :, idxs, :]
+        X_test = self.X[[session], :, test_idx, :, :, :, :]
+        Y_test = self.Y[[session], :, test_idx, :]
+
+        if self.is_segment:
+            # Segmentation-specific logic
+            train_active = self.active[[session], :, idxs, :]
+            test_active = self.active[[session], :, test_idx, :]
+            X_train, Y_train = X_train[torch.tensor(train_active)], Y_train[torch.tensor(train_active)]
+            X_test, Y_test = X_test[torch.tensor(test_active)], Y_test[torch.tensor(test_active)]
+            test_durations = self.durations[session, :, test_idx]
         else:
-            idxs = list(range(self.num_repetitions))
-            # If fine-tuning on a single repetition
-            adapt_idx = []
-            if rep_idx is not None:
-                if type(rep_idx) != list: rep_idx = [rep_idx]
-                for one_rep_idx in sorted(rep_idx, reverse=True):
-                    adapt_idx.append(idxs.pop(one_rep_idx))
-            else: # else, fine-tune on all available test data
-                adapt_idx = idxs
+            # Standard logic
+            test_durations = self.num_samples * np.ones(self.Y.shape[1])
 
-            # If fine-tuning on a single repetition of one or few gestures
-            if gest_idxs is not None:
-                if isinstance(gest_idxs, int): gest_idxs = [gest_idxs] # if single gesture for calibration selected
-            else:
-                gest_idxs = np.arange(self.num_gestures)
+        # Convert to torch tensors of type float32
+        X_train, X_test = X_train.to(torch.float32), X_test.to(torch.float32)
+        if flatten:
+            X_train, Y_train = torch.flatten(X_train, end_dim=-4), torch.flatten(Y_train, end_dim=-1)
+            X_test, Y_test = torch.flatten(X_test, end_dim=-4), torch.flatten(Y_test, end_dim=-1)
 
-            X_train = self.X[[train_session], :, :, :, :, :, :] # get train session labels
-            Y_train = self.Y[[train_session], :, :, :] # get train session labels
-            X_adapt = self.X[[test_session], gest_idxs, adapt_idx, :, :, :, :] # get all sessions but one
-            Y_adapt = self.Y[[test_session], gest_idxs, adapt_idx, :] # get train session labels
-            X_test = self.X[[test_session], :, idxs, :, :, :, :] # get other session
-            Y_test = self.Y[[test_session], :, idxs, :] # get other session
+        return X_train, Y_train, X_test, Y_test, test_durations.ravel()
 
-            # Return duration of each segment in test set, which are all 1s unless specified
-            test_durations = self.num_samples*np.ones(self.Y.shape[1]*(self.Y.shape[2] - 1))
+    def get_tensors_intersession(self, train_session, test_session, rep_idx=None, gest_idxs=None, flatten=True):
+        """
+        Logic for intersession case.
+        """
+        idxs = list(range(self.num_repetitions))
+        adapt_idx = []
 
-            # Convert to torch tensors of type float32
-            X_train, X_adapt, X_test = X_train.to(torch.float32), X_adapt.to(torch.float32), X_test.to(torch.float32)
-            if flatten:
-                X_train, Y_train = torch.flatten(X_train, end_dim=-4), torch.flatten(Y_train, end_dim=-1)
-                X_adapt, Y_adapt = torch.flatten(X_adapt, end_dim=-4), torch.flatten(Y_adapt, end_dim=-1)
-                X_test, Y_test = torch.flatten(X_test, end_dim=-4), torch.flatten(Y_test, end_dim=-1)        
+        if rep_idx is not None:
+            if isinstance(rep_idx, int):
+                rep_idx = [rep_idx]
+            for one_rep_idx in sorted(rep_idx, reverse=True):
+                adapt_idx.append(idxs.pop(one_rep_idx))
+        else:
+            adapt_idx = idxs
 
-            if val_idx is None:
-                return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations
-            else:
-                X_adapt_val = self.X[[test_session], gest_idxs, val_idx, :, :, :, :].to(torch.float32)
-                Y_adapt_val = self.Y[[test_session], gest_idxs, val_idx, :].to(torch.float32) # get train session labels
-                if flatten:
-                    X_adapt_val, Y_adapt_val = torch.flatten(X_adapt_val, end_dim=-4), torch.flatten(Y_adapt_val, end_dim=-1)
-                return X_train, Y_train, X_adapt, Y_adapt, X_adapt_val, Y_adapt_val, X_test, Y_test, test_durations
+        # Get train, adapt, and test splits
+        X_train = self.X[[train_session], :, :, :, :, :, :]
+        Y_train = self.Y[[train_session], :, :, :]
+        X_adapt = self.X[[test_session], :, adapt_idx, :, :, :, :]
+        Y_adapt = self.Y[[test_session], :, adapt_idx, :]
+        X_test = self.X[[test_session], :, idxs, :, :, :, :]
+        Y_test = self.Y[[test_session], :, idxs, :]
+
+        if gest_idxs is not None:
+            if isinstance(gest_idxs, int):
+                gest_idxs = [gest_idxs]
+            X_adapt = X_adapt[:, gest_idxs, :, :, :, :]
+            Y_adapt = Y_adapt[:, gest_idxs, :]
+
+        if self.is_segment:
+            # Segmentation-specific logic
+            train_active = self.active[[train_session], :, :, :]
+            adapt_active = self.active[[test_session], :, adapt_idx, :]
+            test_active = self.active[[test_session], :, idxs, :]
+            X_train, Y_train = X_train[torch.tensor(train_active)], Y_train[torch.tensor(train_active)]
+            X_adapt, Y_adapt = X_adapt[torch.tensor(adapt_active)], Y_adapt[torch.tensor(adapt_active)]
+            X_test, Y_test = X_test[torch.tensor(test_active)], Y_test[torch.tensor(test_active)]
+            adapt_durations = self.durations[test_session, :, adapt_idx]
+            test_durations = self.durations[test_session, :, idxs]
+        else:
+            # Standard logic
+            adapt_durations = self.num_samples * np.ones(self.Y.shape[1])
+            test_durations = self.num_samples * np.ones(self.Y.shape[1])
+
+        # Convert to torch tensors of type float32
+        X_train, X_adapt, X_test = X_train.to(torch.float32), X_adapt.to(torch.float32), X_test.to(torch.float32)
+        if flatten:
+            X_train, Y_train = torch.flatten(X_train, end_dim=-4), torch.flatten(Y_train, end_dim=-1)
+            X_adapt, Y_adapt = torch.flatten(X_adapt, end_dim=-4), torch.flatten(Y_adapt, end_dim=-1)
+            X_test, Y_test = torch.flatten(X_test, end_dim=-4), torch.flatten(Y_test, end_dim=-1)
+
+        return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations.ravel()
+
+    def get_tensors_simulation(self, session, adapt_rep_idx, test_rep_idx, flatten=True):
+        """
+        Logic for simulation case.
+        """
+        idxs = list(range(self.num_repetitions))
+        adapt_idx = [idxs.pop(adapt_rep_idx)]  # Remove adapt repetition from train indices
+        test_idx = [idxs.pop(test_rep_idx - (1 if adapt_rep_idx < test_rep_idx else 0))]  # Remove test repetition from train indices
+
+        # Get train, adapt, and test splits
+        X_train = self.X[[session], :, idxs, :, :, :, :]
+        Y_train = self.Y[[session], :, idxs, :]
+        X_adapt = self.X[[session], :, adapt_idx, :, :, :, :]
+        Y_adapt = self.Y[[session], :, adapt_idx, :]
+        X_test = self.X[[session], :, test_idx, :, :, :, :]
+        Y_test = self.Y[[session], :, test_idx, :]
+
+        if self.is_segment:
+            # Segmentation-specific logic
+            train_active = self.active[[session], :, idxs, :]
+            adapt_active = self.active[[session], :, adapt_idx, :]
+            test_active = self.active[[session], :, test_idx, :]
+            X_train, Y_train = X_train[torch.tensor(train_active)], Y_train[torch.tensor(train_active)]
+            X_adapt, Y_adapt = X_adapt[torch.tensor(adapt_active)], Y_adapt[torch.tensor(adapt_active)]
+            X_test, Y_test = X_test[torch.tensor(test_active)], Y_test[torch.tensor(test_active)]
+            # adapt_durations = self.durations[session, :, adapt_idx]
+            test_durations = self.durations[session, :, test_idx]
+        else:
+            # Standard logic
+            # adapt_durations = self.num_samples * np.ones(self.Y.shape[1])
+            test_durations = self.num_samples * np.ones(self.Y.shape[1])
+
+        # Convert to torch tensors of type float32
+        X_train, X_adapt, X_test = X_train.to(torch.float32), X_adapt.to(torch.float32), X_test.to(torch.float32)
+        if flatten:
+            X_train, Y_train = torch.flatten(X_train, end_dim=-4), torch.flatten(Y_train, end_dim=-1)
+            X_adapt, Y_adapt = torch.flatten(X_adapt, end_dim=-4), torch.flatten(Y_adapt, end_dim=-1)
+            X_test, Y_test = torch.flatten(X_test, end_dim=-4), torch.flatten(Y_test, end_dim=-1)
+
+        return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test,  test_durations.ravel()
 
     def oversample_repetitions(self, X, Y, cur_label, reps, missing):
         ''' Used when there is a non-uniform number of repetitions across gestures for a given uer.
@@ -557,7 +729,7 @@ class CapgmyoData(EMGData):
 #                 # Get segmentation outcome
 #                 emg_segment = emg[start:end]
 #                 sdx = int(DIR[-1]) - 1 # get the session number
-#                 active_start, active_end = self.segment(emg_segment, baseline)
+#                 active_start, active_end = self.is_segment(emg_segment, baseline)
 #                 self.active[sdx, cur_label, idx//2, active_start:active_end] = True # set signals to active within that timeframe
 #                 self.durations[sdx, cur_label, idx//2] = active_end - active_start # store segment duration in samples
 
@@ -586,6 +758,16 @@ class CSLData(EMGData):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        if self.is_segment: # if applying activity segmentation
+            # Preinitialize Data tensors
+            self.num_samples = 3*self.fs
+            self.X = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
+            self.Y = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples))
+
+                    # Mask that determines which EMG segments are active
+            self.active = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples), dtype=np.bool_)
+            self.durations = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions)) # durations of gesture segments
+
     def extract_frames(self, DIR):
         ''' Extract frames for the given subject/session for CSL dataset.'''
 
@@ -598,6 +780,10 @@ class CSLData(EMGData):
         # Filter out gestures not in subset
         filenames = [name for name in filenames if (int(name.replace('gest', '').replace('.mat', ''))-1) in self.gest_subset]
         filenames = sorted(filenames, key=lambda x: int(x.replace('gest', '').replace('.mat', ''))) # ensures ordering of gestures
+        
+        if self.is_segment:
+            baseline = self.get_baseline(SESSION_DIR)
+
         for gdx, name in enumerate(filenames):
             mat = sio.loadmat(os.path.join(SESSION_DIR, name))
             # cur_label = int(name.replace('gest', '').replace('.mat', '')) - 1 # get the label for the given gesture
@@ -611,11 +797,19 @@ class CSLData(EMGData):
                 emg = mat['gestures'][idx, 0].T
                 emg = emg - emg.mean(axis=0, keepdims=True) # centering each channel of EMG to remove baseline drifts
                 emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+
+                # Get segmentation outcome
+                if self.is_segment:
+                    start, end = self.segment(emg, baseline)
+                    self.active[self.current_session, gdx, idx, start:end] = True # set signals to active within that timeframe
+                    self.durations[self.current_session, gdx, idx] = end - start # store segment duration in samples
+                else:
+                    center = len(emg) // 2 # get the central index of the given repetition
+                    emg = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
+                
                 if self.rms:
                     emg = get_rms_signal(emg, Mrms=self.Mrms)
-                center = len(emg) // 2 # get the central index of the given repetition
-                emg_segment = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
-                images = self.get_images(emg_segment)
+                images = self.get_images(emg)
 
                 # Add data extracted from given repetition to our data matrix            
                 X[gdx, idx, :, :, :, :] = images # add EMG surface images onto our data matrix

@@ -1,8 +1,8 @@
 {
-    "name": "intrasession-median-nobase-6gests",
+    "name": "simulation-test-cnn",
     "project": "intrasession-new",
     "K": 1,
-    "num_epochs": 15,
+    "num_epochs": 2,
     "norm": 0,
     "lr": 0.001,
     "p_input": 0.5,
@@ -16,7 +16,7 @@
     "batch_size": 128,
     "momentum": 0,
     "weight_decay": 0,
-    "network": "LogisticRegressor",
+    "network": "CapgMyoNet",
     "dataset": "csl",
     "emg_tensorizer": "CSLData",
     "Trms": 0.25,
@@ -33,7 +33,7 @@
     "real_baseline": true,
     "learnable_baseline": false,
     "adabatch": false,
-    "gest_subset": [7, 8, 9, 10, 11, 12],
+    "gest_subset": [7, 8, 9, 10, 11, 12, 13, 14, 15],
     "circular": false,
-    "median-filter": true
+    "median-filter": false
 }

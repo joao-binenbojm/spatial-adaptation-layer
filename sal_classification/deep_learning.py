@@ -49,13 +49,13 @@ def initial_search(model, train_loader, boundaries, npoints=50):
         
         for npoint in tqdm(range(npoints)):
             # Set initial conditions
-            model.input_transform.xshift.data = init_params[npoint, 0]
-            model.input_transform.yshift.data = init_params[npoint, 1]
-            model.input_transform.rot_theta.data = init_params[npoint, 2]
-            model.input_transform.xscale.data = init_params[npoint, 3]
-            model.input_transform.yscale.data = init_params[npoint, 4]
-            model.input_transform.xshear.data = init_params[npoint, 5]
-            model.input_transform.yshear.data = init_params[npoint, 6]
+            model.input_transform.xshift[0].copy_(init_params[npoint, 0])
+            model.input_transform.yshift[0].copy_(init_params[npoint, 1])
+            model.input_transform.rot_theta[0].copy_(init_params[npoint, 2])
+            model.input_transform.xscale[0].copy_(init_params[npoint, 3])
+            model.input_transform.yscale[0].copy_(init_params[npoint, 4])
+            model.input_transform.xshear[0].copy_(init_params[npoint, 5])
+            model.input_transform.yshear[0].copy_(init_params[npoint, 6])
 
             # Get batch estimate of supervised loss
             total_loss = 0
@@ -72,15 +72,13 @@ def initial_search(model, train_loader, boundaries, npoints=50):
         if npoints > 0:
             best_params = init_params[losses.argmin(), :]
             print('BEST PARAMS:', best_params)
-            model.input_transform.xshift.data = best_params[0]
-            model.input_transform.yshift.data = best_params[1]
-            model.input_transform.rot_theta.data = best_params[2]
-            model.input_transform.xscale.data = best_params[3]
-            model.input_transform.yscale.data = best_params[4]
-            model.input_transform.xshear.data = best_params[5]
-            model.input_transform.yshear.data = best_params[6]            # sda.sal.xscale.data, sda.sal.yscale.data = init_params[losses.argmax(), 3:]
-
-
+            model.input_transform.xshift[0].copy_(best_params[0])
+            model.input_transform.yshift[0].copy_(best_params[1])
+            model.input_transform.rot_theta[0].copy_(best_params[2])
+            model.input_transform.xscale[0].copy_(best_params[3])
+            model.input_transform.yscale[0].copy_(best_params[4])
+            model.input_transform.xshear[0].copy_(best_params[5])
+            model.input_transform.yshear[0].copy_(best_params[6])            # sda.sal.xscale.data, sda.sal.yscale.data = init_params[losses.argmax(), 3:]
 
 def train_model(model, train_loader, optimizer, criterion, num_epochs=2, scheduler=None, warmup_scheduler=None, val_loader=None, val_acc_threshold=0.8, verbose=True, simulation=False):
     '''Training loop for given experiment.'''
@@ -130,7 +128,7 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
                 for param_name in ['xshift', 'yshift', 'rot_theta', 'xscale', 'yscale','xshear', 'yshear']:
                     cur_learned_params = []
                     param = getattr(model.input_transform, param_name, None)
-                    if param: cur_learned_params.append(param.item())
+                    if param: cur_learned_params.append(param[0].item())
                 dists.append(get_grid_distance(signals[[0],:,:,:].shape, model.true_params, cur_learned_params))
 
             if (i + 1) % 20 == 0:

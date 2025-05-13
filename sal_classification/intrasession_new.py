@@ -70,8 +70,8 @@ if __name__ == '__main__':
         # Load EMG data in uniform format
         print('\nLOADING EMG TENSOR...')
         emg_tensorizer = emg_tensorizer_def(dataset=exp['dataset'], path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
-                                        input_shape=data['input_shape'], fs=data['fs'], rep_duration=data['rep_duration'], sessions=session_ids, intrasession=True, Trms=exp['Trms'], 
-                                        remove_baseline=exp['real_baseline'], gest_subset=exp['gest_subset']) 
+                                        input_shape=data['input_shape'], fs=data['fs'], rep_duration=data['rep_duration'], sessions=session_ids, Trms=exp['Trms'], 
+                                        remove_baseline=exp['real_baseline'], gest_subset=exp['gest_subset'], is_segment=True) 
         emg_tensorizer.load_tensors()
 
         for session in tqdm(data['sessions']):
@@ -83,7 +83,7 @@ if __name__ == '__main__':
                 print('\n SUBJECT #{}, SESSION #{}'.format(sub + 1, session + 1))
                 print('TEST REPETITION #{}'.format(test_idx + 1))
 
-                X_train, Y_train, X_test, Y_test, test_durations = emg_tensorizer.get_tensors(test_session=session, rep_idx=test_idx)
+                X_train, Y_train, X_test, Y_test, test_durations = emg_tensorizer.get_tensors_intrasession(session=session, rep_idx=test_idx)
 
                 # Retry median filters
                 if exp['median-filter']:
@@ -100,7 +100,6 @@ if __name__ == '__main__':
 
                 # Model/training set-up
                 Nv, Nh = emg_tensorizer.input_shape[0], emg_tensorizer.input_shape[1]
-                # model = eval(exp['network'])(channels=np.prod((Nv, Nh)), input_shape=(Nv, Nh), num_classes=data['num_gestures']).to(device)
                 model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=emg_tensorizer.num_gestures, 
                                                         p_input=exp['p_input'], baseline=exp['learnable_baseline'], circular=exp["circular"]).to(device)
                 num_epochs = exp['num_epochs']
@@ -109,11 +108,6 @@ if __name__ == '__main__':
                                              lr=exp['lr'], weight_decay=exp['weight_decay'])
                 scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
                 warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
-
-                # Train the model
-                # for param in model.spatial_adapt.parameters():
-                #     param.requires_grad = False
-                # model.baseline.requires_grad = False
                 
                 train_model(model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                             warmup_scheduler=warmup_scheduler) # run training loop
@@ -128,42 +122,6 @@ if __name__ == '__main__':
                 accs.append(acc)
                 print('Test Accuracy:', acc)
 
-                # # Majority voting, with number of frames depending on dataset used
-                # if exp['dataset'] == 'capgmyo':
-                #     maj_all_preds = majority_voting_segments(all_preds, Mmj=75, durations=test_durations)
-                #     maj_acc = accuracy_score(all_labs, maj_all_preds)
-                #     maj_accs.append(maj_acc)
-                #     print('Majority Voting Accuracy:', maj_acc)
-                
-                # else: # if csl, compute one MJV predition for each test segment
-                #     maj_all_preds, maj_all_labs = majority_voting_full_segment(all_preds, test_durations), majority_voting_full_segment(all_labs, test_durations)
-                #     maj_acc = accuracy_score(maj_all_labs, maj_all_preds)
-                #     maj_accs.append(maj_acc)
-                #     print('Majority Voting Accuracy:', maj_acc)
-
-                # # Plotting confusion matrix to understand what's going on
-                # # labs = np.arange(1, 27)
-                # labs = np.arange(data['num_gestures'])
-                # cf = confusion_matrix(all_labs, all_preds, labels=labs)
-                # disp = ConfusionMatrixDisplay(confusion_matrix=cf, display_labels=labs)
-                # disp.plot()
-                # plt.savefig('cfm.jpg')
-                # plt.close()
-
-                # # Plotting a prediction-label stream
-                # plt.figure()
-                # plt.plot(all_labs)
-                # plt.plot(maj_all_preds)
-                # plt.legend(['Labels', 'Predictions'])
-                # plt.savefig('stream_maj.jpg')
-                # plt.close()
-
-                # plt.figure()
-                # plt.plot(all_labs)
-                # plt.plot(all_preds)
-                # plt.legend(['Labels', 'Predictions'])
-                # plt.savefig('stream.jpg')
-                # plt.close()
 
                 # SAVE RESULTS
                 arr = np.array([subs, sessions, test_reps, accs]).T
@@ -184,8 +142,8 @@ if __name__ == '__main__':
         # set the wandb project where this run will be logged
         project=exp.pop("project"),
         config=config,
-        name=name
-        # mode='disabled'
+        name=name,
+        mode='disabled'
     )
 
     # Logging final results onto wandb 
