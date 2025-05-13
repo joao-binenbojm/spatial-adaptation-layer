@@ -1,7 +1,7 @@
 import json
 import os
 
-with open('sal_classification/exp-intra.json', 'rb') as f:
+with open('sal_classification/exp-base.json', 'rb') as f:
     exp = json.load(f)
 
 conditions_dir = 'conditions1'
