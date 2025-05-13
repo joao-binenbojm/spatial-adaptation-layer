@@ -46,13 +46,6 @@ if __name__ == '__main__':
     # Log wandb conditions
     config = deepcopy(exp)
     config['scheduler'] = json.dumps(config['scheduler'])
-    wandb.init(
-        # set the wandb project where this run will be logged
-        project=exp.pop("project"),
-        config=config,
-        name=name,
-        mode='disabled',
-    )
 
     t0 = time() # start tracking time
 
@@ -194,14 +187,6 @@ if __name__ == '__main__':
             print('Oracle Test Accuracy:', oracle_acc)
             print('Oracle F1 Score:', oracle_f1)
 
-            # with torch.no_grad():
-            #     all_labs, all_preds = test_model(adapted_model, test_loader2)
-
-            # oracle_acc = accuracy_score(all_labs, all_preds)
-            # oracle_f1 = f1_score(all_labs, all_preds, average='macro')
-            # print('Oracle Test Accuracy (apply_affine):', oracle_acc)
-            # print('Oracle F1 Score (apply_affine):', oracle_f1)
-
             # Reset SAL parameters
             adapted_model.input_transform.reset_params()
 
@@ -275,6 +260,19 @@ if __name__ == '__main__':
     data_dict.update(learned_params)
     df = pd.DataFrame(data_dict)
     df.to_csv(f"{name}.csv")
+
+    # Initialize wandb and make sure no other runs are active concurrently for interference
+    while wandb.run is not None and not wandb.run._is_finished():
+        time.sleep(3)
+
+    # Log wandb
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project=exp.pop("project"),
+        config=config,
+        name=name,
+        mode='disabled',
+    )
 
     # Logging final results onto wandb 
     table = wandb.Table(dataframe=df)

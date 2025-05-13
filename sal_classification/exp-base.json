@@ -1,6 +1,6 @@
 {
     "name": "simulation-test-cnn",
-    "project": "intrasession-new",
+    "project": "simulation-new",
     "K": 1,
     "num_epochs": 2,
     "norm": 0,
