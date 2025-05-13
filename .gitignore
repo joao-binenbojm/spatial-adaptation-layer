@@ -6,3 +6,5 @@ __pycache__/
 wandb/
 mean_images/
 conditions/
+conditions2/
+conditions3/
