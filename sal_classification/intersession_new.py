@@ -74,13 +74,6 @@ name = exp['name'] # keep experiment name
 # Log wandb conditions
 config = deepcopy(exp)
 config['scheduler'] = json.dumps(config['scheduler'])
-wandb.init(
-    # set the wandb project where this run will be logged
-    project=exp["project"],
-    config=config,
-    name=name,
-    mode='disabled',
-)
 
 t0 = time()
 
@@ -275,6 +268,9 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     for key in learned_params.keys(): learned_params[key].append(0.0) # set fetched parameters to 0 if no spatial adaptation
 
                 # Testing loop over test loader (K-shot)
+                if exp['adaptation'] == 'spatial-adaptation':
+                    adapted_model.input_transform.mode = 'bicubic'
+
                 print('TESTING...')
                 with torch.no_grad():
                     tuned_all_labs, tuned_all_preds = test_model(adapted_model, test_loader)
@@ -329,14 +325,17 @@ data_dict.update(learned_params)
 df = pd.DataFrame(data_dict)
 df.to_csv(f"{name}.csv")
 
+# Initialize wandb and make sure no other runs are active concurrently for interference
+while wandb.run is not None and not wandb.run._is_finished():
+    time.sleep(3)
+
 # Log wandb conditions
-config = deepcopy(exp)
-config['scheduler'] = json.dumps(config['scheduler'])
 wandb.init(
     # set the wandb project where this run will be logged
-    project="intersession",
+    project=exp["project"],
     config=config,
-    mode='disabled',
+    name=name,
+    # mode='disabled',
 )
 
 table = wandb.Table(dataframe=df)
@@ -348,10 +347,10 @@ wandb.log({'Tuned Accuracy': df['Tuned Accuracy'].mean()})
 # wandb.log({'Majority Voting Accuracy': df['Majority Voting Accuracy'].mean()})
 # wandb.log({'Majority Voting Tuned Accuracy': df['Majority Voting Tuned Accuracy'].mean()})
 
-if exp['project'] == 'architecture-evaluation':
-    wandb.log({'inter_channels': base_model.inter_channels})
-    wandb.log({'conv_kernel_size': str(base_model.conv_kernel_size)})
-    wandb.log({'pool_kernel_size': str(base_model.pool_kernel_size)})
+# if exp['project'] == 'architecture-evaluation':
+#     wandb.log({'inter_channels': base_model.inter_channels})
+#     wandb.log({'conv_kernel_size': str(base_model.conv_kernel_size)})
+#     wandb.log({'pool_kernel_size': str(base_model.pool_kernel_size)})
 
 tf = time()
 h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60

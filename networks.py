@@ -19,7 +19,7 @@ class CapgMyoNet(nn.Module):
         self.input_shape = input_shape
         self.num_classes = num_classes
 
-        # self.spatial_adapt = SpatialAdaptation(input_shape)
+        self.corrective_gain = False
 
         if baseline:
             self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
@@ -98,17 +98,17 @@ class CapgMyoNet(nn.Module):
         This is used to set the baseline for normalization.
         """
         # Assuming X is a tensor of shape (batch_size, channels, height, width)
+        self.corrective_gain = True
         with torch.no_grad():
             self.register_buffer('mean_session1', X1.to(next(self.parameters()).device).mean(dim=0, keepdim=True))  # Store the mean as baseline
-            self.register_buf
+            self.register_buffer('mean_session2', X2.to(next(self.parameters()).device).mean(dim=0, keepdim=True))  # Store the mean as baseline
 
     def forward(self, x):
-
-        # # Reshape EMG channels into grid
-        # batch_size = x.shape[0]
-        # x = x.squeeze() # remove any redundant dimensions
-        # x = x.view(batch_size, self.input_shape[1], self.input_shape[0]) # convert from channels into grid
-        # x = torch.transpose(x, 1, 2) # tranpose required as reshape is not the default ordering
+        if self.adaptation_phase and self.corrective_gain:
+            mean_session2 = self.input_transform(self.mean_session2) # apply input transform to session 2 mean
+            scaling_factors = (self.mean_session1 / (mean_session2 + 1e-12))
+            scaling_factors = torch.clamp(scaling_factors, min=0.5, max=2.0)  # clamp scaling factors to avoid extreme values
+            x = x * scaling_factors  # scale to match magnitude of session 1
 
         x = self.batchnorm0(x)
         if self.adaptation_phase:
@@ -184,6 +184,7 @@ class LogisticRegressor(nn.Module):
         if self.adaptation_phase and self.corrective_gain:
             mean_session2 = self.input_transform(self.mean_session2) # apply input transform to session 2 mean
             scaling_factors = (self.mean_session1 / (mean_session2 + 1e-12))
+            scaling_factors = torch.clamp(scaling_factors, min=0.5, max=2.0)  # clamp scaling factors to avoid extreme values
             x = x * scaling_factors  # scale to match magnitude of session 1
         
         x = self.bn(x) # applies normalization procedure after usual filtering operations

@@ -42,7 +42,7 @@ for dataset in ['csl', 'capgmyo', 'hyser', 'grabmyo-forearm', 'grabmyo-wrist']:
     # For each network
     for network in ['LogisticRegressor', 'CapgMyoNet']:
         if network == 'CapgMyoNet':
-            exp['num_epochs'] = 1
+            exp['num_epochs'] = 2
         elif network == 'LogisticRegressor':
             exp['num_epochs'] = 15
         exp['network'] = network
