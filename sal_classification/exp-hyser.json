@@ -1,8 +1,8 @@
 {
-    "name": "hyser-test-refactor",
-    "project": "classification-simulation",
+    "name": "intersession-hyser-test",
+    "project": "simulation-new",
     "K": 1,
-    "num_epochs": 5,
+    "num_epochs": 10,
     "norm": 0,
     "lr": 0.001,
     "p_input": 0.5,
@@ -30,9 +30,10 @@
         "xshear": true,
         "yshear": true
     },
-    "real_baseline": false,
-    "learnable_baseline": true,
+    "real_baseline": true,
+    "learnable_baseline": false,
     "adabatch": false,
-    "gest_subset": [5,6,7,8,9,10,13,14,15,16,17,18],
-    "circular": false
+    "gest_subset": [5,6,7,8,9,10, 13,14,15,16,17,18],
+    "circular": false,
+    "median-filter": true
 }

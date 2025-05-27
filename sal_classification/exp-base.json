@@ -1,8 +1,8 @@
 {
-    "name": "simulation-test-cnn",
-    "project": "simulation-new",
+    "name": "intersession-hyser-testing",
+    "project": "intersession-new",
     "K": 1,
-    "num_epochs": 2,
+    "num_epochs": 15,
     "norm": 0,
     "lr": 0.001,
     "p_input": 0.5,
@@ -16,9 +16,9 @@
     "batch_size": 128,
     "momentum": 0,
     "weight_decay": 0,
-    "network": "CapgMyoNet",
-    "dataset": "csl",
-    "emg_tensorizer": "CSLData",
+    "network": "LogisticRegressor",
+    "dataset": "hyser",
+    "emg_tensorizer": "HyserData",
     "Trms": 0.25,
     "adaptation": "spatial-adaptation",
     "adaptation_params": {
@@ -30,10 +30,10 @@
         "xshear": true,
         "yshear": true
     },
-    "real_baseline": true,
+    "real_baseline": false,
     "learnable_baseline": false,
     "adabatch": false,
-    "gest_subset": [7, 8, 9, 10, 11, 12, 13, 14, 15],
+    "gest_subset": [0,1,4,25,28,31,33],
     "circular": false,
-    "median-filter": false
+    "median-filter": true
 }

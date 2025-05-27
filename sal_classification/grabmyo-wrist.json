@@ -2,7 +2,7 @@
     "DIR": "../datasets/grabmyo",
     "num_gestures": 16,
     "num_repetitions": 7,
-    "input_shape": [2, 14],
+    "input_shape": [2, 6],
     "dataset_name": "grabmyo",
     "fs": 2048,
     "rep_duration": 5,

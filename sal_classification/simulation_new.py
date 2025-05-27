@@ -50,8 +50,7 @@ if __name__ == '__main__':
     t0 = time() # start tracking time
 
     # Preinitialize metric arrays
-    
-    npoints = 100
+    npoints = 10
     session_ids = ['session'+str(ses+1) for ses in data['sessions']]
     subs, sessions, test_reps = [], [], []
     learned_params = {key: [] for key in ['xshift', 'yshift', 'rot_theta', 'xscale', 'yscale', 'xshear', 'yshear']}
@@ -61,6 +60,7 @@ if __name__ == '__main__':
     f1_scores, trans_f1_scores, oracle_f1_scores, tuned_f1_scores = [], [], [], []
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
+
     print('SIMULATED SPATIAL PERTURBATIONS:', data['dataset_name'])
     for idx, sub in tqdm(enumerate(data['subs'])):
         sub_id = 'subject{}'.format(sub+1)
@@ -69,7 +69,7 @@ if __name__ == '__main__':
         print('\nLOADING EMG TENSOR...')
         emg_tensorizer = emg_tensorizer_def(dataset=exp['dataset'], path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
                                         input_shape=data['input_shape'], fs=data['fs'], rep_duration=data['rep_duration'], sessions=session_ids, Trms=exp['Trms'], 
-                                        remove_baseline=exp['real_baseline'], gest_subset=exp['gest_subset'], is_segment=True) # 7-15 for capgmyo, 0-9 for csl)
+                                        remove_baseline=exp['real_baseline'], median_filter=exp['median-filter'], gest_subset=exp['gest_subset'], is_segment=False) # 7-15 for capgmyo, 0-9 for csl)
         emg_tensorizer.load_tensors()
 
         for session in tqdm(data['sessions']):
@@ -86,11 +86,6 @@ if __name__ == '__main__':
                                                                             adapt_rep_idx=sample_reps[0],
                                                                             test_rep_idx=sample_reps[1])
             
-            # Retry median filters
-            if exp['median-filter']:
-                print('MEDIAN FILTERING...')
-                X_train, X_test, X_adapt = median_pool_2d(X_train), median_pool_2d(X_test), median_pool_2d(X_adapt)
-
             # Pytorch training set and non-transformed test set
             train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=exp['norm'])
             test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
@@ -98,7 +93,29 @@ if __name__ == '__main__':
             test_loader = DataLoader(test_data, batch_size=exp['batch_size'], shuffle=False)
 
             # Train original classifier
-            model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=data['num_gestures'], p_input=exp['p_input'], baseline=exp['learnable_baseline']).to(device)
+            input_transform_name = exp['adaptation']
+            if exp['adaptation'] == 'spatial-adaptation':
+                if exp['dataset'] == 'hyser': 
+                    input_transform_name += '-hyser'
+                # elif exp['dataset'] == 'grabmyo':
+                    # input_transform_name += '-grabmyo'
+
+            if 'grabmyo' in exp['dataset']:
+                data['input_shape'] = (1, data['input_shape'][1])
+            
+            H, W = data['input_shape']
+            if exp['dataset'] == 'hyser':
+                H = H // 2
+            
+            # Set-up SAL boundaries
+            if 'spatial-adaptation' in exp['adaptation']:
+                boundaries = [[-2*2.5/(W-1), 2*2.5/(W-1)], [-2*2.5/(H-1), 2*2.5/(H-1)], [-15/180, 15/180
+                                ], [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
+
+            model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], 
+                                         num_classes=emg_tensorizer.num_gestures, p_input=exp['p_input'], 
+                                         baseline=exp['learnable_baseline'], input_transform_name=input_transform_name,
+                                         circular=exp['circular'], boundaries=boundaries).to(device)
             num_epochs = exp['num_epochs']
             criterion = nn.CrossEntropyLoss()
             optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
@@ -123,25 +140,56 @@ if __name__ == '__main__':
             print('Test F1 Score:', f1)
 
             # Apply randomly sampled affine transformation to test set
-            H, W = data['input_shape']
             boundaries = torch.tensor([2.5, 2.5, 15/180, 0.1, 0.1, 0.1, 0.1])
-            samps = 2*torch.rand(len(boundaries)) - 1
-            samps[0], samps[1], samps[2] = 2*boundaries[0]*samps[0]/(W-1), 2*boundaries[1]*samps[1]/(H-1), boundaries[2]*samps[2]
-            samps[3] = torch.pow((1 + torch.abs(samps[3])*boundaries[3]), torch.sign(samps[3]) ) # generates scalings appropriately
-            samps[4] = torch.pow((1 + torch.abs(samps[4])*boundaries[4]), torch.sign(samps[4]) )
-            samps[5], samps[6] = boundaries[5]*samps[5], boundaries[6]*samps[6] # shear
+            adapt_params = exp['adaptation_params']
+
+            samps_list = []
+            for sal_idx in range(model.input_transform.nsals):
+                samps = torch.zeros(len(adapt_params))
+                for p_idx, param in enumerate(adapt_params.keys()):
+                    if adapt_params[param]: samps[p_idx] = 2*torch.rand(1)-1
+
+                if W > 1:
+                    samps[0] = 2*boundaries[0]*samps[0]/(W-1)
+                else:
+                    samps[0] = 0.0
+                if H > 1:
+                    samps[1] = 2*boundaries[1]*samps[1]/(H-1)
+                else:
+                    samps[1] = 0.0
+                samps[2] = boundaries[2]*samps[2]
+                samps[3] = torch.pow((1 + torch.abs(samps[3])*boundaries[3]), torch.sign(samps[3]) ) # generates scalings appropriately
+                samps[4] = torch.pow((1 + torch.abs(samps[4])*boundaries[4]), torch.sign(samps[4]) )
+                samps[5] = boundaries[5]*samps[5] # shear
+                samps[6] = boundaries[6]*samps[6] # shear
+                samps_list.append(samps)
+            samps = torch.stack(samps_list, dim=1)
             model.true_params = samps
 
             # Set-up model to apply input transform
             model.input_transform.mode = 'bicubic'
+            model.input_transform.constrain_params = False
             model.input_transform.reset_params(*samps)
 
+            X_test_original = X_test.detach().clone()
             with torch.no_grad():
-                X_test = model.input_transform(X_test, inverse=False)
-                X_adapt = model.input_transform(X_adapt, inverse=False)
-            for idx, key in enumerate(true_params.keys()): true_params[key].append(samps[idx].item()) # track ground truth params
+                X_test = model.input_transform(X_test) # apply affine transformation to test set
+                X_adapt = model.input_transform(X_adapt)
+            for idx, key in enumerate(true_params.keys()): true_params[key].append(samps[idx, :].detach().cpu().clone().tolist()) # track ground truth params
             model.input_transform.mode = 'bilinear'
-            model.input_transform.reset_params()
+            model.input_transform.constrain_params = True
+
+            plt.figure()
+            fig, ax = plt.subplots(2, 6)
+            for idx in range(2):
+                for jdx in range(6):
+                    label = idx*6 + jdx
+                    ax[idx, jdx].imshow(X_test[Y_train==label,0,:,:].mean(dim=0))
+                    ax[idx, jdx].axis('off')
+                    ax[idx, jdx].set_title(f'Label: {label}')
+            
+            plt.savefig('hyser-baseline-transformed')
+            plt.close()
 
             # Apply transforms and reload data loaders
             test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
@@ -163,22 +211,24 @@ if __name__ == '__main__':
             print('Transformed F1 Score:', trans_f1)
 
             # Compute distance before SAL correction
-            dists.append(get_grid_distance(X_test.shape, samps, [0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0]))
+            subdists = []
+            for sal_idx in range(model.input_transform.nsals):
+                subdists.append(get_grid_distance((1,1,H,W), samps[:, sal_idx], [0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0]))
+            dists.append(subdists)
             print('AVERAGE ELECTRODE DISTANCE BETWEEN GRIDS (CM):', f'{dists[-1]} cm')
 
             # Obtain oracle performance
             adapted_model = deepcopy(model)
-            adapted_model.adaptation_phase = True
-            inv_samps = [-samps[0], -samps[1], -samps[2], 1.0/samps[3], 1.0/samps[4], -samps[5], -samps[6]]
-            adapted_model.input_transform.reset_params(*inv_samps) # add inverse parameters for adapted model
+            with torch.no_grad():
+                X_test_oracle = model.input_transform(X_test, inverse=True)
 
-            oracle_dist = get_grid_distance(X_test.shape, samps, inv_samps)
-
+            test_data_oracle = EMGFrameLoader(X=X_test_oracle, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
+            test_loader_oracle = DataLoader(test_data_oracle, batch_size=exp['batch_size'], shuffle=False)
             # Record performance prior to adaptation
             print('TESTING WITH ORACLE OPTIMAL PARAMETERS...')
             adapted_model.eval()
             with torch.no_grad():
-                all_labs, all_preds = test_model(adapted_model, test_loader)
+                all_labs, all_preds = test_model(adapted_model, test_loader_oracle)
 
             oracle_acc = accuracy_score(all_labs, all_preds)
             oracle_f1 = f1_score(all_labs, all_preds, average='macro')
@@ -187,23 +237,33 @@ if __name__ == '__main__':
             print('Oracle Test Accuracy:', oracle_acc)
             print('Oracle F1 Score:', oracle_f1)
 
+            plt.figure()
+            fig, ax = plt.subplots(2, 6)
+            for idx in range(2):
+                for jdx in range(6):
+                    label = idx*6 + jdx
+                    ax[idx, jdx].imshow(X_test_oracle[Y_train==label,0,:,:].mean(dim=0))
+                    ax[idx, jdx].axis('off')
+                    ax[idx, jdx].set_title(f'Label: {label}')
+            
+            plt.savefig('hyser-baseline-oracle')
+            plt.close()
+
             # Reset SAL parameters
             adapted_model.input_transform.reset_params()
 
             # Spatially adapt the model's transformed position
+            adapted_model.adaptation_phase = True
             print('FINE-TUNING...')
             for param in adapted_model.parameters():
                 param.requires_grad = False
                 for param_name in exp['adaptation_params'].keys():
                     param = getattr(adapted_model.input_transform, param_name)
-                    if isinstance(param, nn.ParameterList):
-                        for p in param: p.requires_grad = exp['adaptation_params'][param_name]
-                    else:
-                        param.requires_grad = exp['adaptation_params'][param_name]
+                    for p in param: p.requires_grad = exp['adaptation_params'][param_name]
 
             print('INITIAL CONDITION SAMPLING...')
             boundaries = torch.tensor([2.5, 2.5, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
-            initial_search(adapted_model, adapt_loader, boundaries, npoints=npoints) # find optimal initial condition
+            initial_search(adapted_model, adapt_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=npoints) # find optimal initial condition
 
             optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
                                 lr=exp['lr'], weight_decay=exp['weight_decay'])
@@ -218,12 +278,15 @@ if __name__ == '__main__':
 
             # Store learned params for later evaluation
             cur_learned_params = []
-            for param_name in exp['adaptation_params'].keys():
-                param = getattr(adapted_model.input_transform, param_name)
-                # if isinstance(param, nn.ParameterList): learned_params[param_name].append([p.item() for p in param])
-                # else: 
-                learned_params[param_name].append(param[0].item())
-                cur_learned_params.append(param[0].item())
+            for nsal_idx in range(model.input_transform.nsals):
+                params = adapted_model.input_transform.get_constrained_params(nsal_idx)
+                params = [p.detach().cpu().clone() for p in params]
+                cur_learned_params.append(params)
+            cur_learned_params = torch.stack([torch.stack(row) for row in cur_learned_params]).T
+
+            for idx, param_name in enumerate(exp['adaptation_params'].keys()):
+                learned_params[param_name].append(cur_learned_params[idx,:])
+                # cur_learned_params.append(param)
             
             # Testing loop over test loader (K-shot)
             print('TESTING...')
@@ -242,8 +305,27 @@ if __name__ == '__main__':
                 print(f'The {param_key} is {learned_params[param_key][-1]}')
 
             # Compute average electrode distance between learned and true grid
-            corrected_dists.append(get_grid_distance(X_test.shape, samps, cur_learned_params))
+            subcorrected_dists = []
+            for sal_idx in range(model.input_transform.nsals):
+                subcorrected_dists.append(get_grid_distance((1,1,H,W), samps[:, sal_idx], cur_learned_params[:, sal_idx]))
+            corrected_dists.append(subcorrected_dists)
             print('AVERAGE ELECTRODE DISTANCE BETWEEN GRIDS (CM):', f'{corrected_dists[-1]} cm')
+
+            # Hyser baseline transform
+            with torch.no_grad():
+                X_test_fixed = adapted_model.input_transform(X_test)
+            
+            plt.figure()
+            fig, ax = plt.subplots(2, 6)
+            for idx in range(2):
+                for jdx in range(6):
+                    label = idx*6 + jdx
+                    ax[idx, jdx].imshow(X_test_fixed[Y_train==label,0,:,:].mean(dim=0))
+                    ax[idx, jdx].axis('off')
+                    ax[idx, jdx].set_title(f'Label: {label}')
+            
+            plt.savefig('hyser-baseline-fixed')
+            plt.close()
 
             # SAVE RESULT
             data_dict = {'Subjects': subs, 'Sessions':sessions, 'Test Repetitions':test_reps, 'Accuracy':accs, 'Transformed Accuracy': trans_accs, 'Oracle Accuracy': oracle_accs, 'Tuned Accuracy':tuned_accs, 
@@ -254,7 +336,7 @@ if __name__ == '__main__':
             df.to_csv(f"{name}.csv")
 
     # Save final experiment data in .csv file
-            data_dict = {'Subjects': subs, 'Sessions':sessions, 'Test Repetitions':test_reps, 'Accuracy':accs, 'Transformed Accuracy': trans_accs, 'Oracle Accuracy': oracle_accs, 'Tuned Accuracy':tuned_accs, 
+    data_dict = {'Subjects': subs, 'Sessions':sessions, 'Test Repetitions':test_reps, 'Accuracy':accs, 'Transformed Accuracy': trans_accs, 'Oracle Accuracy': oracle_accs, 'Tuned Accuracy':tuned_accs, 
                          'F1-Score': f1_scores, 'Transformed F1-Score': trans_f1_scores, 'Oracle F1-Score': oracle_f1_scores, 'Tuned F1-Score': tuned_f1_scores, 'Distance (cm)':dists, 'Tuned Distance (cm)':corrected_dists}
     data_dict.update(true_params)
     data_dict.update(learned_params)

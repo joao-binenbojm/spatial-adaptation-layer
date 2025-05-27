@@ -1,11 +1,11 @@
 {
-    "name": "grabmyo-circular-lbaseline-test",
-    "project": "classification-simulation",
+    "name": "intersession-grabmyo",
+    "project": "simulation-new",
     "K": 1,
     "num_epochs": 15,
     "norm": 0,
     "lr": 0.001,
-    "p_input": 0.5,
+    "p_input": 0.0,
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
         "params": {
@@ -17,22 +17,24 @@
     "momentum": 0,
     "weight_decay": 0,
     "network": "LogisticRegressor",
-    "dataset": "grabmyo",
+    "dataset": "grabmyo-forearm",
     "emg_tensorizer": "GrabmyoData",
     "Trms": 0.25,
     "adaptation": "spatial-adaptation",
     "adaptation_params": {
         "xshift": true,
-        "yshift": true,
-        "rot_theta": true,
-        "xscale": true,
-        "yscale": true,
-        "xshear": true,
-        "yshear": true
+        "yshift": false,
+        "rot_theta": false,
+        "xscale": false,
+        "yscale": false,
+        "xshear": false,
+        "yshear": false
     },
-    "real_baseline": false,
-    "learnable_baseline": true,
+    "real_baseline": null,
+    "corrective_gain": true,
+    "learnable_baseline": false,
     "adabatch": false,
-    "gest_subset": null,
-    "circular": true
+    "gest_subset": [10,11,12,13,14,15],
+    "circular": true,
+    "median-filter": false
 }

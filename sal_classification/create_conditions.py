@@ -8,41 +8,55 @@ conditions_dir = 'conditions1'
 os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
 
 nconditions = 1
-exp['network'] = 'CapgMyoNet'
-for num_epochs in [1, 5, 10]:
-    exp['num_epochs'] = num_epochs
-    for rbase in [True, False]:
-        exp['real-baseline'] = rbase
-        for median_filter in [True, False]:
-            exp['median-filter'] = median_filter
-            for p_input in [0.0, 0.25, 0.5, 0.75]:
-                exp['p_input'] = p_input
-                exp['name'] = f"cnn_{num_epochs}_{int(rbase)}_{int(median_filter)}_{p_input}"
-                with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
-                    json.dump(exp, f)
-                nconditions += 1
-                if nconditions % 49 == 0:
-                    conditions_dir = conditions_dir[:-1] + str(int(conditions_dir[-1]) + 1) # increases condition dir
-                    os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
 
+# For each dataset
+for dataset in ['csl', 'capgmyo', 'hyser', 'grabmyo-forearm', 'grabmyo-wrist']:
+    exp['dataset'] = dataset
+    if 'grabmyo' in dataset:
+        exp['p_input'] = 0.0
+        for key in exp['adaptation_params'].keys():
+            if key == 'xshift':
+                exp['adaptation_params'][key] = True
+            else:
+                exp['adaptation_params'][key] = False
+        exp['circular'] = True
+        exp['emg_tensorizer'] = 'GrabmyoData'
+        exp['gest_subset'] = [10,11,12,13,14,15]
+    else:
+        exp['p_input'] = 0.5
+        for key in exp['adaptation_params'].keys(): exp['adaptation_params'][key] = True
+    
+        if dataset == 'capgmyo':
+            exp['emg_tensorizer'] = f"CapgmyoData"
+            exp['circular'] = True
+            exp['gest_subset'] = None
+        elif dataset == 'csl':
+            exp['emg_tensorizer'] = f"CSLData"
+            exp['circular'] = False
+            gest_subset = [7,8,9,11,12,13,15]
+        elif dataset == 'hyser':
+            exp['emg_tensorizer'] = f"HyserData"
+            exp['circular'] = False
+            gest_subset = [0,1,4,25,28,31,33]
 
-
-
-exp['network'] = 'LogisticRegressor'
-for num_epochs in [15, 30, 50]:
-    exp['num_epochs'] = num_epochs
-    for rbase in [True, False]:
-        exp['real-baseline'] = rbase
-        for median_filter in [True, False]:
-            exp['median-filter'] = median_filter
-            for p_input in [0.0, 0.25, 0.5, 0.75]:
-                exp['p_input'] = p_input
-                exp['name'] = f"logreg_{num_epochs}_{int(rbase)}_{int(median_filter)}_{p_input}"
-                with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
-                    json.dump(exp, f)
-                nconditions += 1
-                if nconditions % 49 == 0:
-                    conditions_dir = conditions_dir[:-1] + str(int(conditions_dir[-1]) + 1) # increases condition dir
-                    os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
-
-
+    # For each network
+    for network in ['LogisticRegressor', 'CapgMyoNet']:
+        if network == 'CapgMyoNet':
+            exp['num_epochs'] = 1
+        elif network == 'LogisticRegressor':
+            exp['num_epochs'] = 15
+        exp['network'] = network
+        for corrective_gain in [True, False]:
+            exp['corrective_gain'] = corrective_gain
+            for rbase in ["mean-square", "root-mean-square", None]:
+                exp['real_baseline'] = rbase
+                for median_filter in [True, False]:
+                    exp['median-filter'] = median_filter
+                    exp['name'] = f"{dataset}_{network}_{rbase}_{int(median_filter)}_{int(corrective_gain)}"
+                    with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
+                        json.dump(exp, f)
+                    nconditions += 1
+                    print(nconditions)
+                    if nconditions % 49 == 0:
+                        conditions_dir = conditions_dir[:-1] + str(int(conditions_dir[-1]) + 1) # increases condition dir
+                        os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)

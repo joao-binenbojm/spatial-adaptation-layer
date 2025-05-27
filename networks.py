@@ -5,12 +5,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from networks_utils import SpatialAdaptation, SpatialAdaptationHyser, SpatialAdaptationGrabmyo, LocallyConnected2d, FactorizedDepthwiseSeparableConv
+from networks_utils import SpatialAdaptation, SpatialAdaptationHyser, LocallyConnected2d
 
 
 # Canonical EMG network from original capgmyo paper
 class CapgMyoNet(nn.Module):
-    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, input_transform_name='spatial-adaptation', p_input=0.0, track_running_stats=True, circular=False):
+    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, input_transform_name='spatial-adaptation', p_input=0.0, track_running_stats=True, circular=False, boundaries=None):
         super(CapgMyoNet, self).__init__()
 
         self.channels = channels
@@ -69,11 +69,9 @@ class CapgMyoNet(nn.Module):
         self.adaptation_phase = False
         self.input_transform_name = input_transform_name
         if input_transform_name == 'spatial-adaptation':
-            self.input_transform = SpatialAdaptation(input_shape, circular=circular)
+            self.input_transform = SpatialAdaptation(input_shape, circular=circular, boundaries=boundaries)
         elif input_transform_name == 'spatial-adaptation-hyser':
-            self.input_transform = SpatialAdaptationHyser(input_shape, circular=circular)
-        elif input_transform_name == 'spatial-adaptation-grabmyo':
-            self.input_transform = SpatialAdaptationGrabmyo(input_shape, circular=circular)
+            self.input_transform = SpatialAdaptationHyser(input_shape, circular=circular, boundaries=boundaries)
         elif input_transform_name == 'linear-layer':
             self.input_transform =  nn.Sequential(
                 nn.Flatten(start_dim=1),  # Flatten from (B, 1, H, W) → (B, H*W)
@@ -93,6 +91,16 @@ class CapgMyoNet(nn.Module):
         if isinstance(m, nn.Linear):
             torch.nn.init.kaiming_uniform_(m.weight)
             m.bias.data.fill_(0.01)
+
+    def get_session_means(self, X1, X2):
+        """
+        Calculate the mean of the original input data.
+        This is used to set the baseline for normalization.
+        """
+        # Assuming X is a tensor of shape (batch_size, channels, height, width)
+        with torch.no_grad():
+            self.register_buffer('mean_session1', X1.to(next(self.parameters()).device).mean(dim=0, keepdim=True))  # Store the mean as baseline
+            self.register_buf
 
     def forward(self, x):
 
@@ -125,7 +133,7 @@ class CapgMyoNet(nn.Module):
 
 class LogisticRegressor(nn.Module):
 
-    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, baseline=True, p_input=0.0, input_transform_name='spatial-adaptation', track_running_stats=True, circular=False):
+    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, baseline=True, p_input=0.0, input_transform_name='spatial-adaptation', track_running_stats=True, circular=False, boundaries=None):
         super(LogisticRegressor, self).__init__()
 
         self.channels = channels
@@ -134,6 +142,7 @@ class LogisticRegressor(nn.Module):
         self.num_classes = num_classes
 
         # scaling = True
+        self.corrective_gain = False
         
         if baseline:
             self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
@@ -148,11 +157,9 @@ class LogisticRegressor(nn.Module):
         self.adaptation_phase = False
         self.input_transform_name = input_transform_name
         if input_transform_name == 'spatial-adaptation':
-            self.input_transform = SpatialAdaptation(input_shape, circular=circular)
+            self.input_transform = SpatialAdaptation(input_shape, circular=circular, boundaries=boundaries)
         elif input_transform_name == 'spatial-adaptation-hyser':
-            self.input_transform = SpatialAdaptationHyser(input_shape, circular=circular)
-        elif input_transform_name == 'spatial-adaptation-grabmyo':
-            self.input_transform = SpatialAdaptationGrabmyo(input_shape, circular=circular)
+            self.input_transform = SpatialAdaptationHyser(input_shape, circular=circular, boundaries=boundaries)
         elif input_transform_name == 'linear-layer':
             self.input_transform =  nn.Sequential(
                 nn.Flatten(start_dim=1),  # Flatten from (B, 1, H, W) → (B, H*W)
@@ -161,12 +168,29 @@ class LogisticRegressor(nn.Module):
             )
         else:
             self.input_transform = lambda x: x  # No transformation        
+        
+    def get_session_means(self, X1, X2):
+        """
+        Calculate the mean of the original input data.
+        This is used to set the baseline for normalization.
+        """
+        # Assuming X is a tensor of shape (batch_size, channels, height, width)
+        self.corrective_gain = True
+        with torch.no_grad():
+            self.register_buffer('mean_session1', X1.to(next(self.parameters()).device).mean(dim=0, keepdim=True))  # Store the mean as baseline
+            self.register_buffer('mean_session2', X2.to(next(self.parameters()).device).mean(dim=0, keepdim=True))  # Store the mean as baseline
 
     def forward(self, x):
+        if self.adaptation_phase and self.corrective_gain:
+            mean_session2 = self.input_transform(self.mean_session2) # apply input transform to session 2 mean
+            scaling_factors = (self.mean_session1 / (mean_session2 + 1e-12))
+            x = x * scaling_factors  # scale to match magnitude of session 1
+        
         x = self.bn(x) # applies normalization procedure after usual filtering operations
         if self.adaptation_phase:
             x = x - self.baseline # subtract baseline for baseline normalization
             x = self.input_transform(x) # perform image resampling step
+
         x = self.input_dropout(x)
         x = x.reshape(x.shape[0],-1) # flatten for determining classification
         x = self.fc(x)

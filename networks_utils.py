@@ -42,19 +42,15 @@ def wrap_grid_horizontally(grid):
 
 
 class SpatialAdaptation(torch.nn.Module):
-    def __init__(self, input_shape, T = True, R = True, Sc = True, Sh = True, mode='bilinear', circular=False):
+    def __init__(self, input_shape, T = True, R = True, Sc = True, Sh = True, mode='bilinear', circular=False, boundaries=None, constrain_params=True):
         super().__init__()
         self.input_shape = input_shape
         self.mode = mode
         self.circular = circular
+        self.boundaries = boundaries # list of tuples (min, max) for each parameter
+        self.constrain_params = constrain_params
+        self.nsals = 1
         # Initialize parameters
-        # self.xshift = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) 
-        # self.yshift = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) 
-        # self.rot_theta = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=R) # theta in rads.
-        # self.xscale = torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc)
-        # self.yscale = torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc)
-        # self.xshear = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh)
-        # self.yshear = torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh)
         self.xshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T)]) 
         self.yshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T)])
         self.rot_theta = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=R)]) # theta in rads.
@@ -62,37 +58,62 @@ class SpatialAdaptation(torch.nn.Module):
         self.yscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc)])
         self.xshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh)])
         self.yshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh)])
-  
-    def forward(self, x, sal_idx=0, inverse=True):
+    
+    def get_constrained_params(self, sal_idx=0):
+        '''Returns the parameters of the affine transformation constrained to the input boundaries using a sigmoid function.'''
+        xshift = torch.sigmoid(self.xshift[sal_idx]) * (self.boundaries[0][1] - self.boundaries[0][0]) + self.boundaries[0][0]
+        yshift = torch.sigmoid(self.yshift[sal_idx]) * (self.boundaries[1][1] - self.boundaries[1][0]) + self.boundaries[1][0]
+        rot_theta = torch.sigmoid(self.rot_theta[sal_idx]) * (self.boundaries[2][1] - self.boundaries[2][0]) + self.boundaries[2][0]
+        xscale = torch.sigmoid(self.xscale[sal_idx]) * (self.boundaries[3][1] - self.boundaries[3][0]) + self.boundaries[3][0]
+        yscale = torch.sigmoid(self.yscale[sal_idx]) * (self.boundaries[4][1] - self.boundaries[4][0]) + self.boundaries[4][0]
+        xshear = torch.sigmoid(self.xshear[sal_idx]) * (self.boundaries[5][1] - self.boundaries[5][0]) + self.boundaries[5][0]
+        yshear = torch.sigmoid(self.yshear[sal_idx]) * (self.boundaries[6][1] - self.boundaries[6][0]) + self.boundaries[6][0]
+
+        return xshift, yshift, rot_theta, xscale, yscale, xshear, yshear
+
+    def forward(self, x, sal_idx=0, inverse=False):
         '''Regrids input image based on affine transformation parameters.'''
         dev = x.device # assuming x and model are on the same device
         N, C, H, W = x.shape
-        # H, W = image_shape
+        # Apply soft constraints to parameters
+        if self.boundaries and self.constrain_params:
+            xshift, yshift, rot_theta, xscale, yscale, xshear, yshear = self.get_constrained_params(sal_idx=sal_idx)
+        else:
+            xshift = self.xshift[sal_idx]
+            yshift = self.yshift[sal_idx]
+            rot_theta = self.rot_theta[sal_idx]
+            xscale = self.xscale[sal_idx]
+            yscale = self.yscale[sal_idx]
+            xshear = self.xshear[sal_idx]
+            yshear = self.yshear[sal_idx]
+
         T = torch.cat([ # Translation Matrix
-            torch.stack([torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev), self.xshift[sal_idx].to(dev)]).unsqueeze(0),
-            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev), self.yshift[sal_idx].to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev), xshift.to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev), yshift.to(dev)]).unsqueeze(0),
             torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
         ], dim=0)
         R = torch.cat([ # Rotation Matrix
-            torch.stack([torch.cos(self.rot_theta[sal_idx].to(dev)), -torch.sin(self.rot_theta[sal_idx].to(dev)), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-            torch.stack([torch.sin(self.rot_theta[sal_idx].to(dev)), torch.cos(self.rot_theta[sal_idx].to(dev)), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.cos(rot_theta.to(dev)), -torch.sin(rot_theta.to(dev)), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.sin(rot_theta.to(dev)), torch.cos(rot_theta.to(dev)), torch.tensor(0.0).to(dev)]).unsqueeze(0),
             torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
         ], dim=0)
         Sc = torch.cat([ # Scaling Matrix
-            torch.stack([self.xscale[sal_idx].to(dev), torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-            torch.stack([torch.tensor(0.0).to(dev), self.yscale[sal_idx].to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([xscale.to(dev), torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), yscale.to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
             torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
         ], dim=0)
         Sh = torch.cat([ # Shear Matrix
-            torch.stack([torch.tensor(1.0).to(dev), self.xshear[sal_idx].to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-            torch.stack([self.yshear[sal_idx].to(dev), torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(1.0).to(dev), xshear.to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([yshear.to(dev), torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
             torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
         ], dim=0)
 
+        theta = T @ R @ Sc @ Sh
+
         if inverse:
-            theta = Sh @ Sc @ R @ T
-        else:
-            theta = T @ R @ Sc @ Sh
+            # Invert the transformation matrix
+            theta = torch.linalg.inv(theta)
+
         theta = theta[0:2,:] # slice into submatrix expected by affine_grid
         theta = theta.repeat(N,1,1)
         grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=False)
@@ -101,17 +122,17 @@ class SpatialAdaptation(torch.nn.Module):
         xresamp = torch.nn.functional.grid_sample(x, grid, mode=self.mode, align_corners=False)
         return xresamp
     
-    def reset_params(self, Tx=torch.tensor(0.0), Ty=torch.tensor(0.0), rot_theta=torch.tensor(0.0), xscale=torch.tensor(1.0), yscale=torch.tensor(1.0), xshear=torch.tensor(0.0), yshear=torch.tensor(0.0)):
+    def reset_params(self, Tx=torch.tensor([0.0,0.0]), Ty=torch.tensor([0.0,0.0]), rot_theta=torch.tensor([0.0,0.0]), xscale=torch.tensor([1.0,1.0]), yscale=torch.tensor([1.0,1.0]), xshear=torch.tensor([0.0,0.0]), yshear=torch.tensor([0.0,0.0])):
         """Manually updates SAL parameters given a new set of parameters"""
         with torch.no_grad():
-            for sal_idx in range(len(self.xshift)):
-                self.xshift[sal_idx].copy_(Tx)
-                self.yshift[sal_idx].copy_(Ty)
-                self.rot_theta[sal_idx].copy_(rot_theta)
-                self.xscale[sal_idx].copy_(xscale)
-                self.yscale[sal_idx].copy_(yscale)
-                self.xshear[sal_idx].copy_(xshear)
-                self.yshear[sal_idx].copy_(yshear)
+            for sal_idx in range(self.nsals):
+                self.xshift[sal_idx].copy_(Tx[sal_idx])
+                self.yshift[sal_idx].copy_(Ty[sal_idx])
+                self.rot_theta[sal_idx].copy_(rot_theta[sal_idx])
+                self.xscale[sal_idx].copy_(xscale[sal_idx])
+                self.yscale[sal_idx].copy_(yscale[sal_idx])
+                self.xshear[sal_idx].copy_(xshear[sal_idx])
+                self.yshear[sal_idx].copy_(yshear[sal_idx])
         
     # def restart(self):
     #     '''Reinitialize the parameters of the affine transformation.'''
@@ -125,50 +146,74 @@ class SpatialAdaptation(torch.nn.Module):
     #         self.xshear[sal_idx].data = torch.tensor(random.uniform(-bnds[5], bnds[5])).to(self.xshear.device)
     #         self.yshear[sal_idx].data = torch.tensor(random.uniform(-bnds[6], bnds[6])).to(self.yshear.device)   
         
-        
+
 class SpatialAdaptationHyser(SpatialAdaptation):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, T = True, R = True, Sc = True, Sh = True, **kwargs)
-        self.H = [self.input_shape[0]//2, self.input_shape[0]//2]
-        self.W = [self.input_shape[1], self.input_shape[1]]
-        self.xshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) for idx in range(2)]) 
-        self.yshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) for idx in range(2)])
-        self.rot_theta = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=R) for idx in range(2)]) # theta in rads.
-        self.xscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc) for idx in range(2)])
-        self.yscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc) for idx in range(2)])
-        self.xshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh) for idx in range(2)])
-        self.yshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh) for idx in range(2)])
+    def __init__(self, *args, T = True, R = True, Sc = True, Sh = True, **kwargs):
+        super().__init__(*args, T=T, R=R, Sc=Sc, Sh=Sh, **kwargs)
+        self.nsals = 2
+        self.H = self.input_shape[0] // 2
+        self.W = self.input_shape[1]
+        self.xshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) for idx in range(self.nsals)]) 
+        self.yshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) for idx in range(self.nsals)])
+        self.rot_theta = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=R) for idx in range(self.nsals)]) # theta in rads.
+        self.xscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc) for idx in range(self.nsals)])
+        self.yscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc) for idx in range(self.nsals)])
+        self.xshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh) for idx in range(self.nsals)])
+        self.yshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh) for idx in range(self.nsals)])
     
-    def forward(self, x):
-        xtop = x[:, :, :self.H[0], :] # top half
-        xbot = x[:, :, self.H[0]:, :] # bottom half
-        xtop = super().forward(xtop, idx=0) # perform image resampling step
-        xbot = super().forward(xbot, idx=1)
+    def forward(self, x, inverse=False):
+        xtop = x[:, :, :self.H, :] # top half
+        xbot = x[:, :, self.H:, :] # bottom half
+        xtop = super().forward(xtop, sal_idx=0, inverse=inverse) # perform image resampling step
+        xbot = super().forward(xbot, sal_idx=1, inverse=inverse)
         x = torch.cat((xtop, xbot), dim=2) # concatenate the two halves   
         return x
 
 
-# Inherits from Hyser module to have double SAL layer
-class SpatialAdaptationGrabmyo(SpatialAdaptation):
-    def __init__(self, *args, T = True, R = True, Sc = True, Sh = True, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.H = [2, 2]
-        self.W = [8, 6]
-        self.xshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) for idx in range(2)]) 
-        self.yshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) for idx in range(2)])
-        self.rot_theta = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=R) for idx in range(2)]) # theta in rads.
-        self.xscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc) for idx in range(2)])
-        self.yscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc) for idx in range(2)])
-        self.xshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh) for idx in range(2)])
-        self.yshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh) for idx in range(2)])
+# # Inherits from Hyser module to have double SAL layer
+# class SpatialAdaptationGrabmyo(SpatialAdaptation):
+#     def __init__(self, *args, T = True, R = True, Sc = True, Sh = True, **kwargs):
+#         super().__init__(*args, **kwargs)
+#         self.H = [2, 2]
+#         self.W = [8, 6]
+#         self.xshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) for idx in range(2)]) 
+#         self.yshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) for idx in range(2)])
+#         self.rot_theta = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=R) for idx in range(2)]) # theta in rads.
+#         self.xscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc) for idx in range(2)])
+#         self.yscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc) for idx in range(2)])
+#         self.xshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh) for idx in range(2)])
+#         self.yshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh) for idx in range(2)])
 
-    def forward(self, x):
-        xforearm = x[:, :, :, :self.W[0]] # top half
-        xwrist = x[:, :, :, self.W[0]:] # bottom half
-        xforearm = super().forward(xforearm, idx=0) # perform image resampling step
-        xwrist = super().forward(xwrist, idx=1) # perform image resampling step
-        x = torch.cat((xforearm, xwrist), dim=3) # concatenate the two halves   
-        return x
+#     def forward(self, x, inverse=True):
+#         xforearm = x[:, :, :, :self.W[0]] # top half
+#         xwrist = x[:, :, :, self.W[0]:] # bottom half
+#         xforearm = super().forward(xforearm, sal_idx=0) # perform image resampling step
+#         xwrist = super().forward(xwrist, sal_idx=1) # perform image resampling step
+#         x = torch.cat((xforearm, xwrist), dim=3) # concatenate the two halves   
+#         return x
+    
+
+## Inherits from Hyser module to have double SAL layer
+# class SpatialAdaptationGrabmyo(SpatialAdaptation):
+#     def __init__(self, *args, T = True, R = True, Sc = True, Sh = True, **kwargs):
+#         super().__init__(*args, **kwargs)
+#         self.H = [2, 2]
+#         self.W = [8, 6]
+#         self.xshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) for idx in range(2)]) 
+#         self.yshift = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=T) for idx in range(2)])
+#         self.rot_theta = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=R) for idx in range(2)]) # theta in rads.
+#         self.xscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc) for idx in range(2)])
+#         self.yscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc) for idx in range(2)])
+#         self.xshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh) for idx in range(2)])
+#         self.yshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh) for idx in range(2)])
+
+#     def forward(self, x, inverse=False):
+#         xforearm = x[:, :, :, :self.W[0]] # top half
+#         xwrist = x[:, :, :, self.W[0]:] # bottom half
+#         xforearm = super().forward(xforearm, sal_idx=0) # perform image resampling step
+#         xwrist = super().forward(xwrist, sal_idx=1) # perform image resampling step
+#         x = torch.cat((xforearm, xwrist), dim=3) # concatenate the two halves   
+#         return x
     
     
 ## Median pooling utils and function
@@ -181,34 +226,79 @@ def unpack_param_2d(param):
 
   return p_H, p_W
 
-def median_pool_2d(input, kernel_size=3, stride=1, padding=1, dilation=1):
+# def median_pool_2d(input, kernel_size=3, stride=1, padding=1, dilation=1):
 
-  #Input should be 4D (BCHW)
-  assert(input.dim() == 4)
+#   #Input should be 4D (BCHW)
+#   assert(input.dim() == 4)
 
-  #Get input dimensions
-  b_size, c_size, h_size, w_size = input.size()
+#   #Get input dimensions
+#   b_size, c_size, h_size, w_size = input.size()
 
-  #Get input parameters
-  k_H, k_W = unpack_param_2d(kernel_size)
-  s_H, s_W = unpack_param_2d(     stride)
-  p_H, p_W = unpack_param_2d(    padding)
-  d_H, d_W = unpack_param_2d(   dilation)
+#   #Get input parameters
+#   k_H, k_W = unpack_param_2d(kernel_size)
+#   s_H, s_W = unpack_param_2d(     stride)
+#   p_H, p_W = unpack_param_2d(    padding)
+#   d_H, d_W = unpack_param_2d(   dilation)
 
-  #First we unfold all the (kernel_size x kernel_size)  patches
-  unf_input =torch.nn.functional.unfold(input, kernel_size, dilation, padding, stride)
+#   #First we unfold all the (kernel_size x kernel_size)  patches
+#   unf_input =torch.nn.functional.unfold(input, kernel_size, dilation, padding, stride)
 
-  #Reshape it so that each patch is a column
-  row_unf_input = unf_input.reshape(b_size, c_size, k_H*k_W, -1)
+#   #Reshape it so that each patch is a column
+#   row_unf_input = unf_input.reshape(b_size, c_size, k_H*k_W, -1)
 
-  #Apply median operation along the columns for each channel separately 
-  med_unf_input, med_unf_indexes =torch.median(row_unf_input, dim = 2, keepdim=True)
+#   #Apply median operation along the columns for each channel separately 
+#   med_unf_input, med_unf_indexes =torch.median(row_unf_input, dim = 2, keepdim=True)
 
-  #Restore original shape
-  out_W = math.floor(((w_size + (2 * p_W) - (d_W * (k_W - 1)) - 1) / s_W) + 1)
-  out_H = math.floor(((h_size + (2 * p_H) - (d_H * (k_H - 1)) - 1) / s_H) + 1)
+#   #Restore original shape
+#   out_W = math.floor(((w_size + (2 * p_W) - (d_W * (k_W - 1)) - 1) / s_W) + 1)
+#   out_H = math.floor(((h_size + (2 * p_H) - (d_H * (k_H - 1)) - 1) / s_H) + 1)
 
-  return med_unf_input.reshape(b_size, c_size, out_H, out_W)
+#   return med_unf_input.reshape(b_size, c_size, out_H, out_W)
+
+def median_pool_2d(input, kernel_size=3, stride=1, padding=1, dilation=1, circular=False):
+    """
+    Median pooling with optional circular padding along the horizontal (width) dimension.
+    Input should be 4D (BCHW).
+    """
+    assert(input.dim() == 4)
+
+    # Ensure all arguments are tuples
+    if isinstance(kernel_size, int):
+        kernel_size = (kernel_size, kernel_size)
+    if isinstance(stride, int):
+        stride = (stride, stride)
+    if isinstance(padding, int):
+        padding = (padding, padding)
+    if isinstance(dilation, int):
+        dilation = (dilation, dilation)
+
+    b_size, c_size, h_size, w_size = input.size()
+    k_H, k_W = kernel_size
+    s_H, s_W = stride
+    p_H, p_W = padding
+    d_H, d_W = dilation
+
+    # Circular pad along width if requested
+    if circular:
+        pad_left = (k_W - 1) // 2
+        pad_right = k_W // 2
+        input = torch.cat([input[..., -pad_left:], input, input[..., :pad_right]], dim=-1)
+        p_W = 0  # No zero-padding
+        p_H = 0
+
+    unf_input = torch.nn.functional.unfold(input, (k_H, k_W), dilation, (p_H, p_W), stride)
+    row_unf_input = unf_input.reshape(b_size, c_size, k_H * k_W, -1)
+    med_unf_input, _ = torch.median(row_unf_input, dim=2, keepdim=True)
+
+    out_W = math.floor(((w_size + (2 * p_W) - (d_W * (k_W - 1)) - 1) / s_W) + 1)
+    out_H = math.floor(((h_size + (2 * p_H) - (d_H * (k_H - 1)) - 1) / s_H) + 1)
+
+    # If circular, output width should match input width
+    if circular:
+        med_unf_input = med_unf_input[..., :w_size]
+
+    return med_unf_input.reshape(b_size, c_size, out_H, w_size if circular else out_W)
+
 
 ## Locally connected module needed for CapgmyoNet 
 class LocallyConnected2d(nn.Module):

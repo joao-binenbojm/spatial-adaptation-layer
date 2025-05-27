@@ -1,10 +1,9 @@
 import torch
 from networks_utils import wrap_grid_horizontally
 
-def get_transformation(grid_shape, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, xshear=0, yshear=0, inverse=False):
+def get_transformation(Tx=0, Ty=0, theta=0, xscale=1, yscale=1, xshear=0, yshear=0, inverse=False):
     '''Computes the transformed grid coordinates for euclidina distance comparison.'''
 
-    N, C, H, W = grid_shape
     Tx, Ty = torch.tensor(Tx), torch.tensor(Ty) # Normalize translation values automatically
     theta, xscale, yscale = torch.tensor(theta), torch.tensor(xscale), torch.tensor(yscale)
     xshear, yshear = torch.tensor(xshear), torch.tensor(yshear)
@@ -45,7 +44,7 @@ def get_transformation(grid_shape, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, xshe
 
 def apply_affine(data_grid, Tx=0.0, Ty=0.0, theta=0.0, xscale=1.0, yscale=1.0, xshear=0.0, yshear=0.0, mode='bilinear', circular=False, inverse=False):
     '''Apply affine transformation to a given input grid.'''
-    theta = get_transformation(data_grid.shape, Tx=Tx, Ty=Ty, theta=theta, xscale=xscale, yscale=yscale, xshear=xshear, yshear=yshear, inverse=inverse)
+    theta = get_transformation(Tx=Tx, Ty=Ty, theta=theta, xscale=xscale, yscale=yscale, xshear=xshear, yshear=yshear, inverse=inverse)
     theta = theta[0:2,:] # slice into submatrix expected by affine_grid
     theta = theta.repeat(data_grid.shape[0],1,1)
     grid = torch.nn.functional.affine_grid(theta, size=data_grid.shape, align_corners=False)
@@ -83,8 +82,8 @@ def get_grid_distance(grid_shape, true_params, learned_params, IED=1, circular=F
     original_grid[:,:,:,1] = (H-1)*(1 + original_grid[:,:,:,1])/2
 
     # Apply true transformation and its inverse to get final grid
-    theta_true = get_transformation(grid_shape, *true_params)
-    theta_learned = get_transformation(grid_shape, *learned_params, inverse=True)
+    theta_true = get_transformation(*true_params)
+    theta_learned = get_transformation(*learned_params, inverse=True)
     net_theta = theta_learned @ theta_true # apply inverse transformation and get resulting grid
     net_theta = net_theta[0:2,:] # slice into submatrix expected by affine_grid
     net_theta = net_theta.repeat(N,1,1)

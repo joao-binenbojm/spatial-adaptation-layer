@@ -102,9 +102,10 @@ for idx, sub in tqdm(enumerate(data['subs'])):
 
     # Load EMG data in uniform format
     print('\nLOADING EMG TENSOR...')
+    is_segment = exp['dataset'] == 'csl'
     emg_tensorizer = emg_tensorizer_def(dataset=exp['dataset'], path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
                                         input_shape=data['input_shape'], fs=data['fs'], rep_duration=data['rep_duration'], sessions=session_ids, intrasession=False, Trms=exp['Trms'], 
-                                        remove_baseline=exp['real_baseline'], gest_subset=exp['gest_subset'], is_segment=True) # 7-15 for capgmyo, 0-9 for csl)
+                                        remove_baseline=exp['real_baseline'], median_filter=exp['median-filter'], gest_subset=exp['gest_subset'], is_segment=is_segment) # 7-15 for capgmyo, 0-9 for csl)
     emg_tensorizer.load_tensors()
 
     # Run code 5 times for every train/test session pair, except where same session is used for train and test
@@ -131,15 +132,11 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                                                                                 test_session=test_idx,
                                                                                 train_session=train_idx,
                                                                                 rep_idx=int(adapt_rep))
-                # Retry median filters
-                if exp['median-filter']:
-                    print('MEDIAN FILTERING...')
-                    X_train, X_test, X_adapt = median_pool_2d(X_train), median_pool_2d(X_test), median_pool_2d(X_adapt)
-
+                
                 # Get PyTorch DataLoaders
-                train_data = EMGFrameLoader(X=X_train, Y=Y_train, norm=exp['norm'])
-                adapt_data = EMGFrameLoader(X=X_adapt, Y=Y_adapt, train=False, norm=exp['norm'], stats=train_data.stats)
-                test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
+                train_data = EMGFrameLoader(X=X_train.clone(), Y=Y_train.clone(), norm=exp['norm'])
+                adapt_data = EMGFrameLoader(X=X_adapt.clone(), Y=Y_adapt.clone(), train=False, norm=exp['norm'], stats=train_data.stats)
+                test_data = EMGFrameLoader(X=X_test.clone(), Y=Y_test.clone(), train=False, norm=exp['norm'], stats=train_data.stats)
                 train_loader = DataLoader(train_data, batch_size=exp['batch_size'], shuffle=True)
                 adapt_loader = DataLoader(adapt_data, batch_size=exp['batch_size'], shuffle=True)
                 test_loader = DataLoader(test_data, batch_size=exp['batch_size'], shuffle=False)
@@ -157,8 +154,25 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                         elif exp['dataset'] == 'grabmyo':
                             input_transform_name += '-grabmyo'
 
+                    if 'grabmyo' in exp['dataset']:
+                        data['input_shape'] = (1, data['input_shape'][1])
+                    
+                    H, W = data['input_shape']
+                    if exp['dataset'] == 'hyser':
+                        H = H // 2
+                    
+                    # Set-up SAL boundaries
+                    if 'spatial-adaptation' in exp['adaptation']:
+                        if 'grabmyo' in exp['dataset']:
+                            boundaries = [[-2*2.5/(W-1), 2*2.5/(W-1)], [-1, 1], [-15/180, 15/180],
+                                           [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
+                        else:
+                            boundaries = [[-2*2.5/(W-1), 2*2.5/(W-1)], [-2*2.5/(H-1), 2*2.5/(H-1)], [-15/180, 15/180],
+                                           [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
+                        
                     base_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=emg_tensorizer.num_gestures, 
-                                                        p_input=exp['p_input'], baseline=exp['learnable_baseline'], input_transform_name=input_transform_name, circular=exp["circular"]).to(device)
+                                                        p_input=exp['p_input'], baseline=exp['learnable_baseline'], input_transform_name=input_transform_name, 
+                                                        circular=exp["circular"], boundaries=boundaries).to(device)
                     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, base_model.parameters()),
                                                 lr=exp['lr'], weight_decay=exp['weight_decay'])
                     scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
@@ -169,20 +183,32 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                                 warmup_scheduler=warmup_scheduler) # run training loop
                     
                     is_model_trained = True
-
-                    # Testing loop over test loader (Zero-shot)
-                    print('TESTING...')
-                    base_model.eval()
-                    with torch.no_grad():
-                        all_labs, all_preds = test_model(base_model, test_loader)
-                        acc = accuracy_score(all_labs, all_preds)
-                        f1 = f1_score(all_labs, all_preds, average='macro')
+                
+                # Testing loop over test loader (Zero-shot)
+                print('TESTING...')
+                base_model.eval()
+                with torch.no_grad():
+                    all_labs, all_preds = test_model(base_model, test_loader)
+                    acc = accuracy_score(all_labs, all_preds)
+                    f1 = f1_score(all_labs, all_preds, average='macro')
                 
                 accs.append(acc)
                 f1_scores.append(f1)
                 print('Test Accuracy:', acc)
                 print('Test F1-Score:', f1)
 
+                # # Get test set image saved
+                # plt.figure()
+                # fig, ax = plt.subplots(2, 6)
+                # for idx in range(2):
+                #     for jdx in range(6):
+                #         label = idx*6 + jdx
+                #         ax[idx, jdx].imshow(X_test[Y_test==label,0,:,:].mean(dim=0))
+                #         ax[idx, jdx].axis('off')
+                #         ax[idx, jdx].set_title(f'Label: {label}')
+                
+                # plt.savefig('baseline-session2.jpg')
+                # plt.close()
 
                 # Fine-tune to update model's shifting position
                 adapted_model = deepcopy(base_model)
@@ -192,10 +218,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                         param.requires_grad = False
                     for param_name in exp['adaptation_params'].keys():
                         param = getattr(adapted_model.input_transform, param_name)
-                        if isinstance(param, nn.ParameterList):
-                            for p in param: p.requires_grad = exp['adaptation_params'][param_name]
-                        else:
-                            param.requires_grad = exp['adaptation_params'][param_name]
+                        for p in param: p.requires_grad = exp['adaptation_params'][param_name]
 
                 elif exp['adaptation'] == 'linear-layer':
                     for param in adapted_model.input_transform.parameters():
@@ -212,33 +235,48 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 if exp['learnable_baseline']:
                     adapted_model.baseline.requires_grad = True
                 
+                # TESTING ON THE FLY STATS ADAPTATION
+                if exp['corrective_gain']:
+                    adapted_model.get_session_means(X_train, X_adapt) # get stats for both X_train and X_adapt
+
                 print('INITIAL CONDITION SAMPLING...')
                 boundaries = torch.tensor([2.5, 2.5, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
-                initial_search(adapted_model, adapt_loader, boundaries, npoints=200) # find optimal initial condition
-
                 adapted_model.adaptation_phase = True # set model to adaptation phase
+                with torch.no_grad():
+                    scaling_factors = (X_train.median(dim=0, keepdim=True)[0] / (X_adapt.median(dim=0, keepdim=True)[0] + 1e-8))
+                    print('Scaling factors:', scaling_factors.squeeze())
+                    X_test_scaled = X_test * scaling_factors # normalize X_adapt to X_train mean
+                # test_data_scaled = EMGFrameLoader(X=X_test_scaled, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
+                # test_loader_scaled = DataLoader(test_data_scaled, batch_size=exp['batch_size'], shuffle=False)
+                
+                initial_search(adapted_model, adapt_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=data['num_repetitions']*exp['num_epochs']//2) # find optimal initial condition
+
                 optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
                                              lr=exp['lr'], weight_decay=exp['weight_decay'])
                 scheduler_params = exp['scheduler']['params']
                 scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
                 scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
-                warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(adapt_loader)*data['num_repetitions'])
-                train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
-                            warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
+                warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(adapt_loader)*data['num_repetitions']*exp['num_epochs']//2)
+                train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=data['num_repetitions']*exp['num_epochs']//2, scheduler=scheduler,
+                            warmup_scheduler=warmup_scheduler, verbose=True) # run training loop
 
                 # Fetch params
                 if exp['adaptation'] == 'spatial-adaptation':
-                    for param_name in exp['adaptation_params'].keys():
-                        param = getattr(adapted_model.input_transform, param_name)
-                        if isinstance(param, nn.ParameterList): learned_params[param_name].append([p.item() for p in param])
-                        else: learned_params[param_name].append(param.item())
+                    cur_learned_params = []
+                    for nsal_idx in range(adapted_model.input_transform.nsals):
+                        params = adapted_model.input_transform.get_constrained_params(nsal_idx)
+                        params = [p.detach().cpu().clone() for p in params]
+                        cur_learned_params.append(params)
+                    cur_learned_params = torch.stack([torch.stack(row) for row in cur_learned_params]).T
+                    
+                    for param, param_name in zip(cur_learned_params, exp['adaptation_params'].keys()):
+                        learned_params[param_name].append(param)
                 else:
                     for key in learned_params.keys(): learned_params[key].append(0.0) # set fetched parameters to 0 if no spatial adaptation
 
                 # Testing loop over test loader (K-shot)
                 print('TESTING...')
                 with torch.no_grad():
-                    print('LEARNED SHIFTS: x: {} , y: {}'.format(learned_params['xshift'][-1], learned_params['yshift'][-1]))
                     tuned_all_labs, tuned_all_preds = test_model(adapted_model, test_loader)
 
                 tuned_acc = accuracy_score(tuned_all_labs, tuned_all_preds)
@@ -265,6 +303,23 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 for param_key in learned_params.keys():
                     print(f'The {param_key} is {learned_params[param_key][-1]}')
       
+                # # Get final 'fixed' model images for comparison
+                # with torch.no_grad():
+                #     X_test_fixed = adapted_model.input_transform(X_test)
+                # plt.figure()
+                # fig, ax = plt.subplots(2, 6)
+                # for idx in range(2):
+                #     for jdx in range(6):
+                #         label = idx*6 + jdx
+                #         ax[idx, jdx].imshow(X_test_fixed[Y_test==label,0,:,:].mean(dim=0))
+                #         ax[idx, jdx].axis('off')
+                #         ax[idx, jdx].set_title(f'Label: {label}')
+                
+                # plt.savefig('baseline-fixed.jpg')
+                # plt.close()
+
+                if 'grabmyo' in exp['dataset']:
+                    data['input_shape'] = (2, data['input_shape'][1])
         is_model_trained = False
 
 # Save experiment data in .csv file
@@ -274,15 +329,15 @@ data_dict.update(learned_params)
 df = pd.DataFrame(data_dict)
 df.to_csv(f"{name}.csv")
 
-# # Log wandb conditions
-# config = deepcopy(exp)
-# config['scheduler'] = json.dumps(config['scheduler'])
-# wandb.init(
-#     # set the wandb project where this run will be logged
-#     project="intersession",
-#     config=config,
-#     mode='disabled',
-# )
+# Log wandb conditions
+config = deepcopy(exp)
+config['scheduler'] = json.dumps(config['scheduler'])
+wandb.init(
+    # set the wandb project where this run will be logged
+    project="intersession",
+    config=config,
+    mode='disabled',
+)
 
 table = wandb.Table(dataframe=df)
 wandb.log({'complete_results': table})
