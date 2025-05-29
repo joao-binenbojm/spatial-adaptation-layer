@@ -235,14 +235,14 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 print('INITIAL CONDITION SAMPLING...')
                 boundaries = torch.tensor([2.5, 2.5, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
                 adapted_model.adaptation_phase = True # set model to adaptation phase
-                with torch.no_grad():
-                    scaling_factors = (X_train.median(dim=0, keepdim=True)[0] / (X_adapt.median(dim=0, keepdim=True)[0] + 1e-8))
-                    print('Scaling factors:', scaling_factors.squeeze())
-                    X_test_scaled = X_test * scaling_factors # normalize X_adapt to X_train mean
+                # with torch.no_grad():
+                #     scaling_factors = (X_train.median(dim=0, keepdim=True)[0] / (X_adapt.median(dim=0, keepdim=True)[0] + 1e-8))
+                #     print('Scaling factors:', scaling_factors.squeeze())
+                #     X_test_scaled = X_test * scaling_factors # normalize X_adapt to X_train mean
                 # test_data_scaled = EMGFrameLoader(X=X_test_scaled, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
                 # test_loader_scaled = DataLoader(test_data_scaled, batch_size=exp['batch_size'], shuffle=False)
                 
-                initial_search(adapted_model, adapt_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=data['num_repetitions']*exp['num_epochs']//2) # find optimal initial condition
+                initial_search(adapted_model, adapt_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=100)#data['num_repetitions']*exp['num_epochs']//2) # find optimal initial condition
 
                 optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
                                              lr=exp['lr'], weight_decay=exp['weight_decay'])
@@ -335,7 +335,7 @@ wandb.init(
     project=exp["project"],
     config=config,
     name=name,
-    # mode='disabled',
+    mode='disabled',
 )
 
 table = wandb.Table(dataframe=df)
