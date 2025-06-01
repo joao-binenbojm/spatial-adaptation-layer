@@ -52,7 +52,7 @@ for dataset in ['csl', 'hyser', 'capgmyo', 'grabmyo-forearm', 'grabmyo-wrist']:
                     exp['median-filter'] = median_filter
                     for p_input in [0.0, 0.5]:
                         exp['p_input'] = p_input
-                        exp['name'] = f"{dataset}_{network}_{rbase}_{int(median_filter)}_{int(corrective_gain)}"
+                        exp['name'] = f"{dataset}_{network}_{rbase}_{int(median_filter)}_{int(corrective_gain)_{p_input}}"
                         with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
                             json.dump(exp, f)
                         nconditions += 1
