@@ -10,7 +10,7 @@ os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
 nconditions = 1
 
 # For each dataset
-for dataset in ['csl', 'capgmyo', 'hyser', 'grabmyo-forearm', 'grabmyo-wrist']:
+for dataset in ['csl', 'hyser', 'capgmyo', 'grabmyo-forearm', 'grabmyo-wrist']:
     exp['dataset'] = dataset
     if 'grabmyo' in dataset:
         for key in exp['adaptation_params'].keys():
