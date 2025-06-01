@@ -59,15 +59,28 @@ class SpatialAdaptation(torch.nn.Module):
         self.xshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh)])
         self.yshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh)])
     
+    # def get_constrained_params(self, sal_idx=0):
+    #     '''Returns the parameters of the affine transformation constrained to the input boundaries using a sigmoid function.'''
+    #     xshift = torch.sigmoid(self.xshift[sal_idx]) * (self.boundaries[0][1] - self.boundaries[0][0]) + self.boundaries[0][0]
+    #     yshift = torch.sigmoid(self.yshift[sal_idx]) * (self.boundaries[1][1] - self.boundaries[1][0]) + self.boundaries[1][0]
+    #     rot_theta = torch.sigmoid(self.rot_theta[sal_idx]) * (self.boundaries[2][1] - self.boundaries[2][0]) + self.boundaries[2][0]
+    #     xscale = torch.sigmoid(self.xscale[sal_idx]) * (self.boundaries[3][1] - self.boundaries[3][0]) + self.boundaries[3][0]
+    #     yscale = torch.sigmoid(self.yscale[sal_idx]) * (self.boundaries[4][1] - self.boundaries[4][0]) + self.boundaries[4][0]
+    #     xshear = torch.sigmoid(self.xshear[sal_idx]) * (self.boundaries[5][1] - self.boundaries[5][0]) + self.boundaries[5][0]
+    #     yshear = torch.sigmoid(self.yshear[sal_idx]) * (self.boundaries[6][1] - self.boundaries[6][0]) + self.boundaries[6][0]
+
+    #     return xshift, yshift, rot_theta, xscale, yscale, xshear, yshear
+
     def get_constrained_params(self, sal_idx=0):
-        '''Returns the parameters of the affine transformation constrained to the input boundaries using a sigmoid function.'''
-        xshift = torch.sigmoid(self.xshift[sal_idx]) * (self.boundaries[0][1] - self.boundaries[0][0]) + self.boundaries[0][0]
-        yshift = torch.sigmoid(self.yshift[sal_idx]) * (self.boundaries[1][1] - self.boundaries[1][0]) + self.boundaries[1][0]
-        rot_theta = torch.sigmoid(self.rot_theta[sal_idx]) * (self.boundaries[2][1] - self.boundaries[2][0]) + self.boundaries[2][0]
-        xscale = torch.sigmoid(self.xscale[sal_idx]) * (self.boundaries[3][1] - self.boundaries[3][0]) + self.boundaries[3][0]
-        yscale = torch.sigmoid(self.yscale[sal_idx]) * (self.boundaries[4][1] - self.boundaries[4][0]) + self.boundaries[4][0]
-        xshear = torch.sigmoid(self.xshear[sal_idx]) * (self.boundaries[5][1] - self.boundaries[5][0]) + self.boundaries[5][0]
-        yshear = torch.sigmoid(self.yshear[sal_idx]) * (self.boundaries[6][1] - self.boundaries[6][0]) + self.boundaries[6][0]
+        '''Returns the parameters of the affine transformation constrained to the input boundaries using a tanh function.'''
+        # tanh outputs in [-1, 1], so map to [min, max] as: 0.5 * (tanh + 1) * (max - min) + min
+        xshift = 0.5 * (torch.tanh(self.xshift[sal_idx]) + 1) * (self.boundaries[0][1] - self.boundaries[0][0]) + self.boundaries[0][0]
+        yshift = 0.5 * (torch.tanh(self.yshift[sal_idx]) + 1) * (self.boundaries[1][1] - self.boundaries[1][0]) + self.boundaries[1][0]
+        rot_theta = 0.5 * (torch.tanh(self.rot_theta[sal_idx]) + 1) * (self.boundaries[2][1] - self.boundaries[2][0]) + self.boundaries[2][0]
+        xscale = 0.5 * (torch.tanh(self.xscale[sal_idx]) + 1) * (self.boundaries[3][1] - self.boundaries[3][0]) + self.boundaries[3][0]
+        yscale = 0.5 * (torch.tanh(self.yscale[sal_idx]) + 1) * (self.boundaries[4][1] - self.boundaries[4][0]) + self.boundaries[4][0]
+        xshear = 0.5 * (torch.tanh(self.xshear[sal_idx]) + 1) * (self.boundaries[5][1] - self.boundaries[5][0]) + self.boundaries[5][0]
+        yshear = 0.5 * (torch.tanh(self.yshear[sal_idx]) + 1) * (self.boundaries[6][1] - self.boundaries[6][0]) + self.boundaries[6][0]
 
         return xshift, yshift, rot_theta, xscale, yscale, xshear, yshear
 
@@ -284,20 +297,17 @@ def median_pool_2d(input, kernel_size=3, stride=1, padding=1, dilation=1, circul
         pad_right = k_W // 2
         input = torch.cat([input[..., -pad_left:], input, input[..., :pad_right]], dim=-1)
         p_W = 0  # No zero-padding
-        p_H = 0
+        out_W = w_size  # Output width remains the same as input width
+    else:
+        out_W = math.floor(((w_size + (2 * p_W) - (d_W * (k_W - 1)) - 1) / s_W) + 1)
+    out_H = math.floor(((h_size + (2 * p_H) - (d_H * (k_H - 1)) - 1) / s_H) + 1)
 
     unf_input = torch.nn.functional.unfold(input, (k_H, k_W), dilation, (p_H, p_W), stride)
     row_unf_input = unf_input.reshape(b_size, c_size, k_H * k_W, -1)
     med_unf_input, _ = torch.median(row_unf_input, dim=2, keepdim=True)
+    med_unf_input = med_unf_input.reshape(b_size, c_size, out_H, out_W)
 
-    out_W = math.floor(((w_size + (2 * p_W) - (d_W * (k_W - 1)) - 1) / s_W) + 1)
-    out_H = math.floor(((h_size + (2 * p_H) - (d_H * (k_H - 1)) - 1) / s_H) + 1)
-
-    # If circular, output width should match input width
-    if circular:
-        med_unf_input = med_unf_input[..., :w_size]
-
-    return med_unf_input.reshape(b_size, c_size, out_H, w_size if circular else out_W)
+    return med_unf_input
 
 
 ## Locally connected module needed for CapgmyoNet 

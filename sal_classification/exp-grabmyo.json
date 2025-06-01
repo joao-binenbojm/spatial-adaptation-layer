@@ -1,8 +1,8 @@
 {
-    "name": "intersession-grabmyo",
+    "name": "intersession-grabmyo-forearm-test",
     "project": "simulation-new",
     "K": 1,
-    "num_epochs": 1,
+    "num_epochs": 10,
     "norm": 0,
     "lr": 0.001,
     "p_input": 0.0,
@@ -30,8 +30,8 @@
         "xshear": false,
         "yshear": false
     },
-    "real_baseline": "mean-square",
-    "corrective_gain": true,
+    "real_baseline": null,
+    "corrective_gain": false,
     "learnable_baseline": false,
     "adabatch": false,
     "gest_subset": [10,11,12,13,14,15],

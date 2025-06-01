@@ -13,7 +13,6 @@ nconditions = 1
 for dataset in ['csl', 'capgmyo', 'hyser', 'grabmyo-forearm', 'grabmyo-wrist']:
     exp['dataset'] = dataset
     if 'grabmyo' in dataset:
-        exp['p_input'] = 0.0
         for key in exp['adaptation_params'].keys():
             if key == 'xshift':
                 exp['adaptation_params'][key] = True
@@ -23,7 +22,6 @@ for dataset in ['csl', 'capgmyo', 'hyser', 'grabmyo-forearm', 'grabmyo-wrist']:
         exp['emg_tensorizer'] = 'GrabmyoData'
         exp['gest_subset'] = [10,11,12,13,14,15]
     else:
-        exp['p_input'] = 0.5
         for key in exp['adaptation_params'].keys(): exp['adaptation_params'][key] = True
     
         if dataset == 'capgmyo':
@@ -37,7 +35,7 @@ for dataset in ['csl', 'capgmyo', 'hyser', 'grabmyo-forearm', 'grabmyo-wrist']:
         elif dataset == 'hyser':
             exp['emg_tensorizer'] = f"HyserData"
             exp['circular'] = False
-            gest_subset = [0,1,4,25,28,31,33]
+            gest_subset = [5,6,7,8,9,10,29,30]
 
     # For each network
     for network in ['LogisticRegressor', 'CapgMyoNet']:
@@ -52,11 +50,13 @@ for dataset in ['csl', 'capgmyo', 'hyser', 'grabmyo-forearm', 'grabmyo-wrist']:
                 exp['real_baseline'] = rbase
                 for median_filter in [True, False]:
                     exp['median-filter'] = median_filter
-                    exp['name'] = f"{dataset}_{network}_{rbase}_{int(median_filter)}_{int(corrective_gain)}"
-                    with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
-                        json.dump(exp, f)
-                    nconditions += 1
-                    print(nconditions)
-                    if nconditions % 49 == 0:
-                        conditions_dir = conditions_dir[:-1] + str(int(conditions_dir[-1]) + 1) # increases condition dir
-                        os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
+                    for p_input in [0.0, 0.5]:
+                        exp['p_input'] = p_input
+                        exp['name'] = f"{dataset}_{network}_{rbase}_{int(median_filter)}_{int(corrective_gain)}"
+                        with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
+                            json.dump(exp, f)
+                        nconditions += 1
+                        print(nconditions)
+                        if nconditions % 49 == 0:
+                            conditions_dir = conditions_dir[:-1] + str(int(conditions_dir[-1]) + 1) # increases condition dir
+                            os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)

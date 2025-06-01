@@ -89,6 +89,7 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let m
 print('Device:', device)
 
 print('INTERSESSION:', data['dataset_name'])
+# data['subs'] = [8]
 for idx, sub in tqdm(enumerate(data['subs'])):
     # Load data for given subject/session
     sub_id = 'subject{}'.format(sub+1)
@@ -121,10 +122,16 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 print('TEST SESSION #{}, TRAIN SESSION #{}'.format(test_session+1, train_session+1))
                 print('ADAPT REP #{}'.format(adapt_rep+1))
                                 
+                # Get adaptation gest from gest subset
+                # if exp['gest_subset'] is not None:
+                #     adapt_gests = [7,8,15]
+                #     subgests = [exp['gest_subset'].index(gest) for gest in adapt_gests] # get gesture indices from subset
+                # else:
+                #     subgests = None
                 X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations = emg_tensorizer.get_tensors_intersession(
                                                                                 test_session=test_idx,
                                                                                 train_session=train_idx,
-                                                                                rep_idx=int(adapt_rep))
+                                                                                rep_idx=int(adapt_rep)) # adapt to only one gesture
                 
                 # Get PyTorch DataLoaders
                 train_data = EMGFrameLoader(X=X_train.clone(), Y=Y_train.clone(), norm=exp['norm'])
@@ -160,7 +167,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                             boundaries = [[-2*2.5/(W-1), 2*2.5/(W-1)], [-1, 1], [-15/180, 15/180],
                                            [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
                         else:
-                            boundaries = [[-2*2.5/(W-1), 2*2.5/(W-1)], [-2*2.5/(H-1), 2*2.5/(H-1)], [-15/180, 15/180],
+                            boundaries = [[-2*4.0/(W-1), 2*4.0/(W-1)], [-2*4.0/(H-1), 2*4.0/(H-1)], [-15/180, 15/180],
                                            [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
                         
                     base_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=emg_tensorizer.num_gestures, 
@@ -169,9 +176,11 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, base_model.parameters()),
                                                 lr=exp['lr'], weight_decay=exp['weight_decay'])
                     scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
-                    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
+                    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader)*exp['num_epochs']//5)
 
                     # Train the model
+                    # train_model(base_model, train_sub_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
+                    #             warmup_scheduler=warmup_scheduler) # run training loop
                     train_model(base_model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                                 warmup_scheduler=warmup_scheduler) # run training loop
                     
@@ -196,7 +205,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 # for idx in range(2):
                 #     for jdx in range(6):
                 #         label = idx*6 + jdx
-                #         ax[idx, jdx].imshow(X_test[Y_test==label,0,:,:].mean(dim=0))
+                #         ax[idx, jdx].imshow(X_adapt[Y_adapt==label,0,:,:].mean(dim=0))
                 #         ax[idx, jdx].axis('off')
                 #         ax[idx, jdx].set_title(f'Label: {label}')
                 
@@ -233,7 +242,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     adapted_model.get_session_means(X_train, X_adapt) # get stats for both X_train and X_adapt
 
                 print('INITIAL CONDITION SAMPLING...')
-                boundaries = torch.tensor([2.5, 2.5, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
+                boundaries = torch.tensor([4.0, 4.0, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
                 adapted_model.adaptation_phase = True # set model to adaptation phase
                 # with torch.no_grad():
                 #     scaling_factors = (X_train.median(dim=0, keepdim=True)[0] / (X_adapt.median(dim=0, keepdim=True)[0] + 1e-8))
@@ -242,16 +251,29 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 # test_data_scaled = EMGFrameLoader(X=X_test_scaled, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
                 # test_loader_scaled = DataLoader(test_data_scaled, batch_size=exp['batch_size'], shuffle=False)
                 
-                initial_search(adapted_model, adapt_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=100)#data['num_repetitions']*exp['num_epochs']//2) # find optimal initial condition
+                labels = torch.unique(Y_adapt)
+                X_adapt_search = torch.zeros(len(labels), 1, X_adapt.shape[2], X_adapt.shape[3], device=device)
+                with torch.no_grad():
+                    for idx, label in enumerate(labels):
+                        X_adapt_search[idx, 0, :, :] = torch.sqrt((X_adapt[Y_adapt == label]**2).mean(dim=0))
+                
+                adapt_search_data = EMGFrameLoader(X=X_adapt_search, Y=labels, train=False, norm=exp['norm'], stats=train_data.stats)
+                adapt_search_loader = DataLoader(adapt_search_data, batch_size=len(labels), shuffle=True)
+
+                if exp['adaptation'] == 'spatial-adaptation':
+                    adapted_model.input_transform.mode = 'bicubic'
+                initial_search(adapted_model, adapt_search_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=int(4**7)) #data['num_repetitions']*exp['num_epochs']//2) # find optimal initial condition
+
+                adapted_model.input_transform.mode = 'bilinear' # set mode to bilinear for training
 
                 optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
-                                             lr=exp['lr'], weight_decay=exp['weight_decay'])
+                                             lr=0.01, weight_decay=exp['weight_decay'])
                 scheduler_params = exp['scheduler']['params']
                 scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
                 scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
-                warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(adapt_loader)*data['num_repetitions']*exp['num_epochs']//2)
-                train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=data['num_repetitions']*exp['num_epochs']//2, scheduler=scheduler,
-                            warmup_scheduler=warmup_scheduler, verbose=True) # run training loop
+                warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 1.0, 1.0, total_iters=len(adapt_loader)*data['num_repetitions']*exp['num_epochs']//5)
+                train_model(adapted_model, adapt_search_loader, optimizer, criterion, num_epochs=500, scheduler=scheduler,
+                            warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
 
                 # Fetch params
                 if exp['adaptation'] == 'spatial-adaptation':
@@ -335,7 +357,7 @@ wandb.init(
     project=exp["project"],
     config=config,
     name=name,
-    mode='disabled',
+    # mode='disabled',
 )
 
 table = wandb.Table(dataframe=df)

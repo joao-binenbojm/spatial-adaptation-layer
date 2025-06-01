@@ -1,5 +1,5 @@
 {
-    "name": "intersession-csl-test",
+    "name": "intersession-capgmyo-test",
     "project": "classification-simulation",
     "K": 1,
     "num_epochs": 2,
@@ -17,8 +17,8 @@
     "momentum": 0,
     "weight_decay": 0,
     "network": "CapgMyoNet",
-    "dataset": "csl",
-    "emg_tensorizer": "CSLData",
+    "dataset": "capgmyo",
+    "emg_tensorizer": "CapgmyoData",
     "Trms": 0.25,
     "adaptation": "spatial-adaptation",
     "adaptation_params": {
@@ -34,7 +34,7 @@
     "learnable_baseline": false,
     "corrective_gain": false,
     "adabatch": false,
-    "gest_subset": [7, 8, 9, 11, 12, 13, 15],
-    "circular": false,
+    "gest_subset": null,
+    "circular": true,
     "median-filter": true
 }

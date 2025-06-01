@@ -102,8 +102,10 @@ class EMGData:
 
     def apply_median_filter(self, X):
         '''Apply median filtering depending on the specific dataset.'''
-        if self.dataset == 'csl' or self.dataset == 'capgmyo':
+        if self.dataset == 'csl':
             X = median_pool_2d(X)
+        elif self.dataset == 'capgmyo':
+            X = median_pool_2d(X, circular=True)
         elif self.dataset == 'hyser':
             Xtop, Xbot = X[:, :, :X.shape[2]//2, :], X[:, :, X.shape[2]//2:, :]
             Xtop, Xbot = median_pool_2d(Xtop), median_pool_2d(Xbot)
@@ -155,7 +157,7 @@ class EMGData:
                 emg = emg**2
                 baseline += emg.sum(axis=0, keepdims=True)
                 baseline_samp_count += emg.shape[0]
-            baseline = baseline/baseline_samp_count
+            baseline = baseline/ (baseline_samp_count + 1e-6) # avoid division by zero
             if self.remove_baseline == 'root-mean-square':
                 baseline = np.sqrt(baseline)
 
@@ -164,7 +166,7 @@ class EMGData:
             baseline = np.zeros((1, np.prod(self.input_shape)))
             baseline_samp_count = 0
             
-            cur_rec_id = str(int(self.sub.replace('subject',''))*2 + self.current_session + 1) # current recording ID
+            cur_rec_id = str((int(self.sub.replace('subject',''))-1)*2 + self.current_session + 1) # current recording ID
             id_len = len(cur_rec_id)
             for idx in range(3-id_len): cur_rec_id = '0' +  cur_rec_id
             filenames = [file for file in filenames if file[:3] == cur_rec_id] # filter to this subject/session
@@ -172,39 +174,41 @@ class EMGData:
             for gdx, name in enumerate(filenames):
                 mat = sio.loadmat(os.path.join(DIR, name))
                 emg, labels = mat['data'], mat['gesture'].ravel()
-                emg = emg - emg[labels==0,:].mean(axis=0, keepdims=True)
+                emg = emg - emg.mean(axis=0, keepdims=True)
                 emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+                emg = emg[labels==0,:] # keep only rest segments
                 emg = emg**2
-
                 baseline += emg.sum(axis=0, keepdims=True)
-            baseline / baseline_samp_count
+                baseline_samp_count += emg.shape[0]
+            baseline = baseline / (baseline_samp_count + 1e-6)
             if self.remove_baseline == 'root-mean-square':
                 baseline = np.sqrt(baseline)
 
         elif self.dataset == 'hyser':
             DIR = DIR.replace('pr_dataset', 'mvc_dataset')
             baseline = np.zeros((1, 256))
-            # baseline_samp_count = 0
-            # for finger_idx in range(5):
-            #     for movement in ['extension', 'flexion']:
-            #         # Process force to get rest periods
-            #         force_record = wfdb.rdrecord(os.path.join(DIR, f"mvc_force_finger{finger_idx+1}_{movement}"))
-            #         force = np.abs(force_record.p_signal.mean(axis=1))
-            #         force = upsample_signal(force, up=self.fs, down=100)
-            #         force = (force - np.min(force)) / (np.max(force) - np.min(force))                    
-            #         force_off = (force < 0.2*force.max()).astype(int)
-            #         force_off_processed = process_binary_signal(force_off)
+            baseline_samp_count = 0
+            for finger_idx in range(5):
+                for movement in ['extension', 'flexion']:
+                    # Process force to get rest periods
+                    force_record = wfdb.rdrecord(os.path.join(DIR, f"mvc_force_finger{finger_idx+1}_{movement}"))
+                    force = np.abs(force_record.p_signal.mean(axis=1))
+                    force = upsample_signal(force, up=self.fs, down=100)
+                    force = (force - np.min(force)) / (np.max(force) - np.min(force))                    
+                    force_off = (force < 0.2*force.max()).astype(int)
+                    force_off_processed = process_binary_signal(force_off)
                     
-            #         # Process EMG and get baseline from rest segments
-            #         emg_record = wfdb.rdrecord(os.path.join(DIR, f"mvc_raw_finger{finger_idx+1}_{movement}"))
-            #         emg = emg_record.p_signal - emg_record.p_signal.mean(axis=0, keepdims=True) # make zero mean signals
-            #         emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
-            #         emg = emg[force_off_processed.astype(np.bool_), :] # keep only rest segments
-            #         baseline += (emg**2).sum(axis=0)
-            #         baseline_samp_count += emg.shape[0]
-            
-            # baseline = baseline / baseline_samp_count
-        
+                    # Process EMG and get baseline from rest segments
+                    emg_record = wfdb.rdrecord(os.path.join(DIR, f"mvc_raw_finger{finger_idx+1}_{movement}"))
+                    emg = emg_record.p_signal - emg_record.p_signal.mean(axis=0, keepdims=True) # make zero mean signals
+                    emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs)
+                    emg = emg[force_off_processed.astype(np.bool_), :] # keep only rest segments
+                    baseline += (emg**2).sum(axis=0)
+                    baseline_samp_count += emg.shape[0]
+            baseline = baseline/ (baseline_samp_count + 1e-6)
+            if self.remove_baseline == 'root-mean-square':
+                baseline = np.sqrt(baseline)        
+                
         elif 'grabmyo' in self.dataset:
             baseline = np.zeros((1, 28))
             baseline_samp_count = 0
@@ -222,10 +226,7 @@ class EMGData:
                 emg_square = emg**2
                 baseline += emg_square.sum(axis=0, keepdims=True)
                 baseline_samp_count += emg.shape[0]
-                # images = self.get_images(rms)
-                # images = images.reshape(1, 1, *images.shape)
-                # baseline += images.mean(axis=2, keepdims=True)
-            baseline = baseline/ baseline_samp_count
+            baseline = baseline/ (baseline_samp_count + 1e-6)
             if self.remove_baseline == 'root-mean-square':
                 baseline = np.sqrt(baseline)
 
@@ -348,12 +349,12 @@ class EMGData:
             adapt_idx = idxs
 
         # Get train, adapt, and test splits
-        X_train = self.X[[train_session], :, :, :, :, :, :]
-        Y_train = self.Y[[train_session], :, :, :]
-        X_adapt = self.X[[test_session], :, adapt_idx, :, :, :, :]
-        Y_adapt = self.Y[[test_session], :, adapt_idx, :]
-        X_test = self.X[[test_session], :, idxs, :, :, :, :]
-        Y_test = self.Y[[test_session], :, idxs, :]
+        X_train = self.X[train_session:train_session+1, :, :, :, :, :, :]
+        Y_train = self.Y[train_session:train_session+1, :, :, :]
+        X_adapt = self.X[test_session:test_session+1, :, adapt_idx, :, :, :, :]
+        Y_adapt = self.Y[test_session:test_session+1, :, adapt_idx, :]
+        X_test = self.X[test_session:test_session+1, :, idxs, :, :, :, :]
+        Y_test = self.Y[test_session:test_session+1, :, idxs, :]
 
         if gest_idxs is not None:
             if isinstance(gest_idxs, int):
@@ -363,13 +364,15 @@ class EMGData:
 
         if self.is_segment:
             # Segmentation-specific logic
-            train_active = self.active[[train_session], :, :, :]
-            adapt_active = self.active[[test_session], :, adapt_idx, :]
-            test_active = self.active[[test_session], :, idxs, :]
+            train_active = self.active[train_session:train_session+1, :, :, :]
+            adapt_active = self.active[test_session:test_session+1, :, adapt_idx, :]
+            if gest_idxs is not None:
+                adapt_active = adapt_active[:, gest_idxs, :, :]
+            test_active = self.active[test_session:test_session+1, :, idxs, :]
             X_train, Y_train = X_train[torch.tensor(train_active)], Y_train[torch.tensor(train_active)]
             X_adapt, Y_adapt = X_adapt[torch.tensor(adapt_active)], Y_adapt[torch.tensor(adapt_active)]
             X_test, Y_test = X_test[torch.tensor(test_active)], Y_test[torch.tensor(test_active)]
-            adapt_durations = self.durations[test_session, :, adapt_idx]
+            # adapt_durations = self.durations[test_session, :, adapt_idx]
             test_durations = self.durations[test_session, :, idxs]
         else:
             # Standard logic
@@ -391,7 +394,7 @@ class EMGData:
             X_test = X_test.mean(dim=2, keepdim=True)
             X_adapt = X_adapt.mean(dim=2, keepdim=True)
         
-        # # HYSER TEST PLOTTING
+        # ## IMAGE TEST PLOTTING
         # plt.figure()
         # fig, ax = plt.subplots(2, 6)
         # # vmin, vmax = X_train.min(), X_train.max()
@@ -631,7 +634,7 @@ class CapgmyoData(EMGData):
         if self.remove_baseline or self.is_segment:
             baseline = self.get_baseline(DIR)
 
-        cur_rec_id = int(self.sub.replace('subject',''))*2 + self.current_session + 1 # current recording ID
+        cur_rec_id = (int(self.sub.replace('subject',''))-1)*2 + self.current_session + 1 # current recording ID
         for file in filenames:
             rec_id, gest = file.split('-')
             rec_id, gest = int(rec_id.lstrip('0')), int(gest.replace('.mat', '').lstrip('0'))

@@ -26,15 +26,31 @@ def add_noise_input_transform(model, std=0.01):
             noise = torch.randn_like(param) * std
             param.add_(noise)
 
+# def get_inv_constrained_params(*args, boundaries):
+#     '''Maps parameters in constrained search space back to unconstrained space using the inverse of the sigmoid function.'''
+#     args_out = list(args).copy()
+#     for arg_idx, arg in enumerate(args):
+#         if boundaries[arg_idx][1] != boundaries[arg_idx][0]:
+#             args_out[arg_idx] = torch.log((arg - boundaries[arg_idx][0]) / (boundaries[arg_idx][1] - arg))
+#         else:
+#             args_out[arg_idx] = boundaries[arg_idx][1] # accounts for when parameter is not searched for
+
+#     return args_out
+
 def get_inv_constrained_params(*args, boundaries):
-    '''Maps parameters in constrained search space back to unconstrained space using the inverse of the sigmoid function.'''
+    '''Maps parameters in constrained search space back to unconstrained space using the inverse of the tanh-based constraint.'''
     args_out = list(args).copy()
     for arg_idx, arg in enumerate(args):
-        if boundaries[arg_idx][1] != boundaries[arg_idx][0]:
-            args_out[arg_idx] = torch.log((arg - boundaries[arg_idx][0]) / (boundaries[arg_idx][1] - arg))
+        min_b, max_b = boundaries[arg_idx]
+        if max_b != min_b:
+            # Avoid division by zero
+            normed = 2 * (arg - min_b) / (max_b - min_b) - 1
+            # Clamp normed to (-1 + eps, 1 - eps) to avoid NaN from arctanh
+            eps = 1e-6
+            normed = torch.clamp(normed, -1 + eps, 1 - eps)
+            args_out[arg_idx] = 0.5 * torch.log((1 + normed) / (1 - normed))  # arctanh
         else:
-            args_out[arg_idx] = boundaries[arg_idx][1] # accounts for when parameter is not searched for
-
+            args_out[arg_idx] = max_b  # or min_b, since they're equal
     return args_out
 
 def initial_search(model, train_loader, boundaries, adaptation_params, H, W, npoints=50):
@@ -82,6 +98,7 @@ def initial_search(model, train_loader, boundaries, adaptation_params, H, W, npo
 
     init_params = init_params.to(device)
     model.input_transform.constrain_params = False # disable parameter constraints for initial search
+    
     with torch.no_grad():
         for sal_idx in range(model.input_transform.nsals):
             print(f'Spatial Adaptation Layer #{sal_idx+1}...')
@@ -142,7 +159,7 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
     # for epoch in range(num_epochs):
         if verbose:
             print('Learning Rate:', scheduler.get_last_lr())
-        running_loss = 0.0
+        # running_loss = 0.0
         for i, (signals, labels) in enumerate(train_loader):
             signals = signals.to(device)
             labels = labels.view(-1).type(torch.LongTensor).to(device)
@@ -156,7 +173,8 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
             warmup_scheduler.step()
 
             # TENSORBOARD
-            running_loss += loss.item()
+            # running_loss += loss.item()
+            running_losses.append(loss.item())
             baseline.append(model.baseline.cpu().detach().numpy().ravel())
 
             # if 'spatial' in model.input_transform.name:
@@ -177,9 +195,9 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
             if (i + 1) % 20 == 0:
                 if verbose:
                     print('Epoch {} / {}, step {} / {}, training loss = {:4f}'.format(epoch+1, num_epochs, i+1, len(train_loader), loss.item()))
-                running_losses.append(running_loss)
-                running_loss = 0.0
-                running_correct = 0
+                # running_losses.append(runni)
+                # running_loss = 0.0
+                # running_correct = 0
         epoch += 1
 
         # if val_loader:
