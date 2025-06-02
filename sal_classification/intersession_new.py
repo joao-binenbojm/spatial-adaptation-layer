@@ -89,7 +89,6 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let m
 print('Device:', device)
 
 print('INTERSESSION:', data['dataset_name'])
-# data['subs'] = [8]
 for idx, sub in tqdm(enumerate(data['subs'])):
     # Load data for given subject/session
     sub_id = 'subject{}'.format(sub+1)
@@ -164,7 +163,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     # Set-up SAL boundaries
                     if 'spatial-adaptation' in exp['adaptation']:
                         if 'grabmyo' in exp['dataset']:
-                            boundaries = [[-2*2.5/(W-1), 2*2.5/(W-1)], [-1, 1], [-15/180, 15/180],
+                            boundaries = [[-2*3.0/(W-1), 2*3.0/(W-1)], [-1, 1], [-15/180, 15/180],
                                            [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
                         else:
                             boundaries = [[-2*4.0/(W-1), 2*4.0/(W-1)], [-2*4.0/(H-1), 2*4.0/(H-1)], [-15/180, 15/180],
@@ -357,7 +356,7 @@ wandb.init(
     project=exp["project"],
     config=config,
     name=name,
-    # mode='disabled',
+    # mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)

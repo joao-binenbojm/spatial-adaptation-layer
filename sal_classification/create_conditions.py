@@ -31,11 +31,11 @@ for dataset in ['csl', 'hyser', 'capgmyo', 'grabmyo-forearm', 'grabmyo-wrist']:
         elif dataset == 'csl':
             exp['emg_tensorizer'] = f"CSLData"
             exp['circular'] = False
-            gest_subset = [7,8,9,11,12,13,15]
+            exp['gest_subset'] = [7,8,11,12,15,20,22]
         elif dataset == 'hyser':
             exp['emg_tensorizer'] = f"HyserData"
             exp['circular'] = False
-            gest_subset = [5,6,7,8,9,10,29,30]
+            exp['gest_subset'] = [5,6,7,8,9,10,29,30]
 
     # For each network
     for network in ['LogisticRegressor', 'CapgMyoNet']:

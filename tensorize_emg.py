@@ -157,7 +157,7 @@ class EMGData:
                 emg = emg**2
                 baseline += emg.sum(axis=0, keepdims=True)
                 baseline_samp_count += emg.shape[0]
-            baseline = baseline/ (baseline_samp_count + 1e-6) # avoid division by zero
+            baseline = baseline / (baseline_samp_count + 1e-6) # avoid division by zero
             if self.remove_baseline == 'root-mean-square':
                 baseline = np.sqrt(baseline)
 
