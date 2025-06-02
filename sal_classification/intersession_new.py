@@ -355,7 +355,7 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name,
+    name=name
     # mode='disabled'
 )
 
