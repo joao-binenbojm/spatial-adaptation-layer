@@ -3,6 +3,7 @@ from time import time
 import json
 from copy import deepcopy
 import sys
+import math
 
 import numpy as np
 import pandas as pd
@@ -25,6 +26,32 @@ from sal_classification.deep_learning import train_model, test_model, init_adabn
 from networks import CapgMyoNet, LogisticRegressor #, LogisticRegressorHyser
 from networks_utils import median_pool_2d
 from emg_processing import majority_voting_full_segment, majority_voting_segments
+
+# def circular_gaussian_blur(x, sigma=0.5, kernel_size=3):
+#     # x shape: (T, 1, 1, W)
+#     T, _, _, W = x.shape
+    
+#     # Create 1D Gaussian kernel
+#     k = kernel_size
+#     center = k // 2
+#     kernel = torch.zeros(k, dtype=x.dtype, device=x.device)
+    
+#     for i in range(k):
+#         kernel[i] = math.exp(-0.5 * ((i - center) / sigma) ** 2)
+    
+#     # Normalize kernel
+#     kernel = kernel / kernel.sum()
+#     kernel = kernel.view(1, 1, -1)  # Shape for conv1d
+    
+#     # Reshape and apply circular padding
+#     x_reshaped = x.squeeze(2)  # (T, 1, W)
+#     pad_size = k // 2
+#     x_padded = F.pad(x_reshaped, (pad_size, pad_size), mode='circular')
+    
+#     # Apply convolution
+#     filtered = F.conv1d(x_padded, kernel, padding=0)
+    
+#     return filtered.unsqueeze(2)  # Back to (T, 1, 1, W)
 
 # def handle_outliers(emg_grid):
 #     '''Determine outlier channels, and replace them with average of neighbours.'''
@@ -122,16 +149,17 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 print('ADAPT REP #{}'.format(adapt_rep+1))
                                 
                 # Get adaptation gest from gest subset
-                # if exp['gest_subset'] is not None:
-                #     adapt_gests = [7,8,15]
-                #     subgests = [exp['gest_subset'].index(gest) for gest in adapt_gests] # get gesture indices from subset
-                # else:
-                #     subgests = None
+                if exp['adapt_gest_subset'] is not None:
+                    subgests = [exp['gest_subset'].index(gest) for gest in exp['adapt_gest_subset']] # get gesture indices from subset
+                else:
+                    subgests = None
                 X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations = emg_tensorizer.get_tensors_intersession(
                                                                                 test_session=test_idx,
                                                                                 train_session=train_idx,
-                                                                                rep_idx=int(adapt_rep)) # adapt to only one gesture
+                                                                                rep_idx=int(adapt_rep),
+                                                                                gest_idxs=subgests) # adapt to only one gesture
                 
+
                 # Get PyTorch DataLoaders
                 train_data = EMGFrameLoader(X=X_train.clone(), Y=Y_train.clone(), norm=exp['norm'])
                 adapt_data = EMGFrameLoader(X=X_adapt.clone(), Y=Y_adapt.clone(), train=False, norm=exp['norm'], stats=train_data.stats)
@@ -161,13 +189,12 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                         H = H // 2
                     
                     # Set-up SAL boundaries
-                    if 'spatial-adaptation' in exp['adaptation']:
-                        if 'grabmyo' in exp['dataset']:
-                            boundaries = [[-2*3.0/(W-1), 2*3.0/(W-1)], [-1, 1], [-15/180, 15/180],
-                                           [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
-                        else:
-                            boundaries = [[-2*4.0/(W-1), 2*4.0/(W-1)], [-2*4.0/(H-1), 2*4.0/(H-1)], [-15/180, 15/180],
-                                           [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
+                    if 'grabmyo' in exp['dataset']:
+                        boundaries = [[-2*3.0/(W-1), 2*3.0/(W-1)], [-1, 1], [-15/180, 15/180],
+                                        [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
+                    else:
+                        boundaries = [[-2*4.0/(W-1), 2*4.0/(W-1)], [-2*4.0/(H-1), 2*4.0/(H-1)], [-15/180, 15/180],
+                                        [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
                         
                     base_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=emg_tensorizer.num_gestures, 
                                                         p_input=exp['p_input'], baseline=exp['learnable_baseline'], input_transform_name=input_transform_name, 
@@ -198,18 +225,18 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 print('Test Accuracy:', acc)
                 print('Test F1-Score:', f1)
 
-                # # Get test set image saved
-                # plt.figure()
-                # fig, ax = plt.subplots(2, 6)
-                # for idx in range(2):
-                #     for jdx in range(6):
-                #         label = idx*6 + jdx
-                #         ax[idx, jdx].imshow(X_adapt[Y_adapt==label,0,:,:].mean(dim=0))
-                #         ax[idx, jdx].axis('off')
-                #         ax[idx, jdx].set_title(f'Label: {label}')
+                # Get test set image saved
+                plt.figure()
+                fig, ax = plt.subplots(2, 6)
+                for idx in range(2):
+                    for jdx in range(6):
+                        label = idx*6 + jdx
+                        ax[idx, jdx].imshow(X_adapt[Y_adapt==label,0,:,:].mean(dim=0))
+                        ax[idx, jdx].axis('off')
+                        ax[idx, jdx].set_title(f'Label: {label}')
                 
-                # plt.savefig('baseline-session2.jpg')
-                # plt.close()
+                plt.savefig('baseline-session2.jpg')
+                plt.close()
 
                 # Fine-tune to update model's shifting position
                 adapted_model = deepcopy(base_model)
@@ -230,7 +257,13 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     for param in adapted_model.parameters(): # make all parameters trainable
                         param.requires_grad = True
 
-                if exp['adabatch']:
+                elif exp['adaptation'] == 'scratch_training': # train from scratch
+                    adapted_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=emg_tensorizer.num_gestures, 
+                                                        p_input=exp['p_input'], baseline=exp['learnable_baseline'], input_transform_name=input_transform_name, 
+                                                        circular=exp["circular"], boundaries=boundaries).to(device)
+                    adapted_model.train()
+
+                if exp['adaptation'] == 'adabatch':
                     init_adabn(adapted_model)
 
                 if exp['learnable_baseline']:
@@ -240,39 +273,45 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 if exp['corrective_gain']:
                     adapted_model.get_session_means(X_train, X_adapt) # get stats for both X_train and X_adapt
 
-                print('INITIAL CONDITION SAMPLING...')
-                boundaries = torch.tensor([4.0, 4.0, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
                 adapted_model.adaptation_phase = True # set model to adaptation phase
-                # with torch.no_grad():
-                #     scaling_factors = (X_train.median(dim=0, keepdim=True)[0] / (X_adapt.median(dim=0, keepdim=True)[0] + 1e-8))
-                #     print('Scaling factors:', scaling_factors.squeeze())
-                #     X_test_scaled = X_test * scaling_factors # normalize X_adapt to X_train mean
-                # test_data_scaled = EMGFrameLoader(X=X_test_scaled, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
-                # test_loader_scaled = DataLoader(test_data_scaled, batch_size=exp['batch_size'], shuffle=False)
-                
-                labels = torch.unique(Y_adapt)
-                X_adapt_search = torch.zeros(len(labels), 1, X_adapt.shape[2], X_adapt.shape[3], device=device)
-                with torch.no_grad():
-                    for idx, label in enumerate(labels):
-                        X_adapt_search[idx, 0, :, :] = torch.sqrt((X_adapt[Y_adapt == label]**2).mean(dim=0))
-                
-                adapt_search_data = EMGFrameLoader(X=X_adapt_search, Y=labels, train=False, norm=exp['norm'], stats=train_data.stats)
-                adapt_search_loader = DataLoader(adapt_search_data, batch_size=len(labels), shuffle=True)
 
-                if exp['adaptation'] == 'spatial-adaptation':
+                if exp['adaptation'] == "spatial-adaptation":
+                    labels = torch.unique(Y_adapt)
+                    X_adapt_search = torch.zeros(len(labels), 1, X_adapt.shape[2], X_adapt.shape[3], device=device)
+                    with torch.no_grad():
+                        for idx, label in enumerate(labels):
+                            X_adapt_search[idx, 0, :, :] = torch.sqrt((X_adapt[Y_adapt == label]**2).mean(dim=0))
+                    
+                    adapt_search_data = EMGFrameLoader(X=X_adapt_search, Y=labels, train=False, norm=exp['norm'], stats=train_data.stats)
+                    adapt_search_loader = DataLoader(adapt_search_data, batch_size=len(labels), shuffle=True)
                     adapted_model.input_transform.mode = 'bicubic'
-                initial_search(adapted_model, adapt_search_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=int(4**7)) #data['num_repetitions']*exp['num_epochs']//2) # find optimal initial condition
+                    print('INITIAL CONDITION SAMPLING...')
+                    boundaries = torch.tensor([4.0, 4.0, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
+                    
+                    initial_search(adapted_model, adapt_search_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=int(4**7)) #data['num_repetitions']*exp['num_epochs']//2) # find optimal initial condition
+                    adapted_model.input_transform.mode = 'bilinear' # set mode to bilinear for training
 
-                adapted_model.input_transform.mode = 'bilinear' # set mode to bilinear for training
+                    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
+                                                lr=0.01, weight_decay=exp['weight_decay'])
+                    scheduler_params = exp['scheduler']['params']
+                    scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
+                    scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
+                    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 1.0, 1.0, total_iters=len(adapt_loader)*data['num_repetitions']*exp['num_epochs']//5)
+                    train_model(adapted_model, adapt_search_loader, optimizer, criterion, num_epochs=500, scheduler=scheduler,
+                                warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
 
-                optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
-                                             lr=0.01, weight_decay=exp['weight_decay'])
-                scheduler_params = exp['scheduler']['params']
-                scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
-                scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
-                warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 1.0, 1.0, total_iters=len(adapt_loader)*data['num_repetitions']*exp['num_epochs']//5)
-                train_model(adapted_model, adapt_search_loader, optimizer, criterion, num_epochs=500, scheduler=scheduler,
-                            warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
+                elif exp['adaptation'] == 'adabatch':
+                    with torch.no_grad():
+                        train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=1) # single forward pass per batch
+                else:
+                    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
+                                                lr=exp['lr'], weight_decay=exp['weight_decay'])
+                    scheduler_params = exp['scheduler']['params']
+                    scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
+                    scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
+                    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(adapt_loader)*data['num_repetitions']*exp['num_epochs']//5)
+                    train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
+                                warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
 
                 # Fetch params
                 if exp['adaptation'] == 'spatial-adaptation':
@@ -293,6 +332,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     adapted_model.input_transform.mode = 'bicubic'
 
                 print('TESTING...')
+                adapted_model.eval()
                 with torch.no_grad():
                     tuned_all_labs, tuned_all_preds = test_model(adapted_model, test_loader)
 
@@ -355,8 +395,8 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name
-    # mode='disabled'
+    name=name,
+    mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)

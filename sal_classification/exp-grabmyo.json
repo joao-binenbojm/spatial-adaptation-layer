@@ -30,11 +30,11 @@
         "xshear": false,
         "yshear": false
     },
-    "real_baseline": null,
+    "real_baseline": "mean-square",
     "corrective_gain": false,
     "learnable_baseline": false,
     "adabatch": false,
     "gest_subset": [10,11,12,13,14,15],
     "circular": true,
-    "median-filter": false
+    "median-filter": true
 }

@@ -31,32 +31,27 @@ for dataset in ['csl', 'hyser', 'capgmyo', 'grabmyo-forearm', 'grabmyo-wrist']:
         elif dataset == 'csl':
             exp['emg_tensorizer'] = f"CSLData"
             exp['circular'] = False
-            exp['gest_subset'] = [7,8,11,12,15,20,22]
+            exp['gest_subset'] = [7,8,11,12,15,20,22,23]
         elif dataset == 'hyser':
             exp['emg_tensorizer'] = f"HyserData"
             exp['circular'] = False
             exp['gest_subset'] = [5,6,7,8,9,10,29,30]
-
-    # For each network
-    for network in ['LogisticRegressor', 'CapgMyoNet']:
-        if network == 'CapgMyoNet':
-            exp['num_epochs'] = 2
-        elif network == 'LogisticRegressor':
-            exp['num_epochs'] = 15
-        exp['network'] = network
-        for corrective_gain in [True, False]:
-            exp['corrective_gain'] = corrective_gain
-            for rbase in ["mean-square", "root-mean-square", None]:
-                exp['real_baseline'] = rbase
-                for median_filter in [True, False]:
-                    exp['median-filter'] = median_filter
-                    for p_input in [0.0, 0.5]:
-                        exp['p_input'] = p_input
-                        exp['name'] = f"{dataset}_{network}_{rbase}_{int(median_filter)}_{int(corrective_gain)}_{p_input}"
-                        with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
-                            json.dump(exp, f)
-                        nconditions += 1
-                        print(nconditions)
-                        if nconditions % 49 == 0:
-                            conditions_dir = conditions_dir[:-1] + str(int(conditions_dir[-1]) + 1) # increases condition dir
-                            os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
+    # For each adaptation method
+    for adaptation in ['spatial-adaptation', 'fine-tuning', 'linear-layer', 'scratch-training', 'adabatch']:
+        # For each network
+        for network in ['LogisticRegressor', 'CapgMyoNet']:
+            if network == 'CapgMyoNet':
+                exp['num_epochs'] = 2
+                exp['p_input'] = 0.0
+            elif network == 'LogisticRegressor':
+                exp['num_epochs'] = 15
+                exp['p_input'] = 0.5 * int("grabmyo" not in dataset)
+            exp['network'] = network
+            exp['name'] = f"{dataset}_{adaptation}_{network}"
+            with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
+                json.dump(exp, f)
+            nconditions += 1
+            print(nconditions)
+            if nconditions % 49 == 0:
+                conditions_dir = conditions_dir[:-1] + str(int(conditions_dir[-1]) + 1) # increases condition dir
+                os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)

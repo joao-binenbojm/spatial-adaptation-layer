@@ -4,20 +4,9 @@ import json
 from tqdm import tqdm
 
 
-N_runs = len(os.listdir('./sal_classification/conditions'))
-exps = []
-for idx in range(1, N_runs+1):
-    with open(f'./sal_classification/conditions/{idx}.json', 'r') as file:
-        exps.append(json.load(file))
-
-for exp in tqdm(exps): # reverse order
-
-    # Save dictionary as current condition to be tested
-    with open('./sal_classification/exp.json', 'w') as file:
-        json.dump(exp, file, indent=4)
-
-    # Run intersession script
+filenames = os.listdir('./sal_classification/conditions3')
+for name in filenames:
     try:
-        os.system('python ./sal_classification/intersession_new.py') # if you can run the intersession file with the given conditions do so, otherwise move onto the next conditions
+        os.system(f"python ./sal_classification/intersession_new.py conditions3/{name.replace('.json','')}") # if you can run the intersession file with the given conditions do so, otherwise move onto the next conditions
     except:
         continue

@@ -157,8 +157,8 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
     epoch = 0
     while epoch < num_epochs:
     # for epoch in range(num_epochs):
-        if verbose:
-            print('Learning Rate:', scheduler.get_last_lr())
+        # if verbose:
+            # print('Learning Rate:', scheduler.get_last_lr())
         # running_loss = 0.0
         for i, (signals, labels) in enumerate(train_loader):
             signals = signals.to(device)
@@ -168,9 +168,11 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
             loss = criterion(outputs, labels)
             # backward pass
             optimizer.zero_grad()
-            loss.backward()
+            if torch.is_grad_enabled():
+                loss.backward()
             optimizer.step()
-            warmup_scheduler.step()
+            if warmup_scheduler:
+                warmup_scheduler.step()
 
             # TENSORBOARD
             # running_loss += loss.item()
@@ -249,7 +251,8 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
                 
 
         # Update scheduler and calculate time taken after given epoch
-        scheduler.step()
+        if scheduler:
+            scheduler.step()
         tf = time()
         h, m = ((tf - t0) / 60) // 60, ((tf - t0) / 60) % 60
         print('TOTAL TIME ELAPSED: {}h, {}min'.format(h, m))
