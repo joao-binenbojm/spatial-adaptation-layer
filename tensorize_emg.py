@@ -395,17 +395,17 @@ class EMGData:
             X_adapt = X_adapt.mean(dim=2, keepdim=True)
         
         ## IMAGE TEST PLOTTING
-        plt.figure()
-        fig, ax = plt.subplots(2, 6)
-        # vmin, vmax = X_train.min(), X_train.max()
-        for idx in range(2):
-            for jdx in range(6):
-                label = idx*6 + jdx
-                ax[idx, jdx].imshow(X_train[Y_train==label,0,:,:].mean(dim=0))
-                ax[idx, jdx].axis('off')
-                ax[idx, jdx].set_title(f'Label: {label}')
+        # plt.figure()
+        # fig, ax = plt.subplots(2, 6)
+        # # vmin, vmax = X_train.min(), X_train.max()
+        # for idx in range(2):
+        #     for jdx in range(6):
+        #         label = idx*6 + jdx
+        #         ax[idx, jdx].imshow(X_train[Y_train==label,0,:,:].mean(dim=0))
+        #         ax[idx, jdx].axis('off')
+        #         ax[idx, jdx].set_title(f'Label: {label}')
         
-        plt.savefig('baseline')
+        # plt.savefig('baseline')
 
         return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations.ravel()
 
