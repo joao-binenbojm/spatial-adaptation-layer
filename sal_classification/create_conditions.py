@@ -13,6 +13,8 @@ nconditions = 1
 for dataset in ['csl', 'hyser', 'capgmyo', 'grabmyo-forearm', 'grabmyo-wrist']:
     exp['dataset'] = dataset
     if 'grabmyo' in dataset:
+        exp['median-filter'] = False
+        exp['real_baseline'] = "mean-square"
         for key in exp['adaptation_params'].keys():
             if key == 'xshift':
                 exp['adaptation_params'][key] = True
@@ -28,16 +30,23 @@ for dataset in ['csl', 'hyser', 'capgmyo', 'grabmyo-forearm', 'grabmyo-wrist']:
             exp['emg_tensorizer'] = f"CapgmyoData"
             exp['circular'] = True
             exp['gest_subset'] = None
+            exp['real_baseline'] = "mean-square"
+            exp['median-filter'] = False
         elif dataset == 'csl':
             exp['emg_tensorizer'] = f"CSLData"
             exp['circular'] = False
             exp['gest_subset'] = [7,8,11,12,15,20,22,23]
+            exp['real_baseline'] = "mean_square"
+            exp['median-filter'] = True
         elif dataset == 'hyser':
             exp['emg_tensorizer'] = f"HyserData"
             exp['circular'] = False
+            exp['real_baseline'] = None
             exp['gest_subset'] = [5,6,7,8,9,10,29,30]
+            exp['median-filter'] = True
     # For each adaptation method
     for adaptation in ['spatial-adaptation', 'fine-tuning', 'linear-layer', 'scratch-training', 'adabatch']:
+        exp['adaptation'] == adaptation
         # For each network
         for network in ['LogisticRegressor', 'CapgMyoNet']:
             if network == 'CapgMyoNet':
