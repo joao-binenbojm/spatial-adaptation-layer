@@ -46,7 +46,7 @@ for dataset in ['csl', 'hyser', 'capgmyo', 'grabmyo-forearm', 'grabmyo-wrist']:
             exp['median-filter'] = True
     # For each adaptation method
     for adaptation in ['spatial-adaptation', 'fine-tuning', 'linear-layer', 'scratch-training', 'adabatch']:
-        exp['adaptation'] == adaptation
+        exp['adaptation'] = adaptation
         # For each network
         for network in ['LogisticRegressor', 'CapgMyoNet']:
             if network == 'CapgMyoNet':

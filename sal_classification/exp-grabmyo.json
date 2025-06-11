@@ -34,7 +34,8 @@
     "corrective_gain": false,
     "learnable_baseline": false,
     "adabatch": false,
-    "gest_subset": [10,11,12,13,14,15],
+    "gest_subset": [4,5,10,11,12,13,14,15],
+    "adapt_gest_subset": null,
     "circular": true,
-    "median-filter": true
+    "median-filter": false
 }
