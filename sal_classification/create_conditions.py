@@ -22,7 +22,7 @@ for dataset in ['csl', 'hyser', 'capgmyo', 'grabmyo-forearm', 'grabmyo-wrist']:
                 exp['adaptation_params'][key] = False
         exp['circular'] = True
         exp['emg_tensorizer'] = 'GrabmyoData'
-        exp['gest_subset'] = [10,11,12,13,14,15]
+        exp['gest_subset'] = [4,5,10,11,12,13,14,15]
     else:
         for key in exp['adaptation_params'].keys(): exp['adaptation_params'][key] = True
     
