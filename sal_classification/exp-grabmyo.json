@@ -1,5 +1,5 @@
 {
-    "name": "intersession-grabmyo-forearm-test",
+    "name": "intersession-grabmyo-wrist-test",
     "project": "simulation-new",
     "K": 1,
     "num_epochs": 10,
@@ -17,7 +17,7 @@
     "momentum": 0,
     "weight_decay": 0,
     "network": "LogisticRegressor",
-    "dataset": "grabmyo-forearm",
+    "dataset": "grabmyo-wrist",
     "emg_tensorizer": "GrabmyoData",
     "Trms": 0.25,
     "adaptation": "spatial-adaptation",

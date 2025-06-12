@@ -257,7 +257,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     for param in adapted_model.parameters(): # make all parameters trainable
                         param.requires_grad = True
 
-                elif exp['adaptation'] == 'scratch_training': # train from scratch
+                elif exp['adaptation'] == 'scratch-training': # train from scratch
                     adapted_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=emg_tensorizer.num_gestures, 
                                                         p_input=exp['p_input'], baseline=exp['learnable_baseline'], input_transform_name=input_transform_name, 
                                                         circular=exp["circular"], boundaries=boundaries).to(device)
@@ -304,6 +304,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     with torch.no_grad():
                         train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=1) # single forward pass per batch
                 else:
+
                     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
                                                 lr=exp['lr'], weight_decay=exp['weight_decay'])
                     scheduler_params = exp['scheduler']['params']
@@ -395,8 +396,8 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name
-    # mode='disabled'
+    name=name,
+    mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)

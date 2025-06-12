@@ -2,10 +2,10 @@
     "name": "test",
     "project": "classification-simulation",
     "K": 1,
-    "num_epochs": 15,
+    "num_epochs": 2,
     "norm": 0,
     "lr": 0.001,
-    "p_input": 0.5,
+    "p_input": 0.0,
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
         "params": {
@@ -16,11 +16,11 @@
     "batch_size": 128,
     "momentum": 0,
     "weight_decay": 0,
-    "network": "LogisticRegressor",
+    "network": "CapgMyoNet",
     "dataset": "csl",
     "emg_tensorizer": "CSLData",
     "Trms": 0.25,
-    "adaptation": "adabatch",
+    "adaptation": "spatial-adaptation",
     "adaptation_params": {
         "xshift": true,
         "yshift": true,
@@ -35,7 +35,7 @@
     "corrective_gain": true,
     "adabatch": false,
     "gest_subset": [7,8,11,12,15,20,22,23],
-    "adapt_gest_subset": null,
+    "adapt_gest_subset": [20,22,23],
     "circular": false,
     "median-filter": true
 }
