@@ -20,7 +20,7 @@
     "dataset": "csl",
     "emg_tensorizer": "CSLData",
     "Trms": 0.25,
-    "adaptation": "spatial-adaptation",
+    "adaptation": "adabatch",
     "adaptation_params": {
         "xshift": true,
         "yshift": true,
