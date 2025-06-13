@@ -10,7 +10,7 @@ os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
 nconditions = 1
 
 # For each dataset
-for dataset in ['csl', 'hyser', 'capgmyo', 'grabmyo-forearm', 'grabmyo-wrist']:
+for dataset in ['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'grabmyo-wrist']:
     exp['dataset'] = dataset
     if 'grabmyo' in dataset:
         exp['median-filter'] = False
@@ -23,27 +23,32 @@ for dataset in ['csl', 'hyser', 'capgmyo', 'grabmyo-forearm', 'grabmyo-wrist']:
         exp['circular'] = True
         exp['emg_tensorizer'] = 'GrabmyoData'
         exp['gest_subset'] = [4,5,10,11,12,13,14,15]
+        exp['adapt_gest_subset'] = [10,11,13]
     else:
         for key in exp['adaptation_params'].keys(): exp['adaptation_params'][key] = True
     
         if dataset == 'capgmyo':
             exp['emg_tensorizer'] = f"CapgmyoData"
             exp['circular'] = True
-            exp['gest_subset'] = None
             exp['real_baseline'] = "mean-square"
             exp['median-filter'] = False
+            exp['gest_subset'] = None
+            exp['adapt_gest_subset'] = [2,4,5]
         elif dataset == 'csl':
             exp['emg_tensorizer'] = f"CSLData"
             exp['circular'] = False
-            exp['gest_subset'] = [7,8,11,12,15,20,22,23]
             exp['real_baseline'] = "mean_square"
             exp['median-filter'] = True
+            exp['gest_subset'] = [7,8,11,12,15,20,22,23]
+            exp['adapt_gest_subset'] = [20,22,23]
         elif dataset == 'hyser':
             exp['emg_tensorizer'] = f"HyserData"
             exp['circular'] = False
             exp['real_baseline'] = None
-            exp['gest_subset'] = [5,6,7,8,9,10,29,30]
             exp['median-filter'] = True
+            exp['gest_subset'] = [5,6,7,8,9,10,29,30]
+            exp['adapt_gest_subset'] = [5,6,9]
+
     # For each adaptation method
     for adaptation in ['spatial-adaptation', 'fine-tuning', 'linear-layer', 'scratch-training', 'adabatch']:
         exp['adaptation'] = adaptation

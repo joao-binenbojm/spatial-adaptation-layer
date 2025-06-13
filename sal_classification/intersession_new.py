@@ -116,6 +116,7 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let m
 print('Device:', device)
 
 print('INTERSESSION:', data['dataset_name'])
+print('CONDITIONS:', exp['name'])
 for idx, sub in tqdm(enumerate(data['subs'])):
     # Load data for given subject/session
     sub_id = 'subject{}'.format(sub+1)
@@ -401,8 +402,8 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name,
-    mode='disabled'
+    name=name
+    # mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)
