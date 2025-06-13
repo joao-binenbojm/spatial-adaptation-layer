@@ -142,8 +142,8 @@ if __name__ == '__main__':
         # set the wandb project where this run will be logged
         project=exp.pop("project"),
         config=config,
-        name=name,
-        mode='disabled'
+        name=name
+        # mode='disabled'
     )
 
     # Logging final results onto wandb 
