@@ -62,6 +62,8 @@ for dataset in ['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'grabmyo-wrist
                 exp['p_input'] = 0.5 * int("grabmyo" not in dataset)
             exp['network'] = network
             exp['name'] = f"{dataset}_{adaptation}_{network}"
+            if exp['adapt_gest_subset'] is not None:
+                exp['name'] = exp['name'] + '_' + str(exp['adapt_gest_subset']).replace(' ', '') 
             with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
                 json.dump(exp, f)
             nconditions += 1
