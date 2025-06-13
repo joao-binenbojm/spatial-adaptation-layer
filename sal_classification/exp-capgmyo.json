@@ -32,9 +32,10 @@
     },
     "real_baseline": "mean-square",
     "learnable_baseline": false,
-    "corrective_gain": false,
+    "corrective_gain": true,
     "adabatch": false,
     "gest_subset": null,
+    "adapt_gest_subset": [2,4,5],
     "circular": true,
-    "median-filter": true
+    "median-filter": false
 }

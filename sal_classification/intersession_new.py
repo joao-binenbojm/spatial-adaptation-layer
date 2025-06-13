@@ -150,7 +150,10 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                                 
                 # Get adaptation gest from gest subset
                 if exp['adapt_gest_subset'] is not None:
-                    subgests = [exp['gest_subset'].index(gest) for gest in exp['adapt_gest_subset']] # get gesture indices from subset
+                    if exp['gest_subset']:
+                        subgests = [exp['gest_subset'].index(gest) for gest in exp['adapt_gest_subset']] # get gesture indices from subset
+                    else:
+                        subgests = exp['adapt_gest_subset']
                 else:
                     subgests = None
                 X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations = emg_tensorizer.get_tensors_intersession(
@@ -271,7 +274,9 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 
                 # TESTING ON THE FLY STATS ADAPTATION
                 if exp['corrective_gain']:
-                    adapted_model.get_session_means(X_train, X_adapt) # get stats for both X_train and X_adapt
+                    mask = torch.isin(Y_train, Y_adapt.unique())
+                    X_train_sub = X_train[mask].clone()
+                    adapted_model.get_session_means(X_train_sub, X_adapt) # get stats for both X_train and X_adapt
 
                 adapted_model.adaptation_phase = True # set model to adaptation phase
 
@@ -396,8 +401,8 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name
-    # mode='disabled'
+    name=name,
+    mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)
