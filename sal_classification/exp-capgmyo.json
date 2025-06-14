@@ -35,7 +35,7 @@
     "corrective_gain": true,
     "adabatch": false,
     "gest_subset": null,
-    "adapt_gest_subset": [2,4,5],
+    "adapt_gest_subset": null,
     "circular": true,
-    "median-filter": false
+    "median-filter": true
 }

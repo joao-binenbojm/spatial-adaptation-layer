@@ -33,21 +33,25 @@ for dataset in ['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'grabmyo-wrist
             exp['real_baseline'] = "mean-square"
             exp['median-filter'] = False
             exp['gest_subset'] = None
-            exp['adapt_gest_subset'] = [2,4,5]
+            # exp['adapt_gest_subset'] = [2,4,5]
+            exp['adapt_gest_subset'] = [5]
         elif dataset == 'csl':
             exp['emg_tensorizer'] = f"CSLData"
             exp['circular'] = False
             exp['real_baseline'] = "mean_square"
             exp['median-filter'] = True
             exp['gest_subset'] = [7,8,11,12,15,20,22,23]
-            exp['adapt_gest_subset'] = [20,22,23]
+            # exp['adapt_gest_subset'] = [20,22,23]
+            exp['adapt_gest_subset'] = [20]
+
         elif dataset == 'hyser':
             exp['emg_tensorizer'] = f"HyserData"
             exp['circular'] = False
             exp['real_baseline'] = None
             exp['median-filter'] = True
             exp['gest_subset'] = [5,6,7,8,9,10,29,30]
-            exp['adapt_gest_subset'] = [5,6,9]
+            # exp['adapt_gest_subset'] = [5,6,9]
+            exp['adapt_gest_subset'] = [6]
 
     # For each adaptation method
     for adaptation in ['spatial-adaptation', 'fine-tuning', 'linear-layer', 'scratch-training', 'adabatch']:

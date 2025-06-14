@@ -27,58 +27,6 @@ from networks import CapgMyoNet, LogisticRegressor #, LogisticRegressorHyser
 from networks_utils import median_pool_2d
 from emg_processing import majority_voting_full_segment, majority_voting_segments
 
-# def circular_gaussian_blur(x, sigma=0.5, kernel_size=3):
-#     # x shape: (T, 1, 1, W)
-#     T, _, _, W = x.shape
-    
-#     # Create 1D Gaussian kernel
-#     k = kernel_size
-#     center = k // 2
-#     kernel = torch.zeros(k, dtype=x.dtype, device=x.device)
-    
-#     for i in range(k):
-#         kernel[i] = math.exp(-0.5 * ((i - center) / sigma) ** 2)
-    
-#     # Normalize kernel
-#     kernel = kernel / kernel.sum()
-#     kernel = kernel.view(1, 1, -1)  # Shape for conv1d
-    
-#     # Reshape and apply circular padding
-#     x_reshaped = x.squeeze(2)  # (T, 1, W)
-#     pad_size = k // 2
-#     x_padded = F.pad(x_reshaped, (pad_size, pad_size), mode='circular')
-    
-#     # Apply convolution
-#     filtered = F.conv1d(x_padded, kernel, padding=0)
-    
-#     return filtered.unsqueeze(2)  # Back to (T, 1, 1, W)
-
-# def handle_outliers(emg_grid):
-#     '''Determine outlier channels, and replace them with average of neighbours.'''
-#     # Determine coordinates of outliers
-#     H, W = emg_grid.shape[2:]
-#     emg_grid_var = emg_grid.mean(dim=[0,1])
-#     Q1, Q3 = torch.quantile(emg_grid_var.flatten(), 0.25), torch.quantile(emg_grid_var.flatten(), 0.75)
-#     IQR = Q3 - Q1
-#     lower, upper = Q1 -1.5*IQR, Q3 + 1.5*IQR
-#     y, x = torch.where(torch.logical_or(emg_grid_var >= upper, emg_grid_var <= lower)) # only keep non-noisy channel
-#     y, x = y.tolist(), x.tolist()
-
-#     idx = 0
-#     while idx < len(y): # for each outlier
-#         l,r,b,t = x[idx] != 0, x[idx] != W-1, y[idx] != H-1, y[idx] != 0
-#         subgrid = emg_grid[:, :, y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten(start_dim=2, end_dim=3)
-#         subgridvar = emg_grid_var[y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten()
-#         subgrid = subgrid[:, :, torch.logical_and(subgridvar < upper, subgridvar > lower)] # remove outlier channels included
-#         if subgrid.shape[2] < 1: # if less than 3 valid neighbours, try again after filling in more channels
-#             y.append(y[idx])
-#             x.append(x[idx])
-#         else:
-#             emg_grid[:,:,y[idx], x[idx]] = subgrid.mean(dim=2) # compute as average of neighbours
-#         idx += 1
-
-#     return emg_grid
-
 # from torch.utils.tensorboard import SummaryWriter
 # writer = SummaryWriter('runs/capgmyo')
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'expandable_segments:True'
@@ -107,7 +55,6 @@ t0 = time()
 # Preinitialize metric arrays
 session_ids = ['session'+str(ses+1) for ses in data['sessions']]
 subs, test_sessions, train_sessions, adapt_reps = [], [], [], []
-# xshifts, yshifts, rot_thetas, xscales, yscales, xshears, yshears = [], [], [], [], [], [], []
 learned_params = {key: [] for key in ['xshift', 'yshift', 'rot_theta', 'xscale', 'yscale', 'xshear', 'yshear']}
 accs, tuned_accs = [], [] # different metrics to be saved in csv from experiment
 f1_scores, tuned_f1_scores = [], []
@@ -200,9 +147,9 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                         boundaries = [[-2*4.0/(W-1), 2*4.0/(W-1)], [-2*4.0/(H-1), 2*4.0/(H-1)], [-15/180, 15/180],
                                         [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
                         
-                    base_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=emg_tensorizer.num_gestures, 
-                                                        p_input=exp['p_input'], baseline=exp['learnable_baseline'], input_transform_name=input_transform_name, 
-                                                        circular=exp["circular"], boundaries=boundaries).to(device)
+                    base_model = eval(exp['network'])(channels=X_train.shape[2]*X_train.shape[3], input_shape=(X_train.shape[2], X_train.shape[3]), 
+                                                        num_classes=emg_tensorizer.num_gestures, p_input=exp['p_input'], baseline=exp['learnable_baseline'], 
+                                                        input_transform_name=input_transform_name, circular=exp["circular"], boundaries=boundaries).to(device)
                     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, base_model.parameters()),
                                                 lr=exp['lr'], weight_decay=exp['weight_decay'])
                     scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
@@ -229,18 +176,18 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 print('Test Accuracy:', acc)
                 print('Test F1-Score:', f1)
 
-                # # Get test set image saved
-                # plt.figure()
-                # fig, ax = plt.subplots(2, 6)
-                # for idx in range(2):
-                #     for jdx in range(6):
-                #         label = idx*6 + jdx
-                #         ax[idx, jdx].imshow(X_adapt[Y_adapt==label,0,:,:].mean(dim=0))
-                #         ax[idx, jdx].axis('off')
-                #         ax[idx, jdx].set_title(f'Label: {label}')
+                # Get test set image saved
+                plt.figure()
+                fig, ax = plt.subplots(2, 6)
+                for idx in range(2):
+                    for jdx in range(6):
+                        label = idx*6 + jdx
+                        ax[idx, jdx].imshow(X_adapt[Y_adapt==label,0,:,:].mean(dim=0))
+                        ax[idx, jdx].axis('off')
+                        ax[idx, jdx].set_title(f'Label: {label}')
                 
-                # plt.savefig('baseline-session2.jpg')
-                # plt.close()
+                plt.savefig('baseline-session2.jpg')
+                plt.close()
 
                 # Fine-tune to update model's shifting position
                 adapted_model = deepcopy(base_model)
@@ -262,9 +209,9 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                         param.requires_grad = True
 
                 elif exp['adaptation'] == 'scratch-training': # train from scratch
-                    adapted_model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], num_classes=emg_tensorizer.num_gestures, 
-                                                        p_input=exp['p_input'], baseline=exp['learnable_baseline'], input_transform_name=input_transform_name, 
-                                                        circular=exp["circular"], boundaries=boundaries).to(device)
+                    adapted_model = eval(exp['network'])(channels=X_train.shape[2]*X_train.shape[3], input_shape=(X_train.shape[2], X_train.shape[3]), 
+                                                         num_classes=emg_tensorizer.num_gestures, p_input=exp['p_input'], baseline=exp['learnable_baseline'], 
+                                                         input_transform_name=input_transform_name, circular=exp["circular"], boundaries=boundaries).to(device)
                     adapted_model.train()
 
                 if exp['adaptation'] == 'adabatch':
@@ -402,8 +349,8 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name
-    # mode='disabled'
+    name=name,
+    mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)

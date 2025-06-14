@@ -386,6 +386,10 @@ class EMGData:
         X_adapt, Y_adapt = torch.flatten(X_adapt, end_dim=-4), torch.flatten(Y_adapt, end_dim=-1)
         X_test, Y_test = torch.flatten(X_test, end_dim=-4), torch.flatten(Y_test, end_dim=-1)
 
+        if self.dataset == 'capgmyo': # average within subgrids to ensure a regular grid
+            X_train, X_adapt, X_test = X_train.view(X_train.shape[0], 1, 8, 8, 2), X_adapt.view(X_adapt.shape[0], 1, 8, 8, 2), X_test.view(X_test.shape[0], 1, 8, 8, 2)
+            X_train, X_adapt, X_test = X_train.mean(dim=-1), X_adapt.mean(dim=-1), X_test.mean(dim=-1)
+
         if self.median_filter:
             print('APPLYING MEDIAN FILTER...')
             X_train, X_adapt, X_test = self.apply_median_filter(X_train), self.apply_median_filter(X_adapt), self.apply_median_filter(X_test)
@@ -394,18 +398,18 @@ class EMGData:
             X_test = X_test.mean(dim=2, keepdim=True)
             X_adapt = X_adapt.mean(dim=2, keepdim=True)
         
-        ## IMAGE TEST PLOTTING
-        # plt.figure()
-        # fig, ax = plt.subplots(2, 6)
-        # # vmin, vmax = X_train.min(), X_train.max()
-        # for idx in range(2):
-        #     for jdx in range(6):
-        #         label = idx*6 + jdx
-        #         ax[idx, jdx].imshow(X_train[Y_train==label,0,:,:].mean(dim=0))
-        #         ax[idx, jdx].axis('off')
-        #         ax[idx, jdx].set_title(f'Label: {label}')
+        # IMAGE TEST PLOTTING
+        plt.figure()
+        fig, ax = plt.subplots(2, 6)
+        # vmin, vmax = X_train.min(), X_train.max()
+        for idx in range(2):
+            for jdx in range(6):
+                label = idx*6 + jdx
+                ax[idx, jdx].imshow(X_train[Y_train==label,0,:,:].mean(dim=0))
+                ax[idx, jdx].axis('off')
+                ax[idx, jdx].set_title(f'Label: {label}')
         
-        # plt.savefig('baseline')
+        plt.savefig('baseline')
 
         return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations.ravel()
 
