@@ -176,18 +176,18 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 print('Test Accuracy:', acc)
                 print('Test F1-Score:', f1)
 
-                # Get test set image saved
-                plt.figure()
-                fig, ax = plt.subplots(2, 6)
-                for idx in range(2):
-                    for jdx in range(6):
-                        label = idx*6 + jdx
-                        ax[idx, jdx].imshow(X_adapt[Y_adapt==label,0,:,:].mean(dim=0))
-                        ax[idx, jdx].axis('off')
-                        ax[idx, jdx].set_title(f'Label: {label}')
+                # # Get test set image saved
+                # plt.figure()
+                # fig, ax = plt.subplots(2, 6)
+                # for idx in range(2):
+                #     for jdx in range(6):
+                #         label = idx*6 + jdx
+                #         ax[idx, jdx].imshow(X_adapt[Y_adapt==label,0,:,:].mean(dim=0))
+                #         ax[idx, jdx].axis('off')
+                #         ax[idx, jdx].set_title(f'Label: {label}')
                 
-                plt.savefig('baseline-session2.jpg')
-                plt.close()
+                # plt.savefig('baseline-session2.jpg')
+                # plt.close()
 
                 # Fine-tune to update model's shifting position
                 adapted_model = deepcopy(base_model)
@@ -349,8 +349,8 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name,
-    mode='disabled'
+    name=name
+    # mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)
