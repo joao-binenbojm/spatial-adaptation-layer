@@ -37,5 +37,5 @@
     "gest_subset": null,
     "adapt_gest_subset": null,
     "circular": true,
-    "median-filter": true
+    "median-filter": false
 }

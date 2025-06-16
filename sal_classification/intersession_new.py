@@ -62,6 +62,13 @@ is_model_trained = False
 device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 print('Device:', device)
 
+# Get labels
+if exp['gest_subset']:
+    nlabels = len(exp['gest_subset'])
+else:
+    nlabels = data['num_gestures']
+cf_tot = np.zeros((nlabels, nlabels))
+
 print('INTERSESSION:', data['dataset_name'])
 print('CONDITIONS:', exp['name'])
 for idx, sub in tqdm(enumerate(data['subs'])):
@@ -111,6 +118,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                                                                                 gest_idxs=subgests) # adapt to only one gesture
                 
 
+                X_train, X_adapt, X_test = X_train[:,:,X_train.shape[2]//2:,:], X_adapt[:,:,X_adapt.shape[2]//2:,:], X_test[:,:,X_test.shape[2]//2:,:]
+
                 # Get PyTorch DataLoaders
                 train_data = EMGFrameLoader(X=X_train.clone(), Y=Y_train.clone(), norm=exp['norm'])
                 adapt_data = EMGFrameLoader(X=X_adapt.clone(), Y=Y_adapt.clone(), train=False, norm=exp['norm'], stats=train_data.stats)
@@ -126,18 +135,20 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     
                     # Set input transformation for adaptation in case of the Hyser dataset
                     input_transform_name = exp['adaptation']
-                    if exp['adaptation'] == 'spatial-adaptation':
-                        if exp['dataset'] == 'hyser': 
-                            input_transform_name += '-hyser'
-                        elif exp['dataset'] == 'grabmyo':
-                            input_transform_name += '-grabmyo'
+                    # if exp['adaptation'] == 'spatial-adaptation':
+                    #     if exp['dataset'] == 'hyser': 
+                    #         input_transform_name += '-hyser'
+                    #     elif exp['dataset'] == 'grabmyo':
+                    #         input_transform_name += '-grabmyo'
 
-                    if 'grabmyo' in exp['dataset']:
-                        data['input_shape'] = (1, data['input_shape'][1])
+                    H, W = X_train.shape[2], X_train.shape[3] 
+
+                    # if 'grabmyo' in exp['dataset']:
+                    #     data['input_shape'] = (1, data['input_shape'][1])
                     
-                    H, W = data['input_shape']
-                    if exp['dataset'] == 'hyser':
-                        H = H // 2
+                    # H, W = data['input_shape']
+                    # if exp['dataset'] == 'hyser':
+                    #     H = H // 2
                     
                     # Set-up SAL boundaries
                     if 'grabmyo' in exp['dataset']:
@@ -170,24 +181,25 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     all_labs, all_preds = test_model(base_model, test_loader)
                     acc = accuracy_score(all_labs, all_preds)
                     f1 = f1_score(all_labs, all_preds, average='macro')
-                
+
                 accs.append(acc)
                 f1_scores.append(f1)
                 print('Test Accuracy:', acc)
                 print('Test F1-Score:', f1)
 
-                # # Get test set image saved
-                # plt.figure()
-                # fig, ax = plt.subplots(2, 6)
-                # for idx in range(2):
-                #     for jdx in range(6):
-                #         label = idx*6 + jdx
-                #         ax[idx, jdx].imshow(X_adapt[Y_adapt==label,0,:,:].mean(dim=0))
-                #         ax[idx, jdx].axis('off')
-                #         ax[idx, jdx].set_title(f'Label: {label}')
+
+                # Get test set image saved
+                plt.figure()
+                fig, ax = plt.subplots(2, 6)
+                for idx in range(2):
+                    for jdx in range(6):
+                        label = idx*6 + jdx
+                        ax[idx, jdx].imshow(X_adapt[Y_adapt==label,0,:,:].mean(dim=0))
+                        ax[idx, jdx].axis('off')
+                        ax[idx, jdx].set_title(f'Label: {label}')
                 
-                # plt.savefig('baseline-session2.jpg')
-                # plt.close()
+                plt.savefig('baseline-session2.jpg')
+                plt.close()
 
                 # Fine-tune to update model's shifting position
                 adapted_model = deepcopy(base_model)
@@ -298,12 +310,17 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 print('Tuned Test F1-Score:', tuned_f1)
 
                 # Get confusion matrix
-                labs = np.arange(data['num_gestures'])
+                labs = np.arange(max([len(Y_train.unique()), len(Y_test.unique())]))
                 cf = confusion_matrix(tuned_all_labs, tuned_all_preds, labels=labs)
+                try:
+                    cf_tot = cf_tot + cf
+                except:
+                    continue
                 disp = ConfusionMatrixDisplay(confusion_matrix=cf, display_labels=labs)
                 disp.plot()
                 plt.savefig('cfm.jpg')
-                plt.close()
+                plt.close('all')
+
                 # SAVE RESULTS
                 data_dict = {"Subject": subs, "Train Sessions": train_sessions, "Test Sessions": test_sessions, "Adaptation Repetitions": adapt_reps,
                              "Accuracy": accs, "Tuned Accuracy": tuned_accs, 'F1-Score': f1_scores, 'Tuned F1-Score': tuned_f1_scores}
@@ -340,6 +357,11 @@ data_dict.update(learned_params)
 df = pd.DataFrame(data_dict)
 df.to_csv(f"{name}.csv")
 
+disp = ConfusionMatrixDisplay(confusion_matrix=cf_tot, display_labels=labs)
+disp.plot()
+plt.savefig('cfm_tot.jpg')
+plt.close()
+
 # Initialize wandb and make sure no other runs are active concurrently for interference
 while wandb.run is not None and not wandb.run._is_finished():
     time.sleep(3)
@@ -349,8 +371,8 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name
-    # mode='disabled'
+    name=name,
+    mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)

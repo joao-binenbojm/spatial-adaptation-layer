@@ -1,11 +1,11 @@
 {
-    "name": "intersession-hyser-test",
+    "name": "extensor-test",
     "project": "simulation-new",
     "K": 1,
-    "num_epochs": 15,
+    "num_epochs": 2,
     "norm": 0,
     "lr": 0.001,
-    "p_input": 0.5,
+    "p_input": 0.0,
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
         "params": {
@@ -16,7 +16,7 @@
     "batch_size": 128,
     "momentum": 0,
     "weight_decay": 0,
-    "network": "LogisticRegressor",
+    "network": "CapgMyoNet",
     "dataset": "hyser",
     "emg_tensorizer": "HyserData",
     "Trms": 0.25,
@@ -30,11 +30,12 @@
         "xshear": true,
         "yshear": true
     },
-    "real_baseline": true,
+    "real_baseline": null,
     "learnable_baseline": false,
     "adabatch": false,
-    "corrective_gain": false,
-    "gest_subset": [5,6,7,8,9,10, 29,30],
+    "corrective_gain": true,
+    "gest_subset": [2,6,7,8,29,31],
+    "adapt_gest_subset": null,
     "circular": false,
     "median-filter": true
 }

@@ -36,6 +36,6 @@
     "adabatch": false,
     "gest_subset": [7,8,11,12,15,20,22,23],
     "adapt_gest_subset": [20,22],
-    "circular": false,
+    "circular": true,
     "median-filter": true
 }
