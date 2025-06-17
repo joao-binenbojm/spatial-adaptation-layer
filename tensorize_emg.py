@@ -102,14 +102,14 @@ class EMGData:
 
     def apply_median_filter(self, X):
         '''Apply median filtering depending on the specific dataset.'''
-        if self.dataset == 'csl':
+        if self.dataset == 'csl' or 'hyser' in self.dataset:
             X = median_pool_2d(X)
         elif self.dataset == 'capgmyo':
             X = median_pool_2d(X, circular=True)
-        elif self.dataset == 'hyser':
-            Xtop, Xbot = X[:, :, :X.shape[2]//2, :], X[:, :, X.shape[2]//2:, :]
-            Xtop, Xbot = median_pool_2d(Xtop), median_pool_2d(Xbot)
-            X = torch.cat((Xtop, Xbot), dim=2)
+        # elif 'hyser' in self.dataset:
+        #     Xtop, Xbot = X[:, :, :X.shape[2]//2, :], X[:, :, X.shape[2]//2:, :]
+        #     Xtop, Xbot = median_pool_2d(Xtop), median_pool_2d(Xbot)
+        #     X = torch.cat((Xtop, Xbot), dim=2)
         elif 'grabmyo' in self.dataset:
             X = median_pool_2d(X, kernel_size=(2,3), padding=0, circular=True)
         return X
@@ -123,7 +123,7 @@ class EMGData:
         elif self.dataset == 'capgmyo':
             images = np.array(emg_segment).reshape(emg_segment.shape[0], 1, self.input_shape[0], self.input_shape[1], order='F')
 
-        elif self.dataset == 'hyser':
+        elif 'hyser' in self.dataset:
             ngrids = 4
             subimages = []
             for grid_idx in range(ngrids):
@@ -131,7 +131,11 @@ class EMGData:
                 subimage = np.flip(np.flip(subimage, axis=2), axis=3)
                 subimages.append(subimage)
             images = np.concatenate(subimages, axis=2) # append along horizontal direction
-                
+            if 'extensors' in self.dataset:
+                images = images[:,:,:images.shape[2]//2,:] # keep only extensors
+            elif 'flexors' in self.dataset:
+                images = images[:,:,images.shape[2]//2:,:] # keep only flexors
+
         elif 'grabmyo' in self.dataset: # can either be for the forearm or wrist
             T = emg_segment.shape[0]
             if 'forearm' in self.dataset:
@@ -184,7 +188,7 @@ class EMGData:
             if self.remove_baseline == 'root-mean-square':
                 baseline = np.sqrt(baseline)
 
-        elif self.dataset == 'hyser':
+        elif 'hyser' in self.dataset:
             DIR = DIR.replace('pr_dataset', 'mvc_dataset')
             baseline = np.zeros((1, 256))
             baseline_samp_count = 0
@@ -406,7 +410,7 @@ class EMGData:
         for idx in range(nrows):
             for jdx in range(6):
                 label = idx*6 + jdx
-                ax[idx, jdx].imshow(X_train[Y_train==label,0,X_train.shape[2]//2:,:].mean(dim=0))
+                ax[idx, jdx].imshow(X_train[Y_train==label,0,:,:].mean(dim=0))
                 ax[idx, jdx].axis('off')
                 ax[idx, jdx].set_title(f'Label: {label}')
         
@@ -420,7 +424,7 @@ class EMGData:
         Logic for simulation case.
         """
         idxs = list(range(self.num_repetitions))
-        if self.dataset == 'hyser':
+        if 'hyser' in self.dataset:
             adapt_idx = [idxs.pop(adapt_rep_idx)]
             test_idx = idxs.copy() # make test set a copy of training idxs for Hyser sims
         else:

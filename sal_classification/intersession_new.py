@@ -117,9 +117,6 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                                                                                 rep_idx=int(adapt_rep),
                                                                                 gest_idxs=subgests) # adapt to only one gesture
                 
-
-                X_train, X_adapt, X_test = X_train[:,:,X_train.shape[2]//2:,:], X_adapt[:,:,X_adapt.shape[2]//2:,:], X_test[:,:,X_test.shape[2]//2:,:]
-
                 # Get PyTorch DataLoaders
                 train_data = EMGFrameLoader(X=X_train.clone(), Y=Y_train.clone(), norm=exp['norm'])
                 adapt_data = EMGFrameLoader(X=X_adapt.clone(), Y=Y_adapt.clone(), train=False, norm=exp['norm'], stats=train_data.stats)
@@ -371,8 +368,8 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name,
-    mode='disabled'
+    name=name
+    # mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)

@@ -10,7 +10,7 @@ os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
 nconditions = 1
 
 # For each dataset
-for dataset in ['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'grabmyo-wrist']:
+for dataset in ['hyser-flexors', 'hyser-extensors']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'grabmyo-wrist']:
     exp['dataset'] = dataset
     if 'grabmyo' in dataset:
         exp['median-filter'] = False
@@ -52,6 +52,21 @@ for dataset in ['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'grabmyo-wrist
             exp['gest_subset'] = [5,6,7,8,9,10,29,30]
             # exp['adapt_gest_subset'] = [5,6,9]
             exp['adapt_gest_subset'] = [6]
+
+        elif dataset == 'hyser-flexors':
+            exp['emg_tensorizer'] = f"HyserData"
+            exp['circular'] = False
+            exp['real_baseline'] = None
+            exp['median-filter'] = True
+            exp['gest_subset'] = [2,6,7,8,29,31]
+            exp['adapt_gest_subset'] = None
+        elif dataset == 'hyser-extensors':
+            exp['emg_tensorizer'] = f"HyserData"
+            exp['circular'] = False
+            exp['real_baseline'] = None
+            exp['median-filter'] = True
+            exp['gest_subset'] = [6,7,8,11,12,30]
+            exp['adapt_gest_subset'] = None
 
     # For each adaptation method
     for adaptation in ['spatial-adaptation', 'fine-tuning', 'linear-layer', 'scratch-training', 'adabatch']:

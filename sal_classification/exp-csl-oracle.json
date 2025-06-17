@@ -1,11 +1,11 @@
 {
-    "name": "extensor-test",
-    "project": "simulation-new",
+    "name": "oracle",
+    "project": "classification-simulation",
     "K": 1,
-    "num_epochs": 2,
+    "num_epochs": 1,
     "norm": 0,
     "lr": 0.001,
-    "p_input": 0.0,
+    "p_input": 0.5,
     "scheduler": {
         "def": "torch.optim.lr_scheduler.MultiStepLR",
         "params": {
@@ -16,9 +16,9 @@
     "batch_size": 128,
     "momentum": 0,
     "weight_decay": 0,
-    "network": "CapgMyoNet",
-    "dataset": "hyser-extensors",
-    "emg_tensorizer": "HyserData",
+    "network": "LogisticRegressor",
+    "dataset": "csl",
+    "emg_tensorizer": "CSLData",
     "Trms": 0.25,
     "adaptation": "spatial-adaptation",
     "adaptation_params": {
@@ -30,12 +30,9 @@
         "xshear": true,
         "yshear": true
     },
-    "real_baseline": null,
+    "real_baseline": false,
     "learnable_baseline": false,
     "adabatch": false,
-    "corrective_gain": true,
-    "gest_subset": [6,7,8,11,12,30],
-    "adapt_gest_subset": null,
-    "circular": false,
-    "median-filter": true
+    "gest_subset": [7, 8, 9, 10, 11, 12, 13, 14, 15],
+    "circular": false
 }
