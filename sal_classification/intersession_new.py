@@ -16,6 +16,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 # from torchvision.transforms.v2 import RandomAffine, InterpolationMode, Compose
 from sklearn.metrics import  accuracy_score, f1_score, confusion_matrix, ConfusionMatrixDisplay
+from scipy.stats import mode
 import matplotlib.pyplot as plt
 
 # from data_loaders import load_tensors, extract_frames_csl, extract_frames_capgmyo, EMGFrameLoader
@@ -26,6 +27,72 @@ from sal_classification.deep_learning import train_model, test_model, init_adabn
 from networks import CapgMyoNet, LogisticRegressor #, LogisticRegressorHyser
 from networks_utils import median_pool_2d
 from emg_processing import majority_voting_full_segment, majority_voting_segments
+
+import torch
+import torch.nn.functional as F
+import torchvision.transforms as transforms
+from PIL import Image
+import matplotlib.pyplot as plt
+
+import torch
+import torch.nn.functional as F
+import torchvision.transforms as transforms
+from PIL import Image
+import matplotlib.pyplot as plt
+
+def handle_outliers(emg_grid, labels):
+    '''Determine outlier channels, and replace them with average of neighbours.'''
+
+    unique_labels = torch.unique(labels)
+    for label_idx in range(len(unique_labels)):
+        # Determine coordinates of outliers
+        H, W = emg_grid.shape[2:]
+        labels_mask = labels == unique_labels[label_idx]
+        if not labels_mask.any(): # if no channels for this label, skip
+            continue
+        emg_grid_var = torch.sqrt((emg_grid[labels_mask]**2).mean(dim=[0,1]))
+        Q1, Q3 = torch.quantile(emg_grid_var.flatten(), 0.25), torch.quantile(emg_grid_var.flatten(), 0.75)
+        # upper = torch.quantile(emg_grid_var.flatten(), 0.85) # q90
+        IQR = Q3 - Q1
+        lower, upper = Q1 -1.5*IQR, Q3 + 1.5*IQR
+        lower = torch.quantile(emg_grid_var.flatten(), 0.15) # q10
+
+        mask = torch.logical_or(emg_grid_var <= lower, emg_grid_var >= upper) # mask for non-outlier channels
+        y, x = torch.where(mask) # only keep non-noisy channel
+        y, x = y.tolist(), x.tolist()
+
+        # Get number of outlier nighbours for each channel and use to sort outlier filling process
+        outlier_kernel = torch.tensor([
+            [1, 1, 1],
+            [1, 0, 1],
+            [1, 1, 1]], dtype=torch.float32).unsqueeze(0).unsqueeze(0)  # shape: (1, 1, 3, 3)
+        neighbor_count_img = F.conv2d(mask.unsqueeze(0).unsqueeze(0).to(torch.float32), outlier_kernel, padding=1)
+        
+        # Add 3 to the counts of outlier neighbours at the edges to avoid edge effects
+        neighbor_count_img[:,:,0,:] += 3
+        neighbor_count_img[:,:,-1,:] += 3
+        neighbor_count_img[:,:,:,0] += 3
+        neighbor_count_img[:,:,:,-1] += 3
+
+        # Add 2 to the counts of outlier neighbours at the corners to avoid edge effects
+        neighbor_count_img[:,:,0,0] += 2
+        neighbor_count_img[:,:,0,-1] += 2
+        neighbor_count_img[:,:,-1,0] += 2
+        neighbor_count_img[:,:,-1,-1] += 2
+
+        outlier_neighbor_counts = neighbor_count_img.squeeze(0).squeeze(0)[y, x]  # Get counts for outlier channels
+
+        # Sort by number of outlier neighbours
+        x, y, _ = zip(*sorted(zip(x, y, outlier_neighbor_counts), key=lambda t: t[2]))
+        for idx in range(len(y)):
+            l,r,b,t = x[idx] != 0, x[idx] != W-1, y[idx] != H-1, y[idx] != 0
+            subgrid = emg_grid[:, :, y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten(start_dim=2, end_dim=3)
+            subgridvar = emg_grid_var[y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten()
+            subgrid = subgrid[:, :, torch.logical_and(subgridvar < upper, subgridvar > lower)] # remove outlier channels included
+            if subgrid.shape[2] != 0: # if no neighbours to interpolate, leave as is
+                emg_grid[labels_mask,:,y[idx], x[idx]] = subgrid[labels_mask].mean(dim=2) # compute as average of neighbours
+
+    return emg_grid
 
 # from torch.utils.tensorboard import SummaryWriter
 # writer = SummaryWriter('runs/capgmyo')
@@ -57,7 +124,10 @@ session_ids = ['session'+str(ses+1) for ses in data['sessions']]
 subs, test_sessions, train_sessions, adapt_reps = [], [], [], []
 learned_params = {key: [] for key in ['xshift', 'yshift', 'rot_theta', 'xscale', 'yscale', 'xshear', 'yshear']}
 accs, tuned_accs = [], [] # different metrics to be saved in csv from experiment
+mv_accs, mv_tuned_accs = [], []
 f1_scores, tuned_f1_scores = [], []
+mv_f1_scores, mv_tuned_f1_scores = [], []
+
 is_model_trained = False
 device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 print('Device:', device)
@@ -71,6 +141,7 @@ cf_tot = np.zeros((nlabels, nlabels))
 
 print('INTERSESSION:', data['dataset_name'])
 print('CONDITIONS:', exp['name'])
+# data['subs'] = [9,10,11,12,13,14,15,16,17]
 for idx, sub in tqdm(enumerate(data['subs'])):
     # Load data for given subject/session
     sub_id = 'subject{}'.format(sub+1)
@@ -117,6 +188,25 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                                                                                 rep_idx=int(adapt_rep),
                                                                                 gest_idxs=subgests) # adapt to only one gesture
                 
+                # Handle outliers in the data
+                if exp['remove_outliers']:
+                    X_train = handle_outliers(X_train, Y_train)
+                    X_adapt = handle_outliers(X_adapt, Y_adapt)
+                    X_test = handle_outliers(X_test, Y_test)
+
+                # Get test set image saved
+                plt.figure()
+                fig, ax = plt.subplots(2, 6)
+                for idx in range(2):
+                    for jdx in range(6):
+                        label = idx*6 + jdx
+                        ax[idx, jdx].imshow(X_train[Y_train==label,0,:,:].mean(dim=0))
+                        ax[idx, jdx].axis('off')
+                        ax[idx, jdx].set_title(f'Label: {label}')
+                
+                plt.savefig('baseline-outlier-removed.jpg')
+                plt.close()
+
                 # Get PyTorch DataLoaders
                 train_data = EMGFrameLoader(X=X_train.clone(), Y=Y_train.clone(), norm=exp['norm'])
                 adapt_data = EMGFrameLoader(X=X_adapt.clone(), Y=Y_adapt.clone(), train=False, norm=exp['norm'], stats=train_data.stats)
@@ -132,11 +222,11 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     
                     # Set input transformation for adaptation in case of the Hyser dataset
                     input_transform_name = exp['adaptation']
-                    # if exp['adaptation'] == 'spatial-adaptation':
-                    #     if exp['dataset'] == 'hyser': 
-                    #         input_transform_name += '-hyser'
-                    #     elif exp['dataset'] == 'grabmyo':
-                    #         input_transform_name += '-grabmyo'
+                    if exp['adaptation'] == 'spatial-adaptation':
+                        if exp['dataset'] == 'hyser': 
+                            input_transform_name += '-hyser'
+                        elif exp['dataset'] == 'grabmyo':
+                            input_transform_name += '-grabmyo'
 
                     H, W = X_train.shape[2], X_train.shape[3] 
 
@@ -155,17 +245,13 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                         boundaries = [[-2*4.0/(W-1), 2*4.0/(W-1)], [-2*4.0/(H-1), 2*4.0/(H-1)], [-15/180, 15/180],
                                         [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
                         
-                    base_model = eval(exp['network'])(channels=X_train.shape[2]*X_train.shape[3], input_shape=(X_train.shape[2], X_train.shape[3]), 
+                    base_model = eval(exp['network'])(input_shape=(X_train.shape[2], X_train.shape[3]), 
                                                         num_classes=emg_tensorizer.num_gestures, p_input=exp['p_input'], baseline=exp['learnable_baseline'], 
                                                         input_transform_name=input_transform_name, circular=exp["circular"], boundaries=boundaries).to(device)
                     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, base_model.parameters()),
                                                 lr=exp['lr'], weight_decay=exp['weight_decay'])
                     scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
                     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader)*exp['num_epochs']//5)
-
-                    # Train the model
-                    # train_model(base_model, train_sub_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
-                    #             warmup_scheduler=warmup_scheduler) # run training loop
                     train_model(base_model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                                 warmup_scheduler=warmup_scheduler) # run training loop
                     
@@ -184,7 +270,28 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 print('Test Accuracy:', acc)
                 print('Test F1-Score:', f1)
 
-
+                # COMPUTE MAJORITY VOTING ON THE FLY
+                with torch.no_grad():
+                    t = 0
+                    all_mode_labs, all_mode_preds = [], []
+                    for d_idx in range(len(test_durations)):
+                        dt = int(test_durations[d_idx])
+                        cur_labs = all_labs[t:t+dt]
+                        cur_preds = all_preds[t:t+dt]
+                        mode_labs,_ = mode(cur_labs)
+                        mode_preds,_ = mode(cur_preds)
+                        all_mode_labs.append(mode_labs)
+                        all_mode_preds.append(mode_preds)
+                        t += dt
+                
+                # Compute accuracy and F1-score for majority voting
+                mv_acc = accuracy_score(all_mode_labs, all_mode_preds)
+                mv_f1 = f1_score(all_mode_labs, all_mode_preds, average='macro')
+                print('Majority Voting Test Accuracy:', mv_acc)
+                print('Majority Voting Test F1-Score:', mv_f1)
+                mv_accs.append(mv_acc)
+                mv_f1_scores.append(mv_f1)
+                    
                 # Get test set image saved
                 plt.figure()
                 fig, ax = plt.subplots(2, 6)
@@ -218,7 +325,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                         param.requires_grad = True
 
                 elif exp['adaptation'] == 'scratch-training': # train from scratch
-                    adapted_model = eval(exp['network'])(channels=X_train.shape[2]*X_train.shape[3], input_shape=(X_train.shape[2], X_train.shape[3]), 
+                    adapted_model = eval(exp['network'])(input_shape=(X_train.shape[2], X_train.shape[3]), 
                                                          num_classes=emg_tensorizer.num_gestures, p_input=exp['p_input'], baseline=exp['learnable_baseline'], 
                                                          input_transform_name=input_transform_name, circular=exp["circular"], boundaries=boundaries).to(device)
                     adapted_model.train()
@@ -306,6 +413,28 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 print('Tuned Test Accuracy:', tuned_acc)
                 print('Tuned Test F1-Score:', tuned_f1)
 
+                # Compute majority voting on the fly
+                with torch.no_grad():
+                    t = 0
+                    tuned_all_mode_labs, tuned_all_mode_preds = [], []
+                    for d_idx in range(len(test_durations)):
+                        dt = int(test_durations[d_idx])
+                        cur_labs = tuned_all_labs[t:t+dt]
+                        cur_preds = tuned_all_preds[t:t+dt]
+                        mode_labs,_ = mode(cur_labs)
+                        mode_preds,_ = mode(cur_preds)
+                        tuned_all_mode_labs.append(mode_labs)
+                        tuned_all_mode_preds.append(mode_preds)
+                        t += dt 
+                
+                # Compute accuracy and F1-score for majority voting
+                tuned_mv_acc = accuracy_score(tuned_all_mode_labs, tuned_all_mode_preds)
+                tuned_mv_f1 = f1_score(tuned_all_mode_labs, tuned_all_mode_preds, average='macro')
+                print('Tuned Majority Voting Test Accuracy:', tuned_mv_acc)
+                print('Tuned Majority Voting Test F1-Score:', tuned_mv_f1)
+                mv_tuned_accs.append(tuned_mv_acc)
+                mv_tuned_f1_scores.append(tuned_mv_f1)
+
                 # Get confusion matrix
                 labs = np.arange(max([len(Y_train.unique()), len(Y_test.unique())]))
                 cf = confusion_matrix(tuned_all_labs, tuned_all_preds, labels=labs)
@@ -320,7 +449,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
 
                 # SAVE RESULTS
                 data_dict = {"Subject": subs, "Train Sessions": train_sessions, "Test Sessions": test_sessions, "Adaptation Repetitions": adapt_reps,
-                             "Accuracy": accs, "Tuned Accuracy": tuned_accs, 'F1-Score': f1_scores, 'Tuned F1-Score': tuned_f1_scores}
+                             "Accuracy": accs, "Majority Voting Accuracy": mv_accs, "Tuned Accuracy": tuned_accs, "Majority Voting Tuned Accuracy": mv_tuned_accs,
+                            'F1-Score': f1_scores, "Majority Voting F1-Score": mv_f1_scores, 'Tuned F1-Score': tuned_f1_scores, "Majority Voting Tuned F1-Score": mv_tuned_f1_scores}
                 data_dict.update(learned_params)
                 df = pd.DataFrame(data_dict)
                 df.to_csv(f"{name}.csv")
@@ -368,8 +498,8 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name
-    # mode='disabled'
+    name=name,
+    mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)
