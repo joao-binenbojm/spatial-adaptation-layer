@@ -11,11 +11,135 @@ from scipy import signal
 import torch
 import wfdb
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from emg_processing import bandpass, bandstop, identity, get_rms_signal
 from networks_utils import median_pool_2d
 
 ## TEMPORARY UTILS FUNCTION LOCATIONS ##
+# def plot_emg_psds(emg_data, fs=2048):
+#     """
+#     Plots PSD for each EMG channel using Welch's method.
+
+#     Parameters:
+#     - emg_data: np.ndarray of shape (T, C), where T = time samples, C = channels (up to 200)
+#     - fs: Sampling frequency in Hz (default 1000)
+#     """
+#     T, C = emg_data.shape
+#     assert C <= 200, "Max 200 channels supported for plotting"
+
+#     # Grid layout: as square as possible
+#     ncols = int(np.ceil(np.sqrt(C)))
+#     nrows = int(np.ceil(C / ncols))
+
+#     fig, axes = plt.subplots(nrows, ncols, figsize=(15, 10), sharex=True, sharey=True)
+#     axes = axes.flatten()
+
+#     for ch in range(C):
+#         f, Pxx = welch(emg_data[:, ch], fs=fs, nperseg=1024)
+
+#         axes[ch].semilogy(f, Pxx)
+#         axes[ch].set_title(f'Ch {ch}', fontsize=8)
+#         axes[ch].tick_params(labelsize=6)
+
+#     # Hide unused subplots
+#     for ax in axes[C:]:
+#         ax.axis('off')
+
+#     fig.suptitle("Power Spectral Density of EMG Channels", fontsize=14)
+#     fig.tight_layout(rect=[0, 0, 1, 0.97])
+#     plt.savefig('psd')
+#     plt.close('all')
+
+def get_current_outlier_mask(norm_wl_img, zcr_img):
+    """Get outlier channels based on RMS and ZCR images."""
+    q1_norm_wl, q3_norm_wl = np.quantile(norm_wl_img.flatten(), [0.25 ,0.75])
+    iqr_norm_wl = q3_norm_wl - q1_norm_wl
+
+    q1_zcr, q3_zcr = np.quantile(zcr_img.flatten(), [0.25 ,0.75])
+    iqr_zcr = q3_zcr - q1_zcr
+
+    outlier_mask = np.logical_or(norm_wl_img > q3_norm_wl + 3.0 * iqr_norm_wl, zcr_img > q3_zcr + 3.0 * iqr_zcr)
+    return outlier_mask
+
+def handle_outliers(emg_grid, outlier_mask):
+    '''Determine outlier channels, and replace them with average of neighbours, 
+       prioritizing those with the fewest outlier neighbours.'''
+    import numpy as np
+    from scipy import signal
+
+    emg_grid = emg_grid.copy()
+    H, W = outlier_mask.shape
+
+    # 1. Count outlier neighbors for each pixel
+    kernel = np.array([[1,1,1],[1,0,1],[1,1,1]], dtype=np.uint8)
+    neighbor_count_img = signal.convolve2d(outlier_mask.astype(np.uint8), kernel, mode='same', boundary='fill', fillvalue=0)
+
+    # 2. Add 3 to all edge pixels
+    neighbor_count_img[0, :] += 3
+    neighbor_count_img[-1, :] += 3
+    neighbor_count_img[:, 0] += 3
+    neighbor_count_img[:, -1] += 3
+
+    # 3. Add 2 more to corners
+    neighbor_count_img[0, 0] += 2
+    neighbor_count_img[0, -1] += 2
+    neighbor_count_img[-1, 0] += 2
+    neighbor_count_img[-1, -1] += 2
+
+    # 4. Get outlier indices and their neighbor counts
+    outlier_indices = np.argwhere(outlier_mask)
+    neighbor_counts = neighbor_count_img[outlier_mask]
+
+    # 5. Sort outliers by neighbor count (ascending)
+    sorted_indices = np.argsort(neighbor_counts)
+    outlier_indices = outlier_indices[sorted_indices]
+
+    # 6. Fill outliers with mean of valid neighbors
+    for y, x in outlier_indices:
+        y0, y1 = max(0, y-1), min(H, y+2)
+        x0, x1 = max(0, x-1), min(W, x+2)
+        neighbor_mask = ~outlier_mask[y0:y1, x0:x1].copy()
+        center_rel_y = y - y0
+        center_rel_x = x - x0
+        neighbor_mask[center_rel_y, center_rel_x] = False  # exclude center
+        neighbors = emg_grid[..., y0:y1, x0:x1][..., neighbor_mask]
+        if neighbors.size > 0:
+            emg_grid[..., y, x] = neighbors.mean()
+        # else: leave as is
+
+    return emg_grid
+
+def get_zcr(emg_data):
+    """
+    Compute zero-crossing rate for each channel in (T, C) EMG array.
+    Returns: array of shape (1, C)
+    """
+    def compute_zcr(signal):
+        """Zero-crossing rate for a 1D signal."""
+        return np.mean(np.diff(np.signbit(signal)) != 0)
+    return np.expand_dims(np.array([compute_zcr(emg_data[:, ch]) for ch in range(emg_data.shape[1])]), axis=0)
+import numpy as np
+
+def get_norm_wl(signal):
+    """
+    Computes normalized waveform length for each channel of a multichannel signal.
+
+    Parameters:
+    signal (ndarray): Input array of shape (T, Ch), where T is time and Ch is number of channels.
+
+    Returns:
+    ndarray: Normalized waveform length for each channel, shape (1, Ch)
+    """
+    # Compute waveform length: sum of absolute differences along time axis
+    wl = np.sum(np.abs(np.diff(signal, axis=0)), axis=0)  # shape: (Ch,)
+
+    # Normalize by number of differences (T - 1)
+    normalized_wl = wl / (signal.shape[0] - 1)
+
+    return normalized_wl[np.newaxis, :]  # shape: (1, Ch)
+
+
 
 def process_binary_signal(input_signal, min_length=1000, edge_trim=500):
     input_signal = np.array(input_signal)
@@ -95,6 +219,9 @@ class EMGData:
         # Preinitialize Data tensors
         self.X = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
         self.Y = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples))
+
+        # Pre-initialize zero-crossing tensor
+        self.zcr = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, 1, self.input_shape[0], self.input_shape[1]))
 
         # Target transforms
         self.transform = transform
@@ -402,20 +529,20 @@ class EMGData:
             X_test = X_test.mean(dim=2, keepdim=True)
             X_adapt = X_adapt.mean(dim=2, keepdim=True)
         
-        # IMAGE TEST PLOTTING
-        nrows = ceil(max([len(Y_train.unique()), len(Y_test.unique())]) / 6)
-        plt.figure()
-        fig, ax = plt.subplots(max([nrows,2]), 6)
-        # vmin, vmax = X_train.min(), X_train.max()
-        for idx in range(nrows):
-            for jdx in range(6):
-                label = idx*6 + jdx
-                ax[idx, jdx].imshow(X_train[Y_train==label,0,:,:].mean(dim=0))
-                ax[idx, jdx].axis('off')
-                ax[idx, jdx].set_title(f'Label: {label}')
+        # # IMAGE TEST PLOTTING
+        # nrows = ceil(max([len(Y_train.unique()), len(Y_test.unique())]) / 6)
+        # plt.figure()
+        # fig, ax = plt.subplots(max([nrows,2]), 6)
+        # # vmin, vmax = X_train.min(), X_train.max()
+        # for idx in range(nrows):
+        #     for jdx in range(6):
+        #         label = idx*6 + jdx
+        #         ax[idx, jdx].imshow(X_train[Y_train==label,0,:,:].mean(dim=0))
+        #         ax[idx, jdx].axis('off')
+        #         ax[idx, jdx].set_title(f'Label: {label}')
         
-        plt.savefig('baseline')
-        plt.close('all')
+        # plt.savefig('baseline')
+        # plt.close('all')
 
         return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations.ravel()
 
@@ -897,6 +1024,9 @@ class CSLData(EMGData):
     def extract_frames(self, DIR):
         ''' Extract frames for the given subject/session for CSL dataset.'''
 
+        # Initialize outlier mask
+        outlier_mask = np.zeros((self.input_shape[0], self.input_shape[1]), dtype=np.bool_)
+
         # Initialize data container for given session
         SESSION_DIR = os.path.join(DIR, self.sub, f"session{self.current_session+1}")
         filenames = os.listdir(SESSION_DIR)
@@ -933,7 +1063,27 @@ class CSLData(EMGData):
                 else:
                     center = len(emg) // 2 # get the central index of the given repetition
                     emg = emg[center - self.num_samples//2 : center + self.num_samples//2, :]
+
+                emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs) # bandstop filter to remove powerline noise
+                # print('PLOTTING EMG PSDs...')
+                zero_crossings = get_zcr(emg) # compute zero-crossing rate for each channel
+                zcr_img = self.get_images(zero_crossings) # get images from zero-crossing rate
                 
+                # plt.figure()
+                # sns.heatmap(zcr_img.squeeze(), cmap='viridis', cbar=True)
+                # plt.title(f'zero-crossing-{gdx*reps + idx}')
+                # plt.savefig(f'zero-crossing.png')
+                # plt.close('all')
+
+                # Compute waveform length
+                waveform_length = get_norm_wl(emg) # compute waveform length for each channel
+                norm_wl_img = self.get_images(waveform_length) # get images from waveform length
+                # plt.figure()
+                # sns.heatmap(norm_wl_img.squeeze(), cmap='viridis', cbar=True)
+                # plt.title(f'waveform-length-{gdx*reps + idx}')
+                # plt.savefig(f'waveform-length.png')
+                # plt.close('all')
+
                 if self.rms:
                     emg = get_rms_signal(emg, Mrms=self.Mrms)
                     if self.remove_baseline:
@@ -946,13 +1096,70 @@ class CSLData(EMGData):
                             emg = np.sqrt(emg_squared) # get RMS from MS
 
                 images = self.get_images(emg)
+                # median_images = median_pool_2d(torch.tensor(images.copy()), kernel_size=(3,1)) # vertical median pooling, along muscle fiber direction
+                # plt.figure()
+                # sns.heatmap(images.squeeze().mean(axis=0), cmap='viridis', cbar=True)
+                # plt.title(f'EMG-{gdx}{idx}')
+                # plt.savefig(f'emg.png')
+                # plt.close('all')
+
+                # plt.figure()
+                # sns.heatmap(median_images.squeeze().mean(axis=0), cmap='viridis', cbar=True)
+                # plt.title(f'MEDIAN-EMG-{gdx}{idx}')
+                # plt.savefig(f'median-emg.png')
+                # plt.close('all')
 
                 # Add data extracted from given repetition to our data matrix            
                 X[gdx, idx, :, :, :, :] = images # add EMG surface images onto our data matrix
                 Y[gdx, idx, :] = np.array([gdx]*self.num_samples)  # add labels onto our label matrix
-        
+
+                # Update outlier mask for current session
+                cur_outlier_mask = get_current_outlier_mask(norm_wl_img.squeeze(), zcr_img.squeeze())
+                outlier_mask = np.logical_or(outlier_mask, cur_outlier_mask) # update outlier mask
+                # plt.figure()
+                # sns.heatmap(outlier_mask, cmap='viridis', cbar=True)
+                # plt.title(f'outlier-mask-{gdx*reps + idx}')
+                # plt.savefig(f'outlier-mask.png')
+                # plt.close('all')
+
+
             # For each repetition that is missing from total number of repetitions, oversample from previous repetitions
             X, Y = self.oversample_repetitions(X, Y, gdx, reps, missing)
+
+        # # Plot prior to outlier removal for each class
+        # fig, ax = plt.subplots(2,4)
+        # # vmin, vmax = X_train.min(), X_train.max()
+        # X_mean = X.mean(axis=(1, 2)).squeeze() # mean across all repetitions and gestures
+        # for idx in range(2):
+        #     for jdx in range(4):
+        #         label = idx*4 + jdx
+        #         if label >= X_mean.shape[0]: continue # skip if label exceeds number of gestures
+        #         ax[idx, jdx].imshow(X_mean[label])
+        #         ax[idx, jdx].axis('off')
+        #         ax[idx, jdx].set_title(f'Label: {label}')
+        
+        # plt.savefig(f'baseline-ses={self.current_session+1}')
+        # plt.close('all')
+
+        # # Handle outliers
+        # self.remove_outliers = True # set to True to remove outliers
+        # if self.remove_outliers:
+        #     print('REMOVING OUTLIERS...')
+        #     # X = handle_outliers(X, outlier_mask)
+        #     fig, ax = plt.subplots(2, 4)
+        #     # vmin, vmax = X_train.min(), X_train.max()
+        #     X_mean = X.mean(axis=(1, 2)) # mean across all repetitions and gestures
+        #     X_mean = self.apply_median_filter(torch.tensor(X_mean.copy())) # apply median filter to the mean images
+        #     for idx in range(2):
+        #         for jdx in range(4):
+        #             label = idx*4 + jdx
+        #             if label >= X_mean.shape[0]: continue # skip if label exceeds number of gestures
+        #             ax[idx, jdx].imshow(X_mean[label].squeeze())    
+        #             ax[idx, jdx].axis('off')
+        #             ax[idx, jdx].set_title(f'Label: {label}')
+            
+        #     plt.savefig(f'baseline-nooutlier-ses={self.current_session+1}')
+        #     plt.close('all')
 
         return X, Y
     

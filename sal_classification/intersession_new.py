@@ -18,13 +18,10 @@ from torch.utils.data import DataLoader
 from sklearn.metrics import  accuracy_score, f1_score, confusion_matrix, ConfusionMatrixDisplay
 from scipy.stats import mode
 import matplotlib.pyplot as plt
-
-# from data_loaders import load_tensors, extract_frames_csl, extract_frames_capgmyo, EMGFrameLoader
-# from tensorize_emg import CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS, CapgmyoDataSegmentRMS, CSLDataSegmentRMS
-from tensorize_emg import CapgmyoData, CSLData, HyserData, GrabmyoData #CapgmyoData, CSLData, CapgmyoDataRMS, CSLDataRMS
+from tensorize_emg import CapgmyoData, CSLData, HyserData, GrabmyoData
 from torch_loaders import EMGFrameLoader
 from sal_classification.deep_learning import train_model, test_model, init_adabn, initial_search
-from networks import CapgMyoNet, LogisticRegressor #, LogisticRegressorHyser
+from networks import CapgMyoNet, LogisticRegressor, VGG11Net #, LogisticRegressorHyser
 from networks_utils import median_pool_2d
 from emg_processing import majority_voting_full_segment, majority_voting_segments
 
@@ -141,7 +138,7 @@ cf_tot = np.zeros((nlabels, nlabels))
 
 print('INTERSESSION:', data['dataset_name'])
 print('CONDITIONS:', exp['name'])
-# data['subs'] = [9,10,11,12,13,14,15,16,17]
+# data['subs'] = [2,3,4]
 for idx, sub in tqdm(enumerate(data['subs'])):
     # Load data for given subject/session
     sub_id = 'subject{}'.format(sub+1)
@@ -188,19 +185,23 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                                                                                 rep_idx=int(adapt_rep),
                                                                                 gest_idxs=subgests) # adapt to only one gesture
                 
-                # Handle outliers in the data
-                if exp['remove_outliers']:
-                    X_train = handle_outliers(X_train, Y_train)
-                    X_adapt = handle_outliers(X_adapt, Y_adapt)
-                    X_test = handle_outliers(X_test, Y_test)
+                # # Handle outliers in the data
+                # if exp['remove_outliers']:
+                #     X_train = handle_outliers(X_train, Y_train)
+                #     X_adapt = handle_outliers(X_adapt, Y_adapt)
+                #     X_test = handle_outliers(X_test, Y_test)
+                
+                # X_train, X_adapt, X_test = torch.log(X_train + 1e-8), torch.log(X_adapt + 1e-8), torch.log(X_test + 1e-8) # log-transform the data
 
                 # Get test set image saved
+                nlabels = max([len(Y_train.unique()), len(Y_test.unique())])
+                nrows = max([math.ceil(nlabels / 4), 2])
                 plt.figure()
-                fig, ax = plt.subplots(2, 6)
-                for idx in range(2):
-                    for jdx in range(6):
-                        label = idx*6 + jdx
-                        ax[idx, jdx].imshow(X_train[Y_train==label,0,:,:].mean(dim=0))
+                fig, ax = plt.subplots(nrows, 4)
+                for idx in range(nrows):
+                    for jdx in range(4):
+                        label = idx*4 + jdx
+                        ax[idx, jdx].imshow(X_adapt[Y_adapt==label,0,:,:].mean(dim=0))
                         ax[idx, jdx].axis('off')
                         ax[idx, jdx].set_title(f'Label: {label}')
                 
@@ -293,11 +294,13 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 mv_f1_scores.append(mv_f1)
                     
                 # Get test set image saved
+                nlabels = max([len(Y_train.unique()), len(Y_test.unique())])
+                nrows = max([math.ceil(nlabels / 4), 2])
                 plt.figure()
-                fig, ax = plt.subplots(2, 6)
-                for idx in range(2):
-                    for jdx in range(6):
-                        label = idx*6 + jdx
+                fig, ax = plt.subplots(nrows, 4)
+                for idx in range(nrows):
+                    for jdx in range(4):
+                        label = idx*4 + jdx
                         ax[idx, jdx].imshow(X_adapt[Y_adapt==label,0,:,:].mean(dim=0))
                         ax[idx, jdx].axis('off')
                         ax[idx, jdx].set_title(f'Label: {label}')
@@ -498,8 +501,8 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name
-    # mode='disabled'
+    name=name,
+    mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)
