@@ -38,68 +38,6 @@ import torchvision.transforms as transforms
 from PIL import Image
 import matplotlib.pyplot as plt
 
-def handle_outliers(emg_grid, labels):
-    '''Determine outlier channels, and replace them with average of neighbours.'''
-
-    unique_labels = torch.unique(labels)
-    for label_idx in range(len(unique_labels)):
-        # Determine coordinates of outliers
-        H, W = emg_grid.shape[2:]
-        labels_mask = labels == unique_labels[label_idx]
-        if not labels_mask.any(): # if no channels for this label, skip
-            continue
-        emg_grid_var = torch.sqrt((emg_grid[labels_mask]**2).mean(dim=[0,1]))
-        Q1, Q3 = torch.quantile(emg_grid_var.flatten(), 0.25), torch.quantile(emg_grid_var.flatten(), 0.75)
-        # upper = torch.quantile(emg_grid_var.flatten(), 0.85) # q90
-        IQR = Q3 - Q1
-        lower, upper = Q1 -1.5*IQR, Q3 + 1.5*IQR
-        lower = torch.quantile(emg_grid_var.flatten(), 0.15) # q10
-
-        mask = torch.logical_or(emg_grid_var <= lower, emg_grid_var >= upper) # mask for non-outlier channels
-        y, x = torch.where(mask) # only keep non-noisy channel
-        y, x = y.tolist(), x.tolist()
-
-        # Get number of outlier nighbours for each channel and use to sort outlier filling process
-        outlier_kernel = torch.tensor([
-            [1, 1, 1],
-            [1, 0, 1],
-            [1, 1, 1]], dtype=torch.float32).unsqueeze(0).unsqueeze(0)  # shape: (1, 1, 3, 3)
-        neighbor_count_img = F.conv2d(mask.unsqueeze(0).unsqueeze(0).to(torch.float32), outlier_kernel, padding=1)
-        
-        # Add 3 to the counts of outlier neighbours at the edges to avoid edge effects
-        neighbor_count_img[:,:,0,:] += 3
-        neighbor_count_img[:,:,-1,:] += 3
-        neighbor_count_img[:,:,:,0] += 3
-        neighbor_count_img[:,:,:,-1] += 3
-
-        # Add 2 to the counts of outlier neighbours at the corners to avoid edge effects
-        neighbor_count_img[:,:,0,0] += 2
-        neighbor_count_img[:,:,0,-1] += 2
-        neighbor_count_img[:,:,-1,0] += 2
-        neighbor_count_img[:,:,-1,-1] += 2
-
-        outlier_neighbor_counts = neighbor_count_img.squeeze(0).squeeze(0)[y, x]  # Get counts for outlier channels
-
-        # Sort by number of outlier neighbours
-        x, y, _ = zip(*sorted(zip(x, y, outlier_neighbor_counts), key=lambda t: t[2]))
-        for idx in range(len(y)):
-            l,r,b,t = x[idx] != 0, x[idx] != W-1, y[idx] != H-1, y[idx] != 0
-            subgrid = emg_grid[:, :, y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten(start_dim=2, end_dim=3)
-            subgridvar = emg_grid_var[y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten()
-            subgrid = subgrid[:, :, torch.logical_and(subgridvar < upper, subgridvar > lower)] # remove outlier channels included
-            if subgrid.shape[2] != 0: # if no neighbours to interpolate, leave as is
-                emg_grid[labels_mask,:,y[idx], x[idx]] = subgrid[labels_mask].mean(dim=2) # compute as average of neighbours
-
-    return emg_grid
-
-def plot_emg_grid(emg_grid, Y, label, title="emg-no-remove"):
-    im = emg_grid[Y==label].mean(dim=0).squeeze()
-    im = im.reshape(1,1,im.shape[0], im.shape[1])
-    im = median_pool_2d(im)
-    plt.figure()
-    sns.heatmap(im.squeeze(), cmap='viridis', cbar=True)
-    plt.savefig(title)
-
 # from torch.utils.tensorboard import SummaryWriter
 # writer = SummaryWriter('runs/capgmyo')
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'expandable_segments:True'
