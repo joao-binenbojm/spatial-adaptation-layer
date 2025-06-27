@@ -201,17 +201,107 @@ class LogisticRegressor(nn.Module):
         return x.reshape(x.shape[0], self.num_classes)
 
 class VGG11Net(nn.Module):
-    def __init__(self, input_size=(8, 16), num_classes=8, baseline=True, p_input=0.0, input_transform_name='spatial-adaptation', track_running_stats=True, circular=False, boundaries=None):
+    def __init__(self, input_shape=(8,16), num_classes=8, baseline=True, p_input=0.0, input_transform_name='spatial-adaptation', track_running_stats=True, circular=False, boundaries=None):
         super(VGG11Net, self).__init__()
-        self.input_size = input_size
+        self.input_shape = input_shape
+        self.num_classes = num_classes
+        self.corrective_gain = False
+
+        # Baseline parameter/buffer - now uses input_shape
+        if baseline:
+            self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
+        else:
+            self.register_buffer('baseline', torch.zeros(1, 1, input_shape[0], input_shape[1]))
+
+        self.input_dropout = nn.Dropout(p=p_input)
+        self.batchnorm0 = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
+
+        # Input transformation - uses input_shape
+        self.adaptation_phase = False
+        self.input_transform_name = input_transform_name
+        if input_transform_name == 'spatial-adaptation':
+            self.input_transform = SpatialAdaptation(input_shape, circular=circular, boundaries=boundaries)
+        elif input_transform_name == 'spatial-adaptation-hyser':
+            self.input_transform = SpatialAdaptationHyser(input_shape, circular=circular, boundaries=boundaries)
+        elif input_transform_name == 'linear-layer':
+            self.input_transform = nn.Sequential(
+                nn.Flatten(start_dim=1),
+                nn.Linear(input_shape[0]*input_shape[1], input_shape[0]*input_shape[1]),
+                nn.Unflatten(dim=1, unflattened_size=(1, input_shape[0], input_shape[1]))
+            )
+        else:
+            self.input_transform = lambda x: x
+
+        # VGG11 backbone - modified for grayscale input
+        self.vgg = models.vgg11(pretrained=False)
+        self.vgg.features[0] = nn.Conv2d(1, 64, kernel_size=3, padding=1)
+
+        # Calculate flattened size after conv layers for input_shape
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, 1, 128, 128)
+            conv_output = self.vgg.features(dummy_input)
+            conv_output = self.vgg.avgpool(conv_output)  # Apply avgpool to match classifier input
+            flattened_size = conv_output.view(1, -1).size(1)
+
+        # Update classifier to match the correct flattened size
+        self.vgg.classifier = nn.Sequential(
+            nn.Linear(flattened_size, 4096),
+            nn.ReLU(True),
+            nn.Dropout(),
+            nn.Linear(4096, 4096),
+            nn.ReLU(True),
+            nn.Dropout(),
+            nn.Linear(4096, num_classes),
+        )
+
+    def get_session_means(self, X1, X2):
+        """
+        X1 and X2 should be tensors of shape (N, 1, 128, 128)
+        """
+        self.corrective_gain = True
+        with torch.no_grad():
+            self.register_buffer('mean_session1', X1.to(next(self.parameters()).device).mean(dim=0, keepdim=True))
+            self.register_buffer('mean_session2', X2.to(next(self.parameters()).device).mean(dim=0, keepdim=True))
+
+    def forward(self, x):
+        # Corrective gain (if enabled)
+        if self.adaptation_phase and self.corrective_gain:
+            mean_session2 = self.input_transform(self.mean_session2)
+            scaling_factors = (self.mean_session1 / (mean_session2 + 1e-12))
+            scaling_factors = torch.clamp(scaling_factors, min=0.5, max=2.0)
+            x = x * scaling_factors
+
+        # Batch normalization
+        x = self.batchnorm0(x)
+        
+        # Adaptation phase transformations
+        if self.adaptation_phase:
+            x = x - self.baseline
+            x = self.input_transform(x)
+        
+        # Input dropout
+        x = self.input_dropout(x)
+        
+        # No need for interpolation since input is already 128x128
+        # Forward through VGG
+        x = F.interpolate(x, size=(128, 128), mode='bilinear', align_corners=False)
+        x = self.vgg(x)
+        
+        return x.reshape(x.shape[0], self.num_classes)
+
+
+class MobileNetV3SmallNet(nn.Module):
+    def __init__(self, input_shape=(8,16), num_classes=8, baseline=True, p_input=0.0, input_transform_name='spatial-adaptation', track_running_stats=True, circular=False, boundaries=None):
+        super(MobileNetV3SmallNet, self).__init__()
+        self.input_shape = input_shape
         self.num_classes = num_classes
         self.corrective_gain = False
 
         # Baseline parameter/buffer
         if baseline:
-            self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_size[0], input_size[1]))
+            self.baseline = torch.nn.parameter.Parameter(torch.zeros(1, 1, input_shape[0], input_shape[1]))
         else:
-            self.register_buffer('baseline', torch.zeros(1, 1, input_size[0], input_size[1]))
+            self.register_buffer('baseline', torch.zeros(1, 1, input_shape[0], input_shape[1]))
 
         self.input_dropout = nn.Dropout(p=p_input)
         self.batchnorm0 = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
@@ -220,30 +310,36 @@ class VGG11Net(nn.Module):
         self.adaptation_phase = False
         self.input_transform_name = input_transform_name
         if input_transform_name == 'spatial-adaptation':
-            self.input_transform = SpatialAdaptation(input_size, circular=circular, boundaries=boundaries)
+            self.input_transform = SpatialAdaptation(input_shape, circular=circular, boundaries=boundaries)
         elif input_transform_name == 'spatial-adaptation-hyser':
-            self.input_transform = SpatialAdaptationHyser(input_size, circular=circular, boundaries=boundaries)
+            self.input_transform = SpatialAdaptationHyser(input_shape, circular=circular, boundaries=boundaries)
         elif input_transform_name == 'linear-layer':
             self.input_transform = nn.Sequential(
                 nn.Flatten(start_dim=1),
-                nn.Linear(input_size[0]*input_size[1], input_size[0]*input_size[1]),
-                nn.Unflatten(dim=1, unflattened_size=(1, input_size[0], input_size[1]))
+                nn.Linear(input_shape[0]*input_shape[1], input_shape[0]*input_shape[1]),
+                nn.Unflatten(dim=1, unflattened_size=(1, input_shape[0], input_shape[1]))
             )
         else:
             self.input_transform = lambda x: x
 
-        # VGG11 backbone
-        self.vgg = models.vgg11(pretrained=False)
-        self.vgg.features[0] = nn.Conv2d(1, 64, kernel_size=3, padding=1)
+        # MobileNetV3 Small backbone - modify first conv for grayscale
+        self.mobilenet = models.mobilenet_v3_small(pretrained=False)
+        self.mobilenet.features[0][0] = nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1, bias=False)
 
-        # Calculate flattened size after conv layers
+        # Calculate flattened size after conv layers for input_shape
         with torch.no_grad():
-            dummy_input = torch.zeros(1, 1, input_size[0], input_size[1])
-            conv_output = self.vgg.features(dummy_input)
-            flattened_size = conv_output.view(1, -1).size(1)
+            dummy_input = torch.zeros(1, 1, 128, 128)
+            features = self.mobilenet.features(dummy_input)
+            pooled = self.mobilenet.avgpool(features)
+            flattened_size = pooled.view(1, -1).size(1)
 
-        self.vgg.classifier[0] = nn.Linear(flattened_size, 4096)
-        self.vgg.classifier[6] = nn.Linear(4096, num_classes)
+        # Update classifier to match the correct flattened size
+        self.mobilenet.classifier = nn.Sequential(
+            nn.Linear(flattened_size, 1024),
+            nn.Hardswish(inplace=True),
+            nn.Dropout(p=0.2, inplace=True),
+            nn.Linear(1024, num_classes),
+        )
 
     def get_session_means(self, X1, X2):
         self.corrective_gain = True
@@ -252,6 +348,7 @@ class VGG11Net(nn.Module):
             self.register_buffer('mean_session2', X2.to(next(self.parameters()).device).mean(dim=0, keepdim=True))
 
     def forward(self, x):
+        # Corrective gain (if enabled)
         if self.adaptation_phase and self.corrective_gain:
             mean_session2 = self.input_transform(self.mean_session2)
             scaling_factors = (self.mean_session1 / (mean_session2 + 1e-12))
@@ -263,5 +360,7 @@ class VGG11Net(nn.Module):
             x = x - self.baseline
             x = self.input_transform(x)
         x = self.input_dropout(x)
-        x = self.vgg(x)
+        x = F.interpolate(x, size=(128, 128), mode='bilinear', align_corners=False)
+        x = self.mobilenet(x)
         return x.reshape(x.shape[0], self.num_classes)
+

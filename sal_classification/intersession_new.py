@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import wandb
+import seaborn as sns
 
 import torch
 from torch import nn
@@ -21,7 +22,7 @@ import matplotlib.pyplot as plt
 from tensorize_emg import CapgmyoData, CSLData, HyserData, GrabmyoData
 from torch_loaders import EMGFrameLoader
 from sal_classification.deep_learning import train_model, test_model, init_adabn, initial_search
-from networks import CapgMyoNet, LogisticRegressor, VGG11Net #, LogisticRegressorHyser
+from networks import CapgMyoNet, LogisticRegressor, VGG11Net, MobileNetV3SmallNet #, LogisticRegressorHyser
 from networks_utils import median_pool_2d
 from emg_processing import majority_voting_full_segment, majority_voting_segments
 
@@ -91,6 +92,14 @@ def handle_outliers(emg_grid, labels):
 
     return emg_grid
 
+def plot_emg_grid(emg_grid, Y, label, title="emg-no-remove"):
+    im = emg_grid[Y==label].mean(dim=0).squeeze()
+    im = im.reshape(1,1,im.shape[0], im.shape[1])
+    im = median_pool_2d(im)
+    plt.figure()
+    sns.heatmap(im.squeeze(), cmap='viridis', cbar=True)
+    plt.savefig(title)
+
 # from torch.utils.tensorboard import SummaryWriter
 # writer = SummaryWriter('runs/capgmyo')
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'expandable_segments:True'
@@ -138,7 +147,7 @@ cf_tot = np.zeros((nlabels, nlabels))
 
 print('INTERSESSION:', data['dataset_name'])
 print('CONDITIONS:', exp['name'])
-# data['subs'] = [2,3,4]
+# data['subs'] = [4]
 for idx, sub in tqdm(enumerate(data['subs'])):
     # Load data for given subject/session
     sub_id = 'subject{}'.format(sub+1)
@@ -158,6 +167,9 @@ for idx, sub in tqdm(enumerate(data['subs'])):
             if test_session == train_session:
                 continue
             
+            # if (train_session != 4) or (test_session != 0):
+            #     continue
+
             rep_idxs = list(range(data['num_repetitions'])) # get all repetition numbers
             sample_reps = list(np.random.choice(list(range(data['num_repetitions'])), replace=False, size=exp['K'])) # sample repetition numbers, ensuring we don't sample the same rep twice
             for rep in sample_reps: rep_idxs.remove(rep) # remove sampled repetitions from the list of all repetitions
@@ -179,20 +191,83 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                         subgests = exp['adapt_gest_subset']
                 else:
                     subgests = None
-                X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations = emg_tensorizer.get_tensors_intersession(
+                X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations, outlier_mask_train, outlier_mask_adapt = emg_tensorizer.get_tensors_intersession(
                                                                                 test_session=test_idx,
                                                                                 train_session=train_idx,
                                                                                 rep_idx=int(adapt_rep),
                                                                                 gest_idxs=subgests) # adapt to only one gesture
                 
+                
+                # from scipy.ndimage import binary_dilation, label
+                # from skimage.morphology import disk  # makes circular structuring element
+
+                # def remove_small_clusters(mask, min_size=2):
+                #     labeled, num = label(mask)
+                #     sizes = np.bincount(labeled.ravel())
+                #     keep = sizes >= min_size
+                #     keep[0] = 0  # background
+                #     return keep[labeled]
+
+                # Get superset outlier mask and apply it to train, adapt and test sets
+                # structure = np.ones((3,3)) # structure for morphological operations
+
+                # # Apply morphological opening, then five iterations of square dilation to the outlier mask of adapt session
+                # outlier_mask_train, outlier_mask_adapt = np.array(outlier_mask_train).squeeze(), np.array(outlier_mask_adapt).squeeze()
+                
+                # # Clean up outlier masks
+                # outlier_mask_train = remove_small_clusters(outlier_mask_train)
+                # outlier_mask_train = binary_dilation(outlier_mask_train, structure=structure, iterations=1)
+
+                # outlier_mask_adapt = remove_small_clusters(outlier_mask_adapt)
+                # structure = np.ones_like(disk(5))
+                # outlier_mask_adapt_dilated = binary_dilation(outlier_mask_adapt, structure=structure, iterations=1)
+
+                # fig, ax = plt.subplots(2,1)
+                # ax[0].imshow(outlier_mask_train)
+                # ax[0].set_title('Outliers (Train)')
+                # ax[1].imshow(outlier_mask_adapt_dilated)
+                # ax[1].set_title('Outliers (Adapt)')
+                # plt.savefig('outlier-masks')
+                # plt.close('all')
+
+                # outlier_mask = np.logical_or(outlier_mask_train, outlier_mask_adapt_dilated) # combine train and adapt masks
+                # # outlier_mask = np.logical_not(outlier_mask)
+                # outlier_mask = torch.tensor(outlier_mask, dtype=torch.bool, device=X_train.device).unsqueeze(0).unsqueeze(0) # convert to tensor
+
+                # # Apply outlier mask to train, adapt and test sets
+                # # outlier_mask = outlier_mask.expand(X_train.shape)  # shape: (T, 1, H, W)
+
+                # ## HARD CODING OUTLIER MASK
+                # outlier_mask = torch.ones((1,1,X_train.shape[2], X_train.shape[3]))
+                # outlier_mask[:,:,:2,:] = 0.0
+                # outlier_mask[:,:,:,:13] = 0.0
+                # outlier_mask = outlier_mask.expand(X_train.shape).to(torch.bool)
+                # valid_values = X_train[~outlier_mask]  # flattening valid values
+                # mean = valid_values.mean()
+                # std = valid_values.std()
+                # noise = torch.randn_like(X_train) * std + mean
+                # X_train[outlier_mask] = noise[outlier_mask]
+                # X_train[X_train < 0] = 0.0
+                # # X_train[:,:,:2,:15] = noise[:,:,:2,:15] 
+                
+                # outlier_mask_adapt = binary_dilation(outlier_mask_adapt, structure=np.ones((3,3)), iterations=1)
+                # outlier_mask_adapt = torch.tensor(outlier_mask_adapt, dtype=torch.bool, device=X_adapt.device).unsqueeze(0).unsqueeze(0) # convert to tensor
+                # outlier_mask_adapt = outlier_mask_adapt.expand(X_adapt.shape)
+                # valid_values = X_adapt[~outlier_mask_adapt]  # flattening valid values
+                # mean = valid_values.mean()
+                # std = valid_values.std()
+                # noise_adapt = torch.randn_like(X_adapt) * std + mean
+                # X_adapt[outlier_mask_adapt] = noise_adapt[outlier_mask_adapt]
+                # X_adapt[X_adapt < 0] = 0.0
+
+                # if exp['outlier_mask'] is not None:
+
                 # # Handle outliers in the data
                 # if exp['remove_outliers']:
                 #     X_train = handle_outliers(X_train, Y_train)
                 #     X_adapt = handle_outliers(X_adapt, Y_adapt)
                 #     X_test = handle_outliers(X_test, Y_test)
                 
-                # X_train, X_adapt, X_test = torch.log(X_train + 1e-8), torch.log(X_adapt + 1e-8), torch.log(X_test + 1e-8) # log-transform the data
-
                 # Get test set image saved
                 nlabels = max([len(Y_train.unique()), len(Y_test.unique())])
                 nrows = max([math.ceil(nlabels / 4), 2])
@@ -201,15 +276,32 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 for idx in range(nrows):
                     for jdx in range(4):
                         label = idx*4 + jdx
-                        ax[idx, jdx].imshow(X_adapt[Y_adapt==label,0,:,:].mean(dim=0))
+                        ax[idx, jdx].imshow(X_train[Y_train==label,0,:,:].mean(dim=0))
                         ax[idx, jdx].axis('off')
                         ax[idx, jdx].set_title(f'Label: {label}')
                 
                 plt.savefig('baseline-outlier-removed.jpg')
                 plt.close()
 
-                # Get PyTorch DataLoaders
-                train_data = EMGFrameLoader(X=X_train.clone(), Y=Y_train.clone(), norm=exp['norm'])
+                # Initialize transform for data augmentation
+                # from transforms import RandomChannelCorruption, RandomChannelBlobCorruption
+                import torchvision
+                from torchvision.transforms import v2
+
+                # Oulier values
+                # train_mean, train_std = X_train.mean(), X_train.std()
+                # min_noise = train_mean + train_std
+                # max_noise = train_mean + train_std*3
+
+                rms_transforms = torchvision.transforms.Compose([
+                    # RandomChannelBlobCorruption(p=1.0, min_blob_size=3, max_blob_size=6),
+                    # v2.GaussianNoise(sigma=0.1*train_std, mean=0.0, clip=False),
+                    v2.RandomErasing()
+                    # RandomChannelCorruption(n_channels=20, min_noise=min_noise, max_noise=max_noise)
+                ])
+
+                # Get PyTortorch DataLoaders
+                train_data = EMGFrameLoader(X=X_train.clone(), Y=Y_train.clone(), norm=exp['norm'], transform=rms_transforms)
                 adapt_data = EMGFrameLoader(X=X_adapt.clone(), Y=Y_adapt.clone(), train=False, norm=exp['norm'], stats=train_data.stats)
                 test_data = EMGFrameLoader(X=X_test.clone(), Y=Y_test.clone(), train=False, norm=exp['norm'], stats=train_data.stats)
                 train_loader = DataLoader(train_data, batch_size=exp['batch_size'], shuffle=True)
@@ -243,7 +335,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                         boundaries = [[-2*3.0/(W-1), 2*3.0/(W-1)], [-1, 1], [-15/180, 15/180],
                                         [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
                     else:
-                        boundaries = [[-2*4.0/(W-1), 2*4.0/(W-1)], [-2*4.0/(H-1), 2*4.0/(H-1)], [-15/180, 15/180],
+                        boundaries = [[-2*5.0/(W-1), 2*5.0/(W-1)], [-2*5.0/(H-1), 2*5.0/(H-1)], [-15/180, 15/180],
                                         [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
                         
                     base_model = eval(exp['network'])(input_shape=(X_train.shape[2], X_train.shape[3]), 
@@ -277,14 +369,15 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     all_mode_labs, all_mode_preds = [], []
                     for d_idx in range(len(test_durations)):
                         dt = int(test_durations[d_idx])
-                        cur_labs = all_labs[t:t+dt]
-                        cur_preds = all_preds[t:t+dt]
-                        mode_labs,_ = mode(cur_labs)
-                        mode_preds,_ = mode(cur_preds)
-                        all_mode_labs.append(mode_labs)
-                        all_mode_preds.append(mode_preds)
-                        t += dt
-                
+                        if dt > 0: # if duration is 0, skip
+                            cur_labs = all_labs[t:t+dt]
+                            cur_preds = all_preds[t:t+dt]
+                            mode_labs,_ = mode(cur_labs)
+                            mode_preds,_ = mode(cur_preds)
+                            all_mode_labs.append(mode_labs)
+                            all_mode_preds.append(mode_preds)
+                            t += dt
+                    
                 # Compute accuracy and F1-score for majority voting
                 mv_acc = accuracy_score(all_mode_labs, all_mode_preds)
                 mv_f1 = f1_score(all_mode_labs, all_mode_preds, average='macro')
@@ -358,7 +451,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     adapt_search_loader = DataLoader(adapt_search_data, batch_size=len(labels), shuffle=True)
                     adapted_model.input_transform.mode = 'bicubic'
                     print('INITIAL CONDITION SAMPLING...')
-                    boundaries = torch.tensor([4.0, 4.0, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
+                    boundaries = torch.tensor([5.0, 5.0, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
                     
                     initial_search(adapted_model, adapt_search_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=int(4**7)) #data['num_repetitions']*exp['num_epochs']//2) # find optimal initial condition
                     adapted_model.input_transform.mode = 'bilinear' # set mode to bilinear for training
@@ -422,13 +515,14 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     tuned_all_mode_labs, tuned_all_mode_preds = [], []
                     for d_idx in range(len(test_durations)):
                         dt = int(test_durations[d_idx])
-                        cur_labs = tuned_all_labs[t:t+dt]
-                        cur_preds = tuned_all_preds[t:t+dt]
-                        mode_labs,_ = mode(cur_labs)
-                        mode_preds,_ = mode(cur_preds)
-                        tuned_all_mode_labs.append(mode_labs)
-                        tuned_all_mode_preds.append(mode_preds)
-                        t += dt 
+                        if dt > 0: # if duration is 0, skip
+                            cur_labs = tuned_all_labs[t:t+dt]
+                            cur_preds = tuned_all_preds[t:t+dt]
+                            mode_labs,_ = mode(cur_labs)
+                            mode_preds,_ = mode(cur_preds)
+                            tuned_all_mode_labs.append(mode_labs)
+                            tuned_all_mode_preds.append(mode_preds)
+                            t += dt 
                 
                 # Compute accuracy and F1-score for majority voting
                 tuned_mv_acc = accuracy_score(tuned_all_mode_labs, tuned_all_mode_preds)
@@ -482,7 +576,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
 
 # Save experiment data in .csv file
 data_dict = {"Subject": subs, "Train Sessions": train_sessions, "Test Sessions": test_sessions, "Adaptation Repetitions": adapt_reps,
-                             "Accuracy": accs, "Tuned Accuracy": tuned_accs, 'F1-Score': f1_scores, 'Tuned F1-Score': tuned_f1_scores}
+                             "Accuracy": accs, "Majority Voting Accuracy": mv_accs, "Tuned Accuracy": tuned_accs, "Majority Voting Tuned Accuracy": mv_tuned_accs,
+                            'F1-Score': f1_scores, "Majority Voting F1-Score": mv_f1_scores, 'Tuned F1-Score': tuned_f1_scores, "Majority Voting Tuned F1-Score": mv_tuned_f1_scores}
 data_dict.update(learned_params)
 df = pd.DataFrame(data_dict)
 df.to_csv(f"{name}.csv")
@@ -501,8 +596,8 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name,
-    mode='disabled'
+    name=name
+    # mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)

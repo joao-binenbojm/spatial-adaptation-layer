@@ -1,11 +1,21 @@
 import torch
 import scipy
-from time import time
+from time import time, sleep
 import matplotlib.pyplot as plt
 import wandb
 from sal_classification.simulation_utils import get_grid_distance
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
+from networks_utils import median_pool_2d
+import seaborn as sns
+
+def plot_emg_grid(emg_grid, Y, label, title="emg-no-remove"):
+    im = emg_grid[Y==label].mean(dim=0).squeeze()
+    im = im.reshape(1,1,im.shape[0], im.shape[1])
+    im = median_pool_2d(im)
+    plt.figure()
+    sns.heatmap(im.squeeze(), cmap='viridis', cbar=True)
+    plt.savefig(title)
 
 def init_adabn(model):
     '''Takes a given PyTorch model, sets all modules to evaluation mode, then resets BN statistics
@@ -155,12 +165,19 @@ def train_model(model, train_loader, optimizer, criterion, num_epochs=2, schedul
 
     t0 = time() # initial timestamp at start of training
     epoch = 0
+    
     while epoch < num_epochs:
     # for epoch in range(num_epochs):
         # if verbose:
             # print('Learning Rate:', scheduler.get_last_lr())
         # running_loss = 0.0
         for i, (signals, labels) in enumerate(train_loader):
+            # plt.figure()
+            # plt.imshow(signals[-1].squeeze())
+            # plt.savefig('ztest-img')
+            # plt.close('all')
+            # sleep(0.5)
+                
             signals = signals.to(device)
             labels = labels.view(-1).type(torch.LongTensor).to(device)
             # forward pass

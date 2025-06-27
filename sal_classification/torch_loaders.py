@@ -37,7 +37,9 @@ class EMGFrameLoader(Dataset):
             self.X = (self.X - self.min)/(self.max - self.min)*2 - 1
 
         if transform:
-            self.X = transform(self.X)
+            self.transform = transform
+        else:
+            self.transform = lambda x: x  # Identity transform if none provided
 
         self.len = X.shape[0]
 
@@ -45,5 +47,6 @@ class EMGFrameLoader(Dataset):
         return self.len
 
     def __getitem__(self, idx):
-        X, Y = self.X[idx], self.Y[idx]
-        return X, Y
+        X, Y = self.X[[idx]], self.Y[idx]
+        X = self.transform(X)
+        return X[0], Y

@@ -30,9 +30,9 @@
         "xshear": true,
         "yshear": true
     },
-    "real_baseline": "mean-square",
+    "real_baseline": null,
     "learnable_baseline": false,
-    "corrective_gain": true,
+    "corrective_gain": false,
     "adabatch": false,
     "gest_subset": [0,7,8,11,12,19,21,23],
     "adapt_gest_subset": null,
