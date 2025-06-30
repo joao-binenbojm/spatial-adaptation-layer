@@ -11,6 +11,42 @@ def get_rms_signal(emg, Mrms=32, s=1):
     rms_signal = np.sqrt(ms_signal)
     return rms_signal
 
+def get_running_ssc_signal(emg, Mssc=32, s=1):
+    '''Computes the running estimate of slope sign changes (SSC) from a window of L samples. Returns a signal of the same length.'''
+    # Compute sign changes in the first difference
+    diff = np.diff(emg, axis=0)
+    ssc_events = (diff[1:] * diff[:-1]) < 0  # shape: (T-2, Ch)
+    ssc_events = ssc_events.astype(float)
+    # Pad to match input length
+    ssc_events_padded = np.pad(ssc_events, ((1,1),(0,0)), mode='constant')
+    # Moving sum in window
+    win = np.ones((2*Mssc+1, 1))
+    ssc_sum = signal.convolve(ssc_events_padded, win, mode='same')
+    # Normalize by window length minus 2 (since SSC is undefined for first/last sample in window)
+    ssc_signal = ssc_sum / (2*Mssc-1)
+    return ssc_signal
+
+def get_running_zcr_signal(emg, Mzcr=32, s=1):
+    '''Computes the running estimate of zero-crossing rate (ZCR) from a window of L samples. Returns a signal of the same length.'''
+    sign_changes = np.diff(np.signbit(emg), axis=0)
+    zcr_events = (sign_changes != 0).astype(float)
+    # Pad to match input length
+    zcr_events_padded = np.pad(zcr_events, ((1,0),(0,0)), mode='constant')
+    win = np.ones((2*Mzcr+1, 1))
+    zcr_sum = signal.convolve(zcr_events_padded, win, mode='same')
+    zcr_signal = zcr_sum / (2*Mzcr)
+    return zcr_signal
+
+def get_running_norm_wl_signal(emg, Mwl=32, s=1):
+    '''Computes the running estimate of normalized waveform length from a window of L samples. Returns a signal of the same length.'''
+    abs_diff = np.abs(np.diff(emg, axis=0))
+    # Pad to match input length
+    abs_diff_padded = np.pad(abs_diff, ((1,0),(0,0)), mode='constant')
+    win = np.ones((2*Mwl+1, 1))
+    wl_sum = signal.convolve(abs_diff_padded, win, mode='same')
+    wl_signal = wl_sum / (2*Mwl)
+    return wl_signal
+
 ## Majority Voting
 def majority_voting(predictions, Mmj=32):
     ''' Go over the length of the segment, and sequentially increase the count of a given symbol.

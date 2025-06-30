@@ -2,7 +2,7 @@
     "name": "test-outlier",
     "project": "classification-simulation",
     "K": 1,
-    "num_epochs": 15,
+    "num_epochs": 5,
     "norm": 0,
     "lr": 0.001,
     "p_input": 0.0,
@@ -19,7 +19,7 @@
     "network": "CapgMyoNet",
     "dataset": "csl",
     "emg_tensorizer": "CSLData",
-    "Trms": 0.008,
+    "Trms": 0.002,
     "adaptation": "spatial-adaptation",
     "adaptation_params": {
         "xshift": true,

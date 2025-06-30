@@ -117,7 +117,7 @@ class CapgMyoNet(nn.Module):
         x = self.batchnorm0(x)
         
         ## TESTING STN
-        x,_ = self.stn(x)
+        # x,_ = self.stn(x)
 
         if self.adaptation_phase:
             x = x - self.baseline # perform baseline normalization

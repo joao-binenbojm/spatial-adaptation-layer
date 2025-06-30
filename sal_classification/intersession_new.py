@@ -232,12 +232,12 @@ for idx, sub in tqdm(enumerate(data['subs'])):
 
                 rms_transforms = torchvision.transforms.Compose([
                     # v2.GaussianNoise(sigma=0.1*train_std, mean=0.0, clip=False),
-                    v2.RandomAffine(
-                        degrees=15,
-                        translate=(5/X_train.shape[2], 5/X_train.shape[3]),
-                        scale=(0.9,1.1),
-                        shear=(-0.1,0.1)
-                    ),
+                    # v2.RandomAffine(
+                    #     degrees=15,
+                    #     translate=(5/X_train.shape[2], 5/X_train.shape[3]),
+                    #     scale=(0.9,1.1),
+                    #     shear=(-0.1,0.1)
+                    # ),
                     v2.GaussianBlur(kernel_size=3),
                     v2.RandomErasing()
                     # RandomChannelCorruption(n_channels=20, min_noise=min_noise, max_noise=max_noise)
@@ -396,7 +396,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     print('INITIAL CONDITION SAMPLING...')
                     boundaries = torch.tensor([5.0, 5.0, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
                     
-                    # initial_search(adapted_model, adapt_search_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=int(4**7)) #data['num_repetitions']*exp['num_epochs']//2) # find optimal initial condition
+                    initial_search(adapted_model, adapt_search_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=int(4**7)) #data['num_repetitions']*exp['num_epochs']//2) # find optimal initial condition
                     adapted_model.input_transform.mode = 'bilinear' # set mode to bilinear for training
 
                     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
@@ -405,8 +405,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
                     scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
                     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 1.0, 1.0, total_iters=len(adapt_loader)*data['num_repetitions']*exp['num_epochs']//5)
-                    # train_model(adapted_model, adapt_search_loader, optimizer, criterion, num_epochs=500, scheduler=scheduler,
-                    #             warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
+                    train_model(adapted_model, adapt_search_loader, optimizer, criterion, num_epochs=500, scheduler=scheduler,
+                                warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
 
                 elif exp['adaptation'] == 'adabatch':
                     with torch.no_grad():
