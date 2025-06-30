@@ -85,7 +85,7 @@ cf_tot = np.zeros((nlabels, nlabels))
 
 print('INTERSESSION:', data['dataset_name'])
 print('CONDITIONS:', exp['name'])
-# data['subs'] = [4]
+data['subs'] = [3,4]
 for idx, sub in tqdm(enumerate(data['subs'])):
     # Load data for given subject/session
     sub_id = 'subject{}'.format(sub+1)
@@ -175,10 +175,10 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 # # Apply outlier mask to train, adapt and test sets
                 # # outlier_mask = outlier_mask.expand(X_train.shape)  # shape: (T, 1, H, W)
 
-                # ## HARD CODING OUTLIER MASK
+                ## HARD CODING OUTLIER MASK
                 # outlier_mask = torch.ones((1,1,X_train.shape[2], X_train.shape[3]))
-                # outlier_mask[:,:,:2,:] = 0.0
-                # outlier_mask[:,:,:,:13] = 0.0
+                # # outlier_mask[:,:,:2,:] = 0.0
+                # outlier_mask[:,:,:2,:13] = 0.0
                 # outlier_mask = outlier_mask.expand(X_train.shape).to(torch.bool)
                 # valid_values = X_train[~outlier_mask]  # flattening valid values
                 # mean = valid_values.mean()
@@ -186,7 +186,6 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 # noise = torch.randn_like(X_train) * std + mean
                 # X_train[outlier_mask] = noise[outlier_mask]
                 # X_train[X_train < 0] = 0.0
-                # # X_train[:,:,:2,:15] = noise[:,:,:2,:15] 
                 
                 # outlier_mask_adapt = binary_dilation(outlier_mask_adapt, structure=np.ones((3,3)), iterations=1)
                 # outlier_mask_adapt = torch.tensor(outlier_mask_adapt, dtype=torch.bool, device=X_adapt.device).unsqueeze(0).unsqueeze(0) # convert to tensor
@@ -222,18 +221,24 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 plt.close()
 
                 # Initialize transform for data augmentation
-                # from transforms import RandomChannelCorruption, RandomChannelBlobCorruption
+                from transforms import RandomChannelCorruption, RandomChannelBlobCorruption
                 import torchvision
                 from torchvision.transforms import v2
 
                 # Oulier values
-                # train_mean, train_std = X_train.mean(), X_train.std()
-                # min_noise = train_mean + train_std
-                # max_noise = train_mean + train_std*3
+                train_mean, train_std = X_train.mean(), X_train.std()
+                min_noise = train_mean + train_std
+                max_noise = train_mean + train_std*3
 
                 rms_transforms = torchvision.transforms.Compose([
-                    # RandomChannelBlobCorruption(p=1.0, min_blob_size=3, max_blob_size=6),
                     # v2.GaussianNoise(sigma=0.1*train_std, mean=0.0, clip=False),
+                    v2.RandomAffine(
+                        degrees=15,
+                        translate=(5/X_train.shape[2], 5/X_train.shape[3]),
+                        scale=(0.9,1.1),
+                        shear=(-0.1,0.1)
+                    ),
+                    v2.GaussianBlur(kernel_size=3),
                     v2.RandomErasing()
                     # RandomChannelCorruption(n_channels=20, min_noise=min_noise, max_noise=max_noise)
                 ])
@@ -391,7 +396,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     print('INITIAL CONDITION SAMPLING...')
                     boundaries = torch.tensor([5.0, 5.0, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
                     
-                    initial_search(adapted_model, adapt_search_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=int(4**7)) #data['num_repetitions']*exp['num_epochs']//2) # find optimal initial condition
+                    # initial_search(adapted_model, adapt_search_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=int(4**7)) #data['num_repetitions']*exp['num_epochs']//2) # find optimal initial condition
                     adapted_model.input_transform.mode = 'bilinear' # set mode to bilinear for training
 
                     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
@@ -400,8 +405,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
                     scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
                     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 1.0, 1.0, total_iters=len(adapt_loader)*data['num_repetitions']*exp['num_epochs']//5)
-                    train_model(adapted_model, adapt_search_loader, optimizer, criterion, num_epochs=500, scheduler=scheduler,
-                                warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
+                    # train_model(adapted_model, adapt_search_loader, optimizer, criterion, num_epochs=500, scheduler=scheduler,
+                    #             warmup_scheduler=warmup_scheduler, verbose=False) # run training loop
 
                 elif exp['adaptation'] == 'adabatch':
                     with torch.no_grad():
@@ -534,8 +539,8 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name
-    # mode='disabled'
+    name=name,
+    mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)

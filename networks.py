@@ -7,6 +7,7 @@ import numpy as np
 
 from networks_utils import SpatialAdaptation, SpatialAdaptationHyser, LocallyConnected2d
 from torchvision import models
+from spatial_transformer import ConvSTN
 
 # Canonical EMG network from original capgmyo paper
 class CapgMyoNet(nn.Module):
@@ -65,6 +66,9 @@ class CapgMyoNet(nn.Module):
 
         # self.apply(CapMyoNet.init_weights)
 
+        ## TESTING WITH ACTUAL STN
+        self.stn = ConvSTN(input_shape=input_shape)
+
         # Set input transformation method
         self.adaptation_phase = False
         self.input_transform_name = input_transform_name
@@ -111,6 +115,10 @@ class CapgMyoNet(nn.Module):
             x = x * scaling_factors  # scale to match magnitude of session 1
 
         x = self.batchnorm0(x)
+        
+        ## TESTING STN
+        x,_ = self.stn(x)
+
         if self.adaptation_phase:
             x = x - self.baseline # perform baseline normalization
             x = self.input_transform(x) # perform image resampling step
