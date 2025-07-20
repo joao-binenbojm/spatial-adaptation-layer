@@ -85,7 +85,7 @@ cf_tot = np.zeros((nlabels, nlabels))
 
 print('INTERSESSION:', data['dataset_name'])
 print('CONDITIONS:', exp['name'])
-data['subs'] = [3,4]
+# data['subs'] = [3,4]
 for idx, sub in tqdm(enumerate(data['subs'])):
     # Load data for given subject/session
     sub_id = 'subject{}'.format(sub+1)
@@ -129,7 +129,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                         subgests = exp['adapt_gest_subset']
                 else:
                     subgests = None
-                X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations, outlier_mask_train, outlier_mask_adapt = emg_tensorizer.get_tensors_intersession(
+                X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations = emg_tensorizer.get_tensors_intersession(
                                                                                 test_session=test_idx,
                                                                                 train_session=train_idx,
                                                                                 rep_idx=int(adapt_rep),
@@ -220,31 +220,31 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 plt.savefig('baseline-outlier-removed.jpg')
                 plt.close()
 
-                # Initialize transform for data augmentation
-                from transforms import RandomChannelCorruption, RandomChannelBlobCorruption
-                import torchvision
-                from torchvision.transforms import v2
+                # # Initialize transform for data augmentation
+                # from transforms import RandomChannelCorruption, RandomChannelBlobCorruption
+                # import torchvision
+                # from torchvision.transforms import v2
 
-                # Oulier values
-                train_mean, train_std = X_train.mean(), X_train.std()
-                min_noise = train_mean + train_std
-                max_noise = train_mean + train_std*3
+                # # Oulier values
+                # train_mean, train_std = X_train.mean(), X_train.std()
+                # min_noise = train_mean + train_std
+                # max_noise = train_mean + train_std*3
 
-                rms_transforms = torchvision.transforms.Compose([
-                    # v2.GaussianNoise(sigma=0.1*train_std, mean=0.0, clip=False),
-                    # v2.RandomAffine(
-                    #     degrees=15,
-                    #     translate=(5/X_train.shape[2], 5/X_train.shape[3]),
-                    #     scale=(0.9,1.1),
-                    #     shear=(-0.1,0.1)
-                    # ),
-                    v2.GaussianBlur(kernel_size=3),
-                    v2.RandomErasing()
-                    # RandomChannelCorruption(n_channels=20, min_noise=min_noise, max_noise=max_noise)
-                ])
+                # rms_transforms = torchvision.transforms.Compose([
+                #     v2.GaussianNoise(sigma=0.1*train_std, mean=0.0, clip=False),
+                #     v2.RandomAffine(
+                #         degrees=15,
+                #         translate=(5/X_train.shape[2], 5/X_train.shape[3]),
+                #         scale=(0.9,1.1),
+                #         shear=(-0.1,0.1)
+                #     ),
+                #     v2.GaussianBlur(kernel_size=3),
+                #     v2.RandomErasing()
+                #     # RandomChannelCorruption(n_channels=20, min_noise=min_noise, max_noise=max_noise)
+                # ])
 
                 # Get PyTortorch DataLoaders
-                train_data = EMGFrameLoader(X=X_train.clone(), Y=Y_train.clone(), norm=exp['norm'], transform=rms_transforms)
+                train_data = EMGFrameLoader(X=X_train.clone(), Y=Y_train.clone(), norm=exp['norm'])
                 adapt_data = EMGFrameLoader(X=X_adapt.clone(), Y=Y_adapt.clone(), train=False, norm=exp['norm'], stats=train_data.stats)
                 test_data = EMGFrameLoader(X=X_test.clone(), Y=Y_test.clone(), train=False, norm=exp['norm'], stats=train_data.stats)
                 train_loader = DataLoader(train_data, batch_size=exp['batch_size'], shuffle=True)
@@ -274,15 +274,11 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     #     H = H // 2
                     
                     # Set-up SAL boundaries
-                    if 'grabmyo' in exp['dataset']:
-                        boundaries = [[-2*3.0/(W-1), 2*3.0/(W-1)], [-1, 1], [-15/180, 15/180],
-                                        [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
-                    else:
-                        boundaries = [[-2*5.0/(W-1), 2*5.0/(W-1)], [-2*5.0/(H-1), 2*5.0/(H-1)], [-15/180, 15/180],
-                                        [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
+                    boundaries = [[-2*5.0/(W-1), 2*5.0/(W-1)], [-2*5.0/(H-1), 2*5.0/(H-1)], [-15/180, 15/180],
+                            [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
                         
                     base_model = eval(exp['network'])(input_shape=(X_train.shape[2], X_train.shape[3]), 
-                                                        num_classes=emg_tensorizer.num_gestures, p_input=exp['p_input'], baseline=exp['learnable_baseline'], 
+                                                        num_classes=emg_tensorizer.num_gestures, nfeatures=X_train.shape[1], p_input=exp['p_input'], baseline=exp['learnable_baseline'], 
                                                         input_transform_name=input_transform_name, circular=exp["circular"], boundaries=boundaries).to(device)
                     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, base_model.parameters()),
                                                 lr=exp['lr'], weight_decay=exp['weight_decay'])
@@ -389,7 +385,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                     with torch.no_grad():
                         for idx, label in enumerate(labels):
                             X_adapt_search[idx, 0, :, :] = torch.sqrt((X_adapt[Y_adapt == label]**2).mean(dim=0))
-                    
+                            # X_adapt_search = X_adapt[Y_adapt == label].mean(dim=0, keepdim=True)
                     adapt_search_data = EMGFrameLoader(X=X_adapt_search, Y=labels, train=False, norm=exp['norm'], stats=train_data.stats)
                     adapt_search_loader = DataLoader(adapt_search_data, batch_size=len(labels), shuffle=True)
                     adapted_model.input_transform.mode = 'bicubic'
@@ -513,8 +509,8 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                 # plt.savefig('baseline-fixed.jpg')
                 # plt.close()
 
-                if 'grabmyo' in exp['dataset']:
-                    data['input_shape'] = (2, data['input_shape'][1])
+                # if 'grabmyo' in exp['dataset']:
+                #     data['input_shape'] = (2, data['input_shape'][1])
         is_model_trained = False
 
 # Save experiment data in .csv file

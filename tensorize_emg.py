@@ -276,7 +276,7 @@ class EMGData:
         self.durations = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions)) # durations of gesture segments
 
         # Preinitialize Data tensors
-        self.X = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
+        self.X = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples, 4, self.input_shape[0], self.input_shape[1]))
         self.Y = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples))
 
         # Target transforms
@@ -472,10 +472,10 @@ class EMGData:
         for idx, session in enumerate(self.sessions):
             # DIR = os.path.join(self.path, self.sub, session)
             DIR = self.path
-            Xs, Ys, outlier_mask = self.extract_frames(DIR)
+            Xs, Ys = self.extract_frames(DIR)
             self.X[idx, :, :, :, :, :, :] = Xs # add data extracted from given session
             self.Y[idx, :, :, :] = Ys # add labels extracted from given session
-            self.outlier_masks[idx, 0, :, :] = outlier_mask # add outlier mask extracted from given session
+            # self.outlier_masks[idx, 0, :, :] = outlier_mask # add outlier mask extracted from given session
             self.current_session += 1
 
         # Convert data to tensor
@@ -544,8 +544,8 @@ class EMGData:
         X_test = self.X[test_session:test_session+1, :, idxs, :, :, :, :]
         Y_test = self.Y[test_session:test_session+1, :, idxs, :]
 
-        outlier_mask_train = torch.tensor(self.outlier_masks[[train_session]])
-        outlier_mask_adapt = torch.tensor(self.outlier_masks[[test_session]])
+        # outlier_mask_train = torch.tensor(self.outlier_masks[[train_session]])
+        # outlier_mask_adapt = torch.tensor(self.outlier_masks[[test_session]])
 
         if gest_idxs is not None:
             if isinstance(gest_idxs, int):
@@ -604,7 +604,7 @@ class EMGData:
         # plt.savefig('baseline')
         # plt.close('all')
 
-        return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations.ravel(), outlier_mask_train, outlier_mask_adapt
+        return X_train, Y_train, X_adapt, Y_adapt, X_test, Y_test, test_durations.ravel() #, outlier_mask_train, outlier_mask_adapt
 
     def get_tensors_simulation(self, session, adapt_rep_idx, test_rep_idx):
         """
@@ -1127,34 +1127,41 @@ class CSLData(EMGData):
 
                 emg = bandstop(bandpass(emg, fs=self.fs), fs=self.fs) # bandstop filter to remove powerline noise
                 # print('PLOTTING EMG PSDs...')
-                zero_crossings = get_zcr(emg) # compute zero-crossing rate for each channel
-                zcr_img = self.get_images(zero_crossings) # get images from zero-crossing rate
-                zcr_img = median_pool_2d(torch.tensor(zcr_img.copy())) # vertical median pooling, along muscle fiber direction
-                plt.figure()
-                sns.heatmap(zcr_img.squeeze(), cmap='viridis', cbar=True)
-                plt.title(f'zero-crossing-{gdx*reps + idx}')
-                plt.savefig(f'zero-crossing.png')
-                plt.close('all')
+                # zero_crossings = get_running_zcr_signal(emg, Mzcr=self.Mrms)
+                # zero_crossings = get_zcr(emg) # compute zero-crossing rate for each channel
+                # zcr_imgs = self.get_images(zero_crossings) # get images from zero-crossing rate
+                # zcr_img = zcr_imgs.mean(axis=0, keepdims=True)
+                # zcr_img = median_pool_2d(torch.tensor(zcr_img.copy())) # vertical median pooling, along muscle fiber direction
+                # plt.figure()
+                # sns.heatmap(zcr_img.squeeze(), cmap='viridis', cbar=True)
+                # plt.title(f'zero-crossing-{gdx*reps + idx}')
+                # plt.savefig(f'zero-crossing.png')
+                # plt.close('all')
 
                 # Slope sign changes (SSC)
-                ssc = get_ssc(emg) # compute slope sign changes for each channel
-                ssc_img = self.get_images(ssc) # get images from SSC
-                ssc_img = median_pool_2d(torch.tensor(ssc_img.copy())) # vertical median pooling, along muscle fiber direction
-                plt.figure()
-                sns.heatmap(ssc_img.squeeze(), cmap='viridis', cbar=True)
-                plt.title(f'slope-sign-changes-{gdx*reps + idx}')
-                plt.savefig(f'slope-sign-changes.png')
-                plt.close('all')
+                # ssc = get_ssc(emg) # compute slope sign changes for each channel
+                # sscs = get_running_ssc_signal(emg, Mssc=self.Mrms)
+                # ssc_imgs = self.get_images(sscs) # get images from SSC
+                # ssc_img = ssc_imgs.mean(axis=0, keepdims=True)
+                # ssc_img = median_pool_2d(torch.tensor(ssc_img.copy())) # vertical median pooling, along muscle fiber direction
+                # plt.figure()
+                # sns.heatmap(ssc_img.squeeze(), cmap='viridis', cbar=True)
+                # plt.title(f'slope-sign-changes-{gdx*reps + idx}')
+                # plt.savefig(f'slope-sign-changes.png')
+                # plt.close('all')
 
                 # Compute waveform length
-                waveform_length = get_norm_wl(emg) # compute waveform length for each channel
-                norm_wl_img = self.get_images(waveform_length) # get images from waveform length
-                norm_wl_img = median_pool_2d(torch.tensor(norm_wl_img.copy())) # vertical median pooling, along muscle fiber direction
-                plt.figure()
-                sns.heatmap(norm_wl_img.squeeze(), cmap='viridis', cbar=True)
-                plt.title(f'waveform-length-{gdx*reps + idx}')
-                plt.savefig(f'waveform-length.png')
-                plt.close('all')
+                # waveform_length = get_norm_wl(emg) # compute waveform length for each channel
+                # norm_wls = get_running_norm_wl_signal(emg, Mwl=self.Mrms)
+                # norm_wl_img = self.get_images(norm_wls.mean(axis=0, keepdims=True)) # get images from waveform length
+                # norm_wl_imgs = self.get_images(norm_wls)
+                # norm_wl_img = norm_wl_imgs.mean(axis=0, keepdims=True)
+                # norm_wl_img = median_pool_2d(torch.tensor(norm_wl_img.copy())) # vertical median pooling, along muscle fiber direction
+                # plt.figure()
+                # sns.heatmap(norm_wl_img.squeeze(), cmap='viridis', cbar=True)
+                # plt.title(f'waveform-length-{gdx*reps + idx}')
+                # plt.savefig(f'waveform-length.png')
+                # plt.close('all')
 
                 # # Compute AR(2) coefficients
                 # flatness = get_spectral_flatness_ar2(emg)
@@ -1178,21 +1185,24 @@ class CSLData(EMGData):
                             emg = np.sqrt(emg_squared) # get RMS from MS
 
                 images = self.get_images(emg)
-                median_images = median_pool_2d(torch.tensor(images.copy())) # vertical median pooling, along muscle fiber direction
+                # median_images = median_pool_2d(torch.tensor(images.copy())) # vertical median pooling, along muscle fiber direction
                 # plt.figure()
                 # sns.heatmap(images.squeeze().mean(axis=0), cmap='viridis', cbar=True)
                 # plt.title(f'EMG-{gdx}{idx}')
                 # plt.savefig(f'emg.png')
                 # plt.close('all')
 
-                plt.figure()
-                sns.heatmap(median_images.squeeze().mean(axis=0), cmap='viridis', cbar=True)
-                plt.title(f'MEDIAN-EMG-{gdx}{idx}')
-                plt.savefig(f'median-emg.png')
-                plt.close('all')
+                # plt.figure()
+                # sns.heatmap(median_images.squeeze().mean(axis=0), cmap='viridis', cbar=True)
+                # plt.title(f'MEDIAN-EMG-{gdx}{idx}')
+                # plt.savefig(f'median-emg.png')
+                # plt.close('all')
 
-                # Add data extracted from given repetition to our data matrix            
-                X[gdx, idx, :, :, :, :] = images # add EMG surface images onto our data matrix
+                # Add data extracted from given repetition to our data matrix
+                # for img_idx, imgs in enumerate([images, zcr_imgs, ssc_imgs, norm_wl_imgs]):         
+                #     X[gdx, idx, :, img_idx:img_idx+1, :, :] = imgs # add EMG surface images onto our data matrix
+                
+                X[gdx, idx, :, :, :, :] = images
                 Y[gdx, idx, :] = np.array([gdx]*self.num_samples)  # add labels onto our label matrix
 
                 # Update outlier mask for current sessions
@@ -1263,7 +1273,7 @@ class CSLData(EMGData):
             # plt.savefig(f'baseline-nooutlier')
             # plt.close('all')
 
-        return X, Y, outlier_mask
+        return X, Y
     
 
 # class CSLDataRMS(EMGData):

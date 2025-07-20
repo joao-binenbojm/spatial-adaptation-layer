@@ -58,18 +58,6 @@ class SpatialAdaptation(torch.nn.Module):
         self.yscale = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(1.0), requires_grad=Sc)])
         self.xshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh)])
         self.yshear = torch.nn.ParameterList([torch.nn.parameter.Parameter(torch.tensor(0.0), requires_grad=Sh)])
-    
-    # def get_constrained_params(self, sal_idx=0):
-    #     '''Returns the parameters of the affine transformation constrained to the input boundaries using a sigmoid function.'''
-    #     xshift = torch.sigmoid(self.xshift[sal_idx]) * (self.boundaries[0][1] - self.boundaries[0][0]) + self.boundaries[0][0]
-    #     yshift = torch.sigmoid(self.yshift[sal_idx]) * (self.boundaries[1][1] - self.boundaries[1][0]) + self.boundaries[1][0]
-    #     rot_theta = torch.sigmoid(self.rot_theta[sal_idx]) * (self.boundaries[2][1] - self.boundaries[2][0]) + self.boundaries[2][0]
-    #     xscale = torch.sigmoid(self.xscale[sal_idx]) * (self.boundaries[3][1] - self.boundaries[3][0]) + self.boundaries[3][0]
-    #     yscale = torch.sigmoid(self.yscale[sal_idx]) * (self.boundaries[4][1] - self.boundaries[4][0]) + self.boundaries[4][0]
-    #     xshear = torch.sigmoid(self.xshear[sal_idx]) * (self.boundaries[5][1] - self.boundaries[5][0]) + self.boundaries[5][0]
-    #     yshear = torch.sigmoid(self.yshear[sal_idx]) * (self.boundaries[6][1] - self.boundaries[6][0]) + self.boundaries[6][0]
-
-    #     return xshift, yshift, rot_theta, xscale, yscale, xshear, yshear
 
     def get_constrained_params(self, sal_idx=0):
         '''Returns the parameters of the affine transformation constrained to the input boundaries using a tanh function.'''

@@ -7,10 +7,9 @@ class ConvSTN(nn.Module):
     Convolutional Spatial Transformer Network optimized for small grayscale images
     Input shapes: 8x16 or 7x24 (or similar small dimensions)
     """
-    def __init__(self, input_shape=(32,32)):
+    def __init__(self, input_channels=1, input_shape=(32,32)):
         super(ConvSTN, self).__init__()
         max_height, max_width = input_shape
-        input_channels = 1
         
         # Localization network - optimized for rectangular inputs
         # Handles shapes like 8x16, 7x24, 32x8 efficiently

@@ -11,10 +11,11 @@ from spatial_transformer import ConvSTN
 
 # Canonical EMG network from original capgmyo paper
 class CapgMyoNet(nn.Module):
-    def __init__(self, num_classes=8, input_shape=(8, 16), channels=64, kernel_sz=3, baseline=True, input_transform_name='spatial-adaptation', p_input=0.0, track_running_stats=True, circular=False, boundaries=None):
+    def __init__(self, num_classes=8, input_shape=(8, 16), nfeatures=1, channels=64, kernel_sz=3, baseline=True, input_transform_name='spatial-adaptation', p_input=0.0, track_running_stats=True, circular=False, boundaries=None):
         super(CapgMyoNet, self).__init__()
 
         self.channels = channels
+        self.nfeatures = nfeatures
         self.kernel_sz = kernel_sz
 
         self.input_shape = input_shape
@@ -29,8 +30,8 @@ class CapgMyoNet(nn.Module):
 
         self.input_dropout = nn.Dropout(p=p_input)
 
-        self.batchnorm0 = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
-        self.conv1 = nn.Conv2d(1, channels, kernel_size=(kernel_sz, kernel_sz), stride=(1, 1), padding='same')
+        self.batchnorm0 = nn.BatchNorm2d(nfeatures, track_running_stats=track_running_stats)
+        self.conv1 = nn.Conv2d(nfeatures, channels, kernel_size=(kernel_sz, kernel_sz), stride=(1, 1), padding='same')
         self.batchnorm1 = nn.BatchNorm2d(channels, track_running_stats=track_running_stats)
         self.relu1 = nn.ReLU()
 
@@ -67,7 +68,7 @@ class CapgMyoNet(nn.Module):
         # self.apply(CapMyoNet.init_weights)
 
         ## TESTING WITH ACTUAL STN
-        self.stn = ConvSTN(input_shape=input_shape)
+        # self.stn = ConvSTN(input_channels=nfeatures ,input_shape=input_shape)
 
         # Set input transformation method
         self.adaptation_phase = False
