@@ -10,7 +10,7 @@ os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
 nconditions = 1
 
 # For each dataset
-for dataset in ['hyser-flexors', 'hyser-extensors']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'grabmyo-wrist']:
+for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'grabmyo-wrist']:
     exp['dataset'] = dataset
     if 'grabmyo' in dataset:
         exp['median-filter'] = False
@@ -40,9 +40,10 @@ for dataset in ['hyser-flexors', 'hyser-extensors']: #['csl', 'hyser', 'capgmyo'
             exp['circular'] = False
             exp['real_baseline'] = "mean_square"
             exp['median-filter'] = True
-            exp['gest_subset'] = [7,8,11,12,15,20,22,23]
-            # exp['adapt_gest_subset'] = [20,22,23]
-            exp['adapt_gest_subset'] = [20]
+            # exp['gest_subset'] = [7,8,11,12,15,20,22,23]
+            exp['gest_subset'] = [7,8,12,20,22,23]
+            exp['adapt_gest_subset'] = [20,22,23]
+            # exp['adapt_gest_subset'] = [20]
 
         elif dataset == 'hyser':
             exp['emg_tensorizer'] = f"HyserData"

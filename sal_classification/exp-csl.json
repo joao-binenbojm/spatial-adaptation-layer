@@ -34,8 +34,8 @@
     "learnable_baseline": false,
     "corrective_gain": false,
     "adabatch": false,
-    "gest_subset": [7,8,11,12,15,20,22,23],
-    "adapt_gest_subset": null,
+    "gest_subset": [7,8,12,20,22,23],
+    "adapt_gest_subset": [20,22,23],
     "circular": false,
     "median-filter": true,
     "remove_outliers": false
