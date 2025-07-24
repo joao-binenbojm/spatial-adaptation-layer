@@ -73,7 +73,7 @@ for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'gra
     for adaptation in ['spatial-adaptation', 'fine-tuning', 'linear-layer', 'scratch-training', 'adabatch']:
         exp['adaptation'] = adaptation
         # For each network
-        for network in ['LogisticRegressor', 'CapgMyoNet']:
+        for network in ['LogisticRegressor']: #, 'CapgMyoNet']:
             if network == 'CapgMyoNet':
                 exp['num_epochs'] = 2
                 exp['p_input'] = 0.0

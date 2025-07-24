@@ -278,7 +278,7 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                             [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
                         
                     base_model = eval(exp['network'])(input_shape=(X_train.shape[2], X_train.shape[3]), 
-                                                        num_classes=emg_tensorizer.num_gestures, nfeatures=X_train.shape[1], p_input=exp['p_input'], baseline=exp['learnable_baseline'], 
+                                                        num_classes=emg_tensorizer.num_gestures, p_input=exp['p_input'], baseline=exp['learnable_baseline'], 
                                                         input_transform_name=input_transform_name, circular=exp["circular"], boundaries=boundaries).to(device)
                     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, base_model.parameters()),
                                                 lr=exp['lr'], weight_decay=exp['weight_decay'])
@@ -535,8 +535,8 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name,
-    mode='disabled'
+    name=name
+    # mode='disabled'
 )
 
 table = wandb.Table(dataframe=df)
