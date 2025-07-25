@@ -10,7 +10,7 @@ os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
 nconditions = 1
 
 # For each dataset
-for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'grabmyo-wrist']:
+for dataset in ['capgmyo']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'grabmyo-wrist']:
     exp['dataset'] = dataset
     if 'grabmyo' in dataset:
         exp['median-filter'] = False
@@ -31,10 +31,11 @@ for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'gra
             exp['emg_tensorizer'] = f"CapgmyoData"
             exp['circular'] = True
             exp['real_baseline'] = "mean-square"
-            exp['median-filter'] = False
-            exp['gest_subset'] = None
-            # exp['adapt_gest_subset'] = [2,4,5]
-            exp['adapt_gest_subset'] = [5]
+            exp['median-filter'] = True
+            exp['gest_subset'] = [0,1,3,4,5,6]
+            # exp['adapt_gest_subset'] = [1,4,5]
+            # exp['adapt_gest_subset'] = [5]
+
         elif dataset == 'csl':
             exp['emg_tensorizer'] = f"CSLData"
             exp['circular'] = False
@@ -73,7 +74,7 @@ for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'gra
     for adaptation in ['spatial-adaptation', 'fine-tuning', 'linear-layer', 'scratch-training', 'adabatch']:
         exp['adaptation'] = adaptation
         # For each network
-        for network in ['LogisticRegressor']: #, 'CapgMyoNet']:
+        for network in ['LogisticRegressor', 'CapgMyoNet']:
             if network == 'CapgMyoNet':
                 exp['num_epochs'] = 2
                 exp['p_input'] = 0.0

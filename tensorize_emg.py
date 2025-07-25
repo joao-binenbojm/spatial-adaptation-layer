@@ -276,7 +276,7 @@ class EMGData:
         self.durations = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions)) # durations of gesture segments
 
         # Preinitialize Data tensors
-        self.X = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples, 4, self.input_shape[0], self.input_shape[1]))
+        self.X = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples, 1, self.input_shape[0], self.input_shape[1]))
         self.Y = np.zeros((self.num_sessions, self.num_gestures, self.num_repetitions, self.num_samples))
 
         # Target transforms
@@ -288,7 +288,7 @@ class EMGData:
         if self.dataset == 'csl' or 'hyser' in self.dataset:
             X = median_pool_2d(X)
         elif self.dataset == 'capgmyo':
-            X = median_pool_2d(X, circular=True)
+            X = median_pool_2d(X, kernel_size=(3,1), padding=(1,0))
         # elif 'hyser' in self.dataset:
         #     Xtop, Xbot = X[:, :, :X.shape[2]//2, :], X[:, :, X.shape[2]//2:, :]
         #     Xtop, Xbot = median_pool_2d(Xtop), median_pool_2d(Xbot)
@@ -577,9 +577,9 @@ class EMGData:
         X_adapt, Y_adapt = torch.flatten(X_adapt, end_dim=-4), torch.flatten(Y_adapt, end_dim=-1)
         X_test, Y_test = torch.flatten(X_test, end_dim=-4), torch.flatten(Y_test, end_dim=-1)
 
-        if self.dataset == 'capgmyo': # average within subgrids to ensure a regular grid
-            X_train, X_adapt, X_test = X_train.view(X_train.shape[0], 1, 8, 8, 2), X_adapt.view(X_adapt.shape[0], 1, 8, 8, 2), X_test.view(X_test.shape[0], 1, 8, 8, 2)
-            X_train, X_adapt, X_test = X_train.mean(dim=-1), X_adapt.mean(dim=-1), X_test.mean(dim=-1)
+        # if self.dataset == 'capgmyo': # average within subgrids to ensure a regular grid
+        #     X_train, X_adapt, X_test = X_train.view(X_train.shape[0], 1, 8, 8, 2), X_adapt.view(X_adapt.shape[0], 1, 8, 8, 2), X_test.view(X_test.shape[0], 1, 8, 8, 2)
+        #     X_train, X_adapt, X_test = X_train.mean(dim=-1), X_adapt.mean(dim=-1), X_test.mean(dim=-1)
 
         if self.median_filter:
             print('APPLYING MEDIAN FILTER...')
@@ -857,6 +857,12 @@ class CapgmyoData(EMGData):
                         emg = np.sqrt(emg_square) # get RMS from MS
 
             cur_label = gest-1
+
+            # If gesture is not in our subset, skip it
+            if cur_label not in self.gest_subset:
+                continue
+            else:
+                cur_label = self.gest_subset.index(cur_label)
 
             # Account for exception case of missing repetitions
             labels = mat['gesture'].ravel()

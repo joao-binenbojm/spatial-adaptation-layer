@@ -535,7 +535,7 @@ wandb.init(
     # set the wandb project where this run will be logged
     project=exp["project"],
     config=config,
-    name=name
+    name=name,
     # mode='disabled'
 )
 
@@ -545,8 +545,8 @@ wandb.log({'complete_results': table})
 #   title="Performance Distribution Across Dataset")})
 wandb.log({'Accuracy': df['Accuracy'].mean()})
 wandb.log({'Tuned Accuracy': df['Tuned Accuracy'].mean()})
-# wandb.log({'Majority Voting Accuracy': df['Majority Voting Accuracy'].mean()})
-# wandb.log({'Majority Voting Tuned Accuracy': df['Majority Voting Tuned Accuracy'].mean()})
+wandb.log({'Majority Voting Accuracy': df['Majority Voting Accuracy'].mean()})
+wandb.log({'Majority Voting Tuned Accuracy': df['Majority Voting Tuned Accuracy'].mean()})
 
 # if exp['project'] == 'architecture-evaluation':
 #     wandb.log({'inter_channels': base_model.inter_channels})
