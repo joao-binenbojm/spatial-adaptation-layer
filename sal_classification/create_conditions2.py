@@ -78,7 +78,7 @@ for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'gra
             for adapt_gest_subset in [None, [20,22,23], [20]]:
                 exp['adapt_gest_subset'] = adapt_gest_subset
                 # For each network
-                exp['name'] = f"{median_filter}_{real_baseline}_{adapt_gest_subset}"
+                exp['name'] = f"{median_filter}_{real_baseline}"
                 if exp['adapt_gest_subset'] is not None:
                     exp['name'] = exp['name'] + '_' + str(exp['adapt_gest_subset']).replace(' ', '') 
                 with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
