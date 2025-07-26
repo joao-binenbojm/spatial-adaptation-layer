@@ -39,7 +39,7 @@ for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'gra
         elif dataset == 'csl':
             exp['emg_tensorizer'] = f"CSLData"
             exp['circular'] = False
-            exp['real_baseline'] = "mean_square"
+            exp['real_baseline'] = "mean-square"
             exp['median-filter'] = True
             # exp['gest_subset'] = [7,8,11,12,15,20,22,23]
             exp['gest_subset'] = [7,8,12,20,22,23]
@@ -71,24 +71,20 @@ for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'gra
             exp['adapt_gest_subset'] = None
 
     # For each adaptation method
-    for adaptation in ['spatial-adaptation', 'fine-tuning', 'linear-layer', 'scratch-training', 'adabatch']:
-        exp['adaptation'] = adaptation
-        # For each network
-        for network in ['LogisticRegressor', 'CapgMyoNet']:
-            if network == 'CapgMyoNet':
-                exp['num_epochs'] = 2
-                exp['p_input'] = 0.0
-            elif network == 'LogisticRegressor':
-                exp['num_epochs'] = 15
-                exp['p_input'] = 0.5 * int("grabmyo" not in dataset)
-            exp['network'] = network
-            exp['name'] = f"{dataset}_{adaptation}_{network}"
-            if exp['adapt_gest_subset'] is not None:
-                exp['name'] = exp['name'] + '_' + str(exp['adapt_gest_subset']).replace(' ', '') 
-            with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
-                json.dump(exp, f)
-            nconditions += 1
-            print(nconditions)
-            if nconditions % 49 == 0:
-                conditions_dir = conditions_dir[:-1] + str(int(conditions_dir[-1]) + 1) # increases condition dir
-                os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
+    for median_filter in [True, False]:
+        exp['median-filter'] = median_filter
+        for real_baseline in ['mean-square', 'root-mean-square', None]:
+            exp['real_baseline'] = real_baseline
+            for adapt_gest_subset in [None, [20,22,23], [20]]:
+                exp['adapt_gest_subset'] = adapt_gest_subset
+                # For each network
+                exp['name'] = f"{median_filter}_{real_baseline}_{adapt_gest_subset}"
+                if exp['adapt_gest_subset'] is not None:
+                    exp['name'] = exp['name'] + '_' + str(exp['adapt_gest_subset']).replace(' ', '') 
+                with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
+                    json.dump(exp, f)
+                nconditions += 1
+                print(nconditions)
+                if nconditions % 49 == 0:
+                    conditions_dir = conditions_dir[:-1] + str(int(conditions_dir[-1]) + 1) # increases condition dir
+                    os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
