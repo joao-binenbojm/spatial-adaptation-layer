@@ -265,13 +265,6 @@ for idx, sub in tqdm(enumerate(data['subs'])):
                             input_transform_name += '-grabmyo'
 
                     H, W = X_train.shape[2], X_train.shape[3] 
-
-                    # if 'grabmyo' in exp['dataset']:
-                    #     data['input_shape'] = (1, data['input_shape'][1])
-                    
-                    # H, W = data['input_shape']
-                    # if exp['dataset'] == 'hyser':
-                    #     H = H // 2
                     
                     # Set-up SAL boundaries
                     boundaries = [[-2*5.0/(W-1), 2*5.0/(W-1)], [-2*5.0/(H-1), 2*5.0/(H-1)], [-15/180, 15/180],

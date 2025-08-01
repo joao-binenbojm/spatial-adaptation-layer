@@ -6,6 +6,7 @@ import sys
 import wandb
 import numpy as np
 import pandas as pd
+from scipy.stats import mode
 from tqdm import tqdm
 
 import torch
@@ -18,7 +19,7 @@ import matplotlib.pyplot as plt
 import psutil
 from copy import deepcopy
 
-from tensorize_emg import CapgmyoData, CSLData, HyserData, GrabmyoData
+from tensorize_emg import CSLData, CapgmyoData
 from torch_loaders import EMGFrameLoader
 from sal_classification.deep_learning import train_model, test_model, initial_search
 from networks import CapgMyoNet, LogisticRegressor
@@ -50,7 +51,6 @@ if __name__ == '__main__':
     t0 = time() # start tracking time
 
     # Preinitialize metric arrays
-    npoints = 10
     session_ids = ['session'+str(ses+1) for ses in data['sessions']]
     subs, sessions, test_reps = [], [], []
     learned_params = {key: [] for key in ['xshift', 'yshift', 'rot_theta', 'xscale', 'yscale', 'xshear', 'yshear']}
@@ -58,6 +58,10 @@ if __name__ == '__main__':
     dists, corrected_dists = [], []
     accs, trans_accs, oracle_accs, tuned_accs = [], [], [], [] # different metrics to be saved in csv from experiment
     f1_scores, trans_f1_scores, oracle_f1_scores, tuned_f1_scores = [], [], [], []
+    # mv_accs, mv_tuned_accs = [], []
+    # f1_scores, tuned_f1_scores = [], []
+    # mv_f1_scores, mv_tuned_f1_scores = [], []
+    
     device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
 
@@ -67,9 +71,11 @@ if __name__ == '__main__':
 
         # Load EMG data in uniform format
         print('\nLOADING EMG TENSOR...')
+        is_segment = exp['dataset'] == 'csl'
         emg_tensorizer = emg_tensorizer_def(dataset=exp['dataset'], path=data['DIR'], sub=sub_id, num_gestures=data['num_gestures'], num_repetitions=data['num_repetitions'],
                                         input_shape=data['input_shape'], fs=data['fs'], rep_duration=data['rep_duration'], sessions=session_ids, Trms=exp['Trms'], 
-                                        remove_baseline=exp['real_baseline'], median_filter=exp['median-filter'], gest_subset=exp['gest_subset'], is_segment=False) # 7-15 for capgmyo, 0-9 for csl)
+                                        remove_baseline=exp['real_baseline'], median_filter=exp['median-filter'], gest_subset=exp['gest_subset'], is_segment=is_segment) # 7-15 for capgmyo, 0-9 for csl)
+        
         emg_tensorizer.load_tensors()
 
         for session in tqdm(data['sessions']):
@@ -94,25 +100,20 @@ if __name__ == '__main__':
 
             # Train original classifier
             input_transform_name = exp['adaptation']
+            input_transform_name = exp['adaptation']
             if exp['adaptation'] == 'spatial-adaptation':
                 if exp['dataset'] == 'hyser': 
                     input_transform_name += '-hyser'
-                # elif exp['dataset'] == 'grabmyo':
-                    # input_transform_name += '-grabmyo'
+                elif exp['dataset'] == 'grabmyo':
+                    input_transform_name += '-grabmyo'
 
-            if 'grabmyo' in exp['dataset']:
-                data['input_shape'] = (1, data['input_shape'][1])
-            
-            H, W = data['input_shape']
-            if exp['dataset'] == 'hyser':
-                H = H // 2
+            H, W = X_train.shape[2], X_train.shape[3] 
             
             # Set-up SAL boundaries
-            if 'spatial-adaptation' in exp['adaptation']:
-                boundaries = [[-2*2.5/(W-1), 2*2.5/(W-1)], [-2*2.5/(H-1), 2*2.5/(H-1)], [-15/180, 15/180
-                                ], [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
+            boundaries = [[-2*2.5/(W-1), 2*2.5/(W-1)], [-2*2.5/(H-1), 2*2.5/(H-1)], [-15/180, 15/180],
+                        [1/1.1, 1.1], [1/1.1, 1.1], [-0.1, 0.1], [-0.1, 0.1]]
 
-            model = eval(exp['network'])(channels=np.prod(data['input_shape']), input_shape=data['input_shape'], 
+            model = eval(exp['network'])(input_shape=(X_train.shape[2], X_train.shape[3]), 
                                          num_classes=emg_tensorizer.num_gestures, p_input=exp['p_input'], 
                                          baseline=exp['learnable_baseline'], input_transform_name=input_transform_name,
                                          circular=exp['circular'], boundaries=boundaries).to(device)
@@ -121,7 +122,7 @@ if __name__ == '__main__':
             optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
                                         lr=exp['lr'], weight_decay=exp['weight_decay'])
             scheduler = eval(exp['scheduler']['def'])(optimizer, **exp['scheduler']['params'])
-            warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(train_loader))
+            warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 1.0, 1.0, total_iters=len(train_loader))
 
             train_model(model, train_loader, optimizer, criterion, num_epochs=exp['num_epochs'], scheduler=scheduler,
                         warmup_scheduler=warmup_scheduler) # run training loop
@@ -140,7 +141,7 @@ if __name__ == '__main__':
             print('Test F1 Score:', f1)
 
             # Apply randomly sampled affine transformation to test set
-            boundaries = torch.tensor([2.5, 2.5, 15/180, 0.1, 0.1, 0.1, 0.1])
+            boundaries = torch.tensor([2.5, 2.5, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
             adapt_params = exp['adaptation_params']
 
             samps_list = []
@@ -179,17 +180,17 @@ if __name__ == '__main__':
             model.input_transform.mode = 'bilinear'
             model.input_transform.constrain_params = True
 
-            plt.figure()
-            fig, ax = plt.subplots(2, 6)
-            for idx in range(2):
-                for jdx in range(6):
-                    label = idx*6 + jdx
-                    ax[idx, jdx].imshow(X_test[Y_train==label,0,:,:].mean(dim=0))
-                    ax[idx, jdx].axis('off')
-                    ax[idx, jdx].set_title(f'Label: {label}')
+            # plt.figure()
+            # fig, ax = plt.subplots(2, 6)
+            # for idx in range(2):
+            #     for jdx in range(6):
+            #         label = idx*6 + jdx
+            #         ax[idx, jdx].imshow(X_test[Y_train==label,0,:,:].mean(dim=0))
+            #         ax[idx, jdx].axis('off')
+            #         ax[idx, jdx].set_title(f'Label: {label}')
             
-            plt.savefig('hyser-baseline-transformed')
-            plt.close()
+            # plt.savefig('baseline-transformed')
+            # plt.close()
 
             # Apply transforms and reload data loaders
             test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
@@ -237,17 +238,17 @@ if __name__ == '__main__':
             print('Oracle Test Accuracy:', oracle_acc)
             print('Oracle F1 Score:', oracle_f1)
 
-            plt.figure()
-            fig, ax = plt.subplots(2, 6)
-            for idx in range(2):
-                for jdx in range(6):
-                    label = idx*6 + jdx
-                    ax[idx, jdx].imshow(X_test_oracle[Y_train==label,0,:,:].mean(dim=0))
-                    ax[idx, jdx].axis('off')
-                    ax[idx, jdx].set_title(f'Label: {label}')
+            # plt.figure()
+            # fig, ax = plt.subplots(2, 6)
+            # for idx in range(2):
+            #     for jdx in range(6):
+            #         label = idx*6 + jdx
+            #         ax[idx, jdx].imshow(X_test_oracle[Y_train==label,0,:,:].mean(dim=0))
+            #         ax[idx, jdx].axis('off')
+            #         ax[idx, jdx].set_title(f'Label: {label}')
             
-            plt.savefig('hyser-baseline-oracle')
-            plt.close()
+            # plt.savefig('baseline-oracle')
+            # plt.close()
 
             # Reset SAL parameters
             adapted_model.input_transform.reset_params()
@@ -257,23 +258,35 @@ if __name__ == '__main__':
             print('FINE-TUNING...')
             for param in adapted_model.parameters():
                 param.requires_grad = False
-                for param_name in exp['adaptation_params'].keys():
-                    param = getattr(adapted_model.input_transform, param_name)
-                    for p in param: p.requires_grad = exp['adaptation_params'][param_name]
+            for param_name in exp['adaptation_params'].keys():
+                param = getattr(adapted_model.input_transform, param_name)
+                for p in param: p.requires_grad = exp['adaptation_params'][param_name]
+
+            # Aggregate adaptation data per class
+            labels = torch.unique(Y_adapt)
+            X_adapt_search = torch.zeros(len(labels), 1, X_adapt.shape[2], X_adapt.shape[3], device=device)
+            with torch.no_grad():
+                for idx, label in enumerate(labels):
+                    X_adapt_search[idx, 0, :, :] = torch.sqrt((X_adapt[Y_adapt == label]**2).mean(dim=0))
+                    # X_adapt_search = X_adapt[Y_adapt == label].mean(dim=0, keepdim=True)
+            adapt_search_data = EMGFrameLoader(X=X_adapt_search, Y=labels, train=False, norm=exp['norm'], stats=train_data.stats)
+            adapt_search_loader = DataLoader(adapt_search_data, batch_size=len(labels), shuffle=True)
+            adapted_model.input_transform.mode = 'bicubic'
 
             print('INITIAL CONDITION SAMPLING...')
             boundaries = torch.tensor([2.5, 2.5, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
-            initial_search(adapted_model, adapt_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=npoints) # find optimal initial condition
+            initial_search(adapted_model, adapt_search_loader, boundaries, exp['adaptation_params'], H=H, W=W, npoints=int(4**7)) # find optimal initial condition
+            adapted_model.input_transform.mode = 'bilinear'
 
             optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, adapted_model.parameters()),                                                                                
                                 lr=exp['lr'], weight_decay=exp['weight_decay'])
             scheduler_params = exp['scheduler']['params']
             scheduler_params['milestones'] = [mlst*data['num_repetitions'] for mlst in scheduler_params['milestones']]
             scheduler = eval(exp['scheduler']['def'])(optimizer, **scheduler_params)
-            warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 0.01, 1.0, total_iters=len(test_loader)*data['num_repetitions'])
+            warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 1.0, 1.0, total_iters=len(test_loader)*data['num_repetitions'])
 
             # Adapt to given test set
-            train_model(adapted_model, adapt_loader, optimizer, criterion, num_epochs=exp['num_epochs']*data['num_repetitions'], scheduler=scheduler,
+            train_model(adapted_model, adapt_search_loader, optimizer, criterion, num_epochs=500, scheduler=scheduler,
                         warmup_scheduler=warmup_scheduler, simulation=True) # run training loop
 
             # Store learned params for later evaluation
@@ -315,17 +328,17 @@ if __name__ == '__main__':
             with torch.no_grad():
                 X_test_fixed = adapted_model.input_transform(X_test)
             
-            plt.figure()
-            fig, ax = plt.subplots(2, 6)
-            for idx in range(2):
-                for jdx in range(6):
-                    label = idx*6 + jdx
-                    ax[idx, jdx].imshow(X_test_fixed[Y_train==label,0,:,:].mean(dim=0))
-                    ax[idx, jdx].axis('off')
-                    ax[idx, jdx].set_title(f'Label: {label}')
+            # plt.figure()
+            # fig, ax = plt.subplots(2, 6)
+            # for idx in range(2):
+            #     for jdx in range(6):
+            #         label = idx*6 + jdx
+            #         ax[idx, jdx].imshow(X_test_fixed[Y_train==label,0,:,:].mean(dim=0))
+            #         ax[idx, jdx].axis('off')
+            #         ax[idx, jdx].set_title(f'Label: {label}')
             
-            plt.savefig('hyser-baseline-fixed')
-            plt.close()
+            # plt.savefig('hyser-baseline-fixed')
+            # plt.close()
 
             # SAVE RESULT
             data_dict = {'Subjects': subs, 'Sessions':sessions, 'Test Repetitions':test_reps, 'Accuracy':accs, 'Transformed Accuracy': trans_accs, 'Oracle Accuracy': oracle_accs, 'Tuned Accuracy':tuned_accs, 

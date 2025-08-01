@@ -39,7 +39,7 @@ for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'gra
         elif dataset == 'csl':
             exp['emg_tensorizer'] = f"CSLData"
             exp['circular'] = False
-            exp['real_baseline'] = "mean_square"
+            exp['real_baseline'] = "mean-square"
             exp['median-filter'] = True
             # exp['gest_subset'] = [7,8,11,12,15,20,22,23]
             exp['gest_subset'] = [7,8,12,20,22,23]

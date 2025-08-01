@@ -619,18 +619,18 @@ class EMGData:
             test_idx = adapt_idx.copy()  # Remove test repetition from train indices
             
         # Get train, adapt, and test splits
-        X_train = self.X[[session], :, idxs, :, :, :, :]
-        Y_train = self.Y[[session], :, idxs, :]
-        X_adapt = self.X[[session], :, adapt_idx, :, :, :, :]
-        Y_adapt = self.Y[[session], :, adapt_idx, :]
-        X_test = self.X[[session], :, test_idx, :, :, :, :]
-        Y_test = self.Y[[session], :, test_idx, :]
+        X_train = self.X[session:session+1, :, idxs, :, :, :, :]
+        Y_train = self.Y[session:session+1, :, idxs, :]
+        X_adapt = self.X[session:session+1, :, adapt_idx, :, :, :, :]
+        Y_adapt = self.Y[session:session+1, :, adapt_idx, :]
+        X_test = self.X[session:session+1, :, test_idx, :, :, :, :]
+        Y_test = self.Y[session:session+1, :, test_idx, :]
 
         if self.is_segment:
             # Segmentation-specific logic
-            train_active = self.active[[session], :, idxs, :]
-            adapt_active = self.active[[session], :, adapt_idx, :]
-            test_active = self.active[[session], :, test_idx, :]
+            train_active = self.active[session:session+1, :, idxs, :]
+            adapt_active = self.active[session:session+1, :, adapt_idx, :]
+            test_active = self.active[session:session+1, :, test_idx, :]
             X_train, Y_train = X_train[torch.tensor(train_active)], Y_train[torch.tensor(train_active)]
             X_adapt, Y_adapt = X_adapt[torch.tensor(adapt_active)], Y_adapt[torch.tensor(adapt_active)]
             X_test, Y_test = X_test[torch.tensor(test_active)], Y_test[torch.tensor(test_active)]
@@ -647,24 +647,6 @@ class EMGData:
         X_train, Y_train = torch.flatten(X_train, end_dim=-4), torch.flatten(Y_train, end_dim=-1)
         X_adapt, Y_adapt = torch.flatten(X_adapt, end_dim=-4), torch.flatten(Y_adapt, end_dim=-1)
         X_test, Y_test = torch.flatten(X_test, end_dim=-4), torch.flatten(Y_test, end_dim=-1)
-        
-        # # TESTING OUR BASELINE ACTVIATION
-        # if self.dataset == 'hyser' and self.rms:
-        #     # X_train = X_train - X_train.mean(dim=[0,1], keepdim=True) # remove baseline activity
-        #     # X_adapt = X_adapt - X_adapt.mean(dim=[0,1], keepdim=True)
-        #     # X_test = X_test - X_test.mean(dim=[0,1], keepdim=True)
-        #     X_train = X_train**2 # Get MS from RMS
-        #     X_train = X_train - X_train.mean(dim=[0,1], keepdim=True) # remove baseline activity
-        #     X_train[X_train < 0] = 0 # ensure all values are positive
-        #     X_train = torch.sqrt(X_train) # Get RMS from MS
-        #     X_adapt = X_adapt**2 # Get MS from RMS
-        #     X_adapt = X_adapt - X_adapt.mean(dim=[0,1], keepdim=True)
-        #     X_adapt[X_adapt < 0] = 0 # ensure all values are positive
-        #     X_adapt = torch.sqrt(X_adapt)
-        #     X_test = X_test**2 # Get MS from RMS
-        #     X_test = X_test - X_test.mean(dim=[0,1], keepdim=True)
-        #     X_test[X_test < 0] = 0 # ensure all values are positive
-        #     X_test = torch.sqrt(X_test)
 
         if self.median_filter:
             print('APPLYING MEDIAN FILTER...')

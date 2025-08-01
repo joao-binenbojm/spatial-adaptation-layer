@@ -1,5 +1,5 @@
 {
-    "name": "test-outlier",
+    "name": "test-csl-simulation",
     "project": "classification-simulation",
     "K": 1,
     "num_epochs": 2,
@@ -35,7 +35,7 @@
     "corrective_gain": false,
     "adabatch": false,
     "gest_subset": [7,8,12,20,22,23],
-    "adapt_gest_subset": [20,22,23],
+    "adapt_gest_subset": null,
     "circular": false,
     "median-filter": true,
     "remove_outliers": false
