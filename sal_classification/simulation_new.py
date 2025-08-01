@@ -146,7 +146,7 @@ if __name__ == '__main__':
 
             samps_list = []
             for sal_idx in range(model.input_transform.nsals):
-                samps = torch.zeros(len(adapt_params))
+                samps = torch.zeros(sum(adapt_params.values())) # create empty tensor to hold sampled parameters
                 for p_idx, param in enumerate(adapt_params.keys()):
                     if adapt_params[param]: samps[p_idx] = 2*torch.rand(1)-1
 
@@ -174,11 +174,9 @@ if __name__ == '__main__':
 
             X_test_original = X_test.detach().clone()
             with torch.no_grad():
-                X_test = model.input_transform(X_test) # apply affine transformation to test set
                 X_adapt = model.input_transform(X_adapt)
+                X_test = model.input_transform(X_test) # apply affine transformation to test set
             for idx, key in enumerate(true_params.keys()): true_params[key].append(samps[idx, :].detach().cpu().clone().tolist()) # track ground truth params
-            model.input_transform.mode = 'bilinear'
-            model.input_transform.constrain_params = True
 
             # plt.figure()
             # fig, ax = plt.subplots(2, 6)
@@ -193,10 +191,10 @@ if __name__ == '__main__':
             # plt.close()
 
             # Apply transforms and reload data loaders
-            test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
-            test_loader = DataLoader(test_data, batch_size=exp['batch_size'], shuffle=False)
             adapt_data = EMGFrameLoader(X=X_adapt, Y=Y_adapt, train=False, norm=exp['norm'], stats=train_data.stats)
             adapt_loader = DataLoader(adapt_data, batch_size=exp['batch_size'], shuffle=True)
+            test_data = EMGFrameLoader(X=X_test, Y=Y_test, train=False, norm=exp['norm'], stats=train_data.stats)
+            test_loader = DataLoader(test_data, batch_size=exp['batch_size'], shuffle=False)
 
             # Record performance prior to adaptation
             print('TESTING POST TRANSFORMATION...')
@@ -238,19 +236,8 @@ if __name__ == '__main__':
             print('Oracle Test Accuracy:', oracle_acc)
             print('Oracle F1 Score:', oracle_f1)
 
-            # plt.figure()
-            # fig, ax = plt.subplots(2, 6)
-            # for idx in range(2):
-            #     for jdx in range(6):
-            #         label = idx*6 + jdx
-            #         ax[idx, jdx].imshow(X_test_oracle[Y_train==label,0,:,:].mean(dim=0))
-            #         ax[idx, jdx].axis('off')
-            #         ax[idx, jdx].set_title(f'Label: {label}')
-            
-            # plt.savefig('baseline-oracle')
-            # plt.close()
-
             # Reset SAL parameters
+            model.input_transform.constrain_params = True
             adapted_model.input_transform.reset_params()
 
             # Spatially adapt the model's transformed position
@@ -271,7 +258,6 @@ if __name__ == '__main__':
                     # X_adapt_search = X_adapt[Y_adapt == label].mean(dim=0, keepdim=True)
             adapt_search_data = EMGFrameLoader(X=X_adapt_search, Y=labels, train=False, norm=exp['norm'], stats=train_data.stats)
             adapt_search_loader = DataLoader(adapt_search_data, batch_size=len(labels), shuffle=True)
-            adapted_model.input_transform.mode = 'bicubic'
 
             print('INITIAL CONDITION SAMPLING...')
             boundaries = torch.tensor([2.5, 2.5, 15/180, 0.1, 0.1, 0.1, 0.1]) # symmetric for each dimension about zero
@@ -365,8 +351,8 @@ if __name__ == '__main__':
         # set the wandb project where this run will be logged
         project=exp.pop("project"),
         config=config,
-        name=name,
-        mode='disabled',
+        name=name
+        # mode='disabled',
     )
 
     # Logging final results onto wandb 

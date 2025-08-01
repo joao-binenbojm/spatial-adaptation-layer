@@ -160,7 +160,6 @@ class LogisticRegressor(nn.Module):
 
         self.input_dropout = nn.Dropout(p=p_input)
         self.bn = nn.BatchNorm2d(1, track_running_stats=track_running_stats)
-        self.pca = False
         self.fc = nn.Linear(self.channels, self.num_classes)
 
         # Set input transformation method
@@ -204,8 +203,6 @@ class LogisticRegressor(nn.Module):
 
         x = self.input_dropout(x)
         x = x.reshape(x.shape[0],-1) # flatten for determining classification
-        if self.pca:
-            x = torch.mm(x, self.pca_projection)  # apply PCA projection if available
         x = self.fc(x)
         return x.reshape(x.shape[0], self.num_classes)
 
