@@ -1,6 +1,6 @@
 {
     "name": "intersession-hyser-testing",
-    "project": "intersession-ablation",
+    "project": "intersession-6gest-final",
     "K": 1,
     "num_epochs": 15,
     "norm": 0,

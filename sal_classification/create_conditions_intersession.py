@@ -33,6 +33,7 @@ for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'gra
             exp['real_baseline'] = "mean-square"
             exp['median-filter'] = True
             exp['gest_subset'] = [0,1,3,4,5,6]
+            adapt_gest_subsets = [None, [1,4,5], [5]]  # For Capgmyo, we can try different subsets
             # exp['adapt_gest_subset'] = [1,4,5]
             # exp['adapt_gest_subset'] = [5]
 
@@ -44,6 +45,7 @@ for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'gra
             # exp['gest_subset'] = [7,8,11,12,15,20,22,23]
             exp['gest_subset'] = [7,8,12,20,22,23]
             exp['adapt_gest_subset'] = [20,22,23]
+            adapt_gest_subsets = [None, [20,22,23], [20]]
             # exp['adapt_gest_subset'] = [20]
 
         elif dataset == 'hyser':
@@ -75,20 +77,23 @@ for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'gra
         exp['adaptation'] = adaptation
         # For each network
         for network in ['LogisticRegressor', 'CapgMyoNet']:
+            exp['network'] = network
             if network == 'CapgMyoNet':
                 exp['num_epochs'] = 2
                 exp['p_input'] = 0.0
             elif network == 'LogisticRegressor':
                 exp['num_epochs'] = 15
                 exp['p_input'] = 0.5 * int("grabmyo" not in dataset)
-            exp['network'] = network
-            exp['name'] = f"{dataset}_{adaptation}_{network}"
-            if exp['adapt_gest_subset'] is not None:
-                exp['name'] = exp['name'] + '_' + str(exp['adapt_gest_subset']).replace(' ', '') 
-            with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
-                json.dump(exp, f)
-            nconditions += 1
-            print(nconditions)
-            if nconditions % 49 == 0:
-                conditions_dir = conditions_dir[:-1] + str(int(conditions_dir[-1]) + 1) # increases condition dir
-                os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
+            # For each number of gestures
+            for adapt_gest_subset in adapt_gest_subsets:
+                exp['adapt_gest_subset'] = adapt_gest_subset
+                exp['name'] = f"{dataset}_{adaptation}_{network}"
+                if exp['adapt_gest_subset'] is not None:
+                    exp['name'] = exp['name'] + '_' + str(exp['adapt_gest_subset']).replace(' ', '') 
+                with open(f"sal_classification/{conditions_dir}/{nconditions}.json", 'w') as f:
+                    json.dump(exp, f)
+                nconditions += 1
+                print(nconditions)
+                if nconditions % 49 == 0:
+                    conditions_dir = conditions_dir[:-1] + str(int(conditions_dir[-1]) + 1) # increases condition dir
+                    os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
