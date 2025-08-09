@@ -10,7 +10,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
-            "args": ["exp-csl"],
+            "args": ["exp-grid-cnn"],
             "console": "integratedTerminal",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
