@@ -1,6 +1,6 @@
 {
     "name": "intersession-hyser-testing",
-    "project": "intersession-6gest-final",
+    "project": "intersession-6gest-xshift",
     "K": 1,
     "num_epochs": 15,
     "norm": 0,
@@ -23,12 +23,12 @@
     "adaptation": "spatial-adaptation",
     "adaptation_params": {
         "xshift": true,
-        "yshift": true,
-        "rot_theta": true,
-        "xscale": true,
-        "yscale": true,
-        "xshear": true,
-        "yshear": true
+        "yshift": false,
+        "rot_theta": false,
+        "xscale": false,
+        "yscale": false,
+        "xshear": false,
+        "yshear": false
     },
     "real_baseline": "mean-square",
     "corrective_gain": false,

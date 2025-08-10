@@ -10,7 +10,7 @@ os.makedirs(f"sal_classification/{conditions_dir}", exist_ok=True)
 nconditions = 1
 
 # For each dataset
-for dataset in ['capgmyo']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'grabmyo-wrist']:
+for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'grabmyo-wrist']:
     exp['dataset'] = dataset
     if 'grabmyo' in dataset:
         exp['median-filter'] = False
