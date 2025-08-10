@@ -25,7 +25,7 @@ for dataset in ['csl']: #['csl', 'hyser', 'capgmyo']: #, 'grabmyo-forearm', 'gra
         exp['gest_subset'] = [4,5,10,11,12,13,14,15]
         exp['adapt_gest_subset'] = [10,11,13]
     else:
-        for key in exp['adaptation_params'].keys(): exp['adaptation_params'][key] = True
+        # for key in exp['adaptation_params'].keys(): exp['adaptation_params'][key] = True
     
         if dataset == 'capgmyo':
             exp['emg_tensorizer'] = f"CapgmyoData"
