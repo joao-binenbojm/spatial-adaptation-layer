@@ -97,7 +97,7 @@ for fxmax in tqdm(fxmaxs):
                     # set the wandb project where this run will be logged
                     project="sal-decomposition-simulations-freeze",
                     name=f'{opt}-{SNR}-{fxmax}',
-                    # mode='disabled',
+                    mode='disabled',
                 )
             
                 # Keep track of experimental parameters of the run
