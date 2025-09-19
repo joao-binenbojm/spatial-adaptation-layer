@@ -117,12 +117,18 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
     # Searching through initial conditions
     print('SAMPLING AND EVALUATING INITIAL CONDITIONS...')
     losses = torch.zeros(npoints)
-    # engine = scipy.stats.qmc.LatinHypercube(d=5)
-    engine = scipy.stats.qmc.LatinHypercube(d=3)
+    d = len(boundaries)
+    engine = scipy.stats.qmc.LatinHypercube(d=d)
     init_params = 2*torch.tensor(engine.random(n=npoints)).to(torch.float64)-1 # scale from [0,1] to [-1, 1]
-    init_params[:,0], init_params[:,1], init_params[:, 2] = 2*boundaries[0]*init_params[:,0]/(W-1), 2*boundaries[1]*init_params[:,1]/(H-1), boundaries[2]*init_params[:, 2]/np.pi
-    # init_params[:, 3] = torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) ) # generates scalings appropriately
-    # init_params[:, 4] = torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
+    init_params[:,0] = 2*boundaries[0]*init_params[:,0]/(W-1)
+    if d > 1:
+        init_params[:,1] = 2*boundaries[1]*init_params[:,1]/(H-1)
+    if d > 2:
+        init_params[:,2] = boundaries[2]*init_params[:, 2]/np.pi
+    if d > 3:
+        init_params[:, 3] = torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) )
+    if d > 4:
+        init_params[:, 4] = torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
 
     init_params = init_params.to(device)
     sda.train() # leave batch norm parameters adaptive
@@ -130,8 +136,15 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
         
         for npoint in tqdm(range(npoints)):
             # Set initial conditions
-            sda.sal.xshift[0].data, sda.sal.yshift[0].data, sda.sal.rot_theta[0].data = init_params[npoint, :3]
-            # sda.sal.xscale.data, sda.sal.yscale.data = init_params[npoint, 3:]
+            sda.sal.xshift[0].copy_(init_params[npoint, 0])
+            if d > 1:
+                sda.sal.yshift[0].copy_(init_params[npoint, 1])
+            if d > 2:
+                sda.sal.rot_theta[0].copy_(init_params[npoint, 2])
+            if d > 3:
+                sda.sal.xscale[0].copy_(init_params[npoint, 3])
+            if d > 4:
+                sda.sal.yscale[0].copy_(init_params[npoint, 4])
 
             # Evaluate loss function at given condition across batches
             n_batches = emg_grid_transform.shape[0] // batch_size
@@ -152,8 +165,18 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
 
         if npoints > 0:
             losses = losses / base_loss # normalize by baseline loss
-            sda.sal.xshift[0].data, sda.sal.yshift[0].data, sda.sal.rot_theta[0].data = init_params[losses.argmax(), :3] # get best initialization
+            # sda.sal.xshift[0].data, sda.sal.yshift[0].data, sda.sal.rot_theta[0].data = init_params[losses.argmax(), :3] # get best initialization
             # sda.sal.xscale.data, sda.sal.yscale.data = init_params[losses.argmax(), 3:]
+            sda.sal.xshift[0].copy_(init_params[losses.argmax(), 0]) # get best initialization
+            if d > 1:
+                sda.sal.yshift[0].copy_(init_params[losses.argmax(), 1])
+            if d > 2:
+                sda.sal.rot_theta[0].copy_(init_params[losses.argmax(), 2])
+            if d > 3:
+                sda.sal.xscale[0].copy_(init_params[losses.argmax(), 3])
+            if d > 4:
+                sda.sal.yscale[0].copy_(init_params[losses.argmax(), 4])
+            
             print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=torch.min(torch.tensor([npoints, 5])))}')
 
     # Make SAL parameters learnable
@@ -194,17 +217,28 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
 
         print('LOSS:', epoch_loss/base_loss)
         optimizer.step()
-        print(f'PARAMS:\n xshift: {W*sda.sal.xshift.item()/2}, yshift: {H*sda.sal.yshift.item()/2}, theta: {sda.sal.rot_theta.item()} ')
+        print(f'PARAMS:\n xshift: {W*sda.sal.xshift[0].item()/2}, yshift: {H*sda.sal.yshift[0].item()/2}, theta: {sda.sal.rot_theta[0].item()} ')
         # print(f'xscale: {sda.sal.xscale.item()}, yscale: {sda.sal.yscale.item()}')
         # Collect outputs and loss
         losses.append(epoch_loss)
-        xshifts.append(sda.sal.xshift.item())
-        yshifts.append(sda.sal.yshift.item())
-        angles.append(sda.sal.rot_theta.item())
+        # xshifts.append(sda.sal.xshift.item())
+        # yshifts.append(sda.sal.yshift.item())
+        # angles.append(sda.sal.rot_theta.item())
         # xscales.append(sda.sal.xscale.item())
         # yscales.append(sda.sal.yscale.item())
 
-    return losses
+    # Get final outputs, i.e. optimal souces
+    with torch.no_grad():
+        batch_outputs = []
+        N = emg_grid_transform.shape[0]
+        for start_idx in range(0, N, batch_size):
+            end_idx = min(start_idx + batch_size, N)
+            batch = emg_grid_transform[start_idx:end_idx].to(device)
+            batch_out = sda(batch)
+            batch_outputs.append(batch_out.cpu())  # Move to CPU to save GPU RAM
+        sources = torch.cat(batch_outputs, dim=0)
+
+    return sources, losses
 
 def loss_sampling(emg_grid_transform, sda, base_loss=1.0, T=(0.0, 0.0), bounds=(0.0, 0.0), batch_size=2048, num_points=20, loss='kurtosis', device='cpu'):
     ''' Method used to sample the loss landscape.'''
@@ -252,8 +286,8 @@ def loss_sampling(emg_grid_transform, sda, base_loss=1.0, T=(0.0, 0.0), bounds=(
                 # Compute losses for all grid points in current batch
                 batch_outputs = []
                 for xshift, yshift in zip(xshifts_batch, yshifts_batch):
-                    sda.sal.xshift.copy_(xshift)
-                    sda.sal.yshift.copy_(yshift)
+                    sda.sal.xshift[0].copy_(xshift)
+                    sda.sal.yshift[0].copy_(yshift)
                     batch_output = sda(emg_batch)
                     batch_outputs.append(ica_loss(batch_output))
                 

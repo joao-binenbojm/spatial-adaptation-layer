@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import torch
 import os
 
-from sal_decomposition.simulation_study.sda_pipeline import SDAExperiment
+from sal_decomposition.simulation_study._sda_pipeline import SDAExperiment
 
 mu_counts = [20] # number of MUs
 fxmaxs = [62.5, 125, 187.5] # maximum spatial bandwidth in both grid directions

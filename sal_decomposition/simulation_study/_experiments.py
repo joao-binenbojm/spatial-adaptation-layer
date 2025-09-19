@@ -7,7 +7,7 @@ import pickle
 import wandb
 import pandas as pd
 
-from sal_decomposition.simulation_study.sda_pipeline import SDAExperiment
+from sal_decomposition.simulation_study._sda_pipeline import SDAExperiment
 
 # Define experimental checklist to include all conditions already tried and ran
 # this will allow us to continue where we left off if the system breaks

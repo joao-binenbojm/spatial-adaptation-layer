@@ -103,119 +103,119 @@ def downsample_grid(emg_grid, sampfactor=10):
     '''Downsample EMG signal given the originally used sampfactor.'''
     return emg_grid[:, :, ::sampfactor, ::sampfactor] # downsamples EMG grid spatially
 
-def search_fit_sda(emg_grid_transform, sda, base_loss, npoints=50, nepochs=50, lr=1e-4, device='cpu', loss='kurtosis', frozen_sep_mat=True, plot=0):
-    ''' Fit SDA to emg_grid data to find optimal affine parameters. If plot, plot learning of all parameters and loss over iterations.'''    
-    _, _, H, W = emg_grid_transform.shape
-    if loss == 'kurtosis':
-        ica_loss = KurtosisLoss()
-    else:
-        ica_loss = NegentropyLoss()
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, sda.parameters()),
-                                                lr=lr)                 
+# def search_fit_sda(emg_grid_transform, sda, base_loss, npoints=50, nepochs=50, lr=1e-4, device='cpu', loss='kurtosis', frozen_sep_mat=True, plot=0):
+#     ''' Fit SDA to emg_grid data to find optimal affine parameters. If plot, plot learning of all parameters and loss over iterations.'''    
+#     _, _, H, W = emg_grid_transform.shape
+#     if loss == 'kurtosis':
+#         ica_loss = KurtosisLoss()
+#     else:
+#         ica_loss = NegentropyLoss()
+#     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, sda.parameters()),
+#                                                 lr=lr)                 
 
-    # Collect output tensors
-    output_list = []
-    losses = []
-    xshifts,yshifts,angles,xscales,yscales = [], [], [], [], []
+#     # Collect output tensors
+#     output_list = []
+#     losses = []
+#     xshifts,yshifts,angles,xscales,yscales = [], [], [], [], []
 
-    # Freeze all parameters
-    for param in sda.parameters():
-        param.requires_grad = False
+#     # Freeze all parameters
+#     for param in sda.parameters():
+#         param.requires_grad = False
     
-    # Searching through initial conditions
-    print('SAMPLING AND EVALUATING INITIAL CONDITIONS...')
-    boundaries = torch.tensor([3.0, 3.0, 20*np.pi/180, 0.2, 0.2]) # symmetric for each dimension about zero
-    losses = torch.zeros(npoints)
-    engine = scipy.stats.qmc.LatinHypercube(d=5)
-    init_params = 2*torch.tensor(engine.random(n=npoints)).to(torch.float32)-1 # scale from [0,1] to [-1, 1]
-    init_params[:,0], init_params[:,1], init_params[:, 2] = 2*boundaries[0]*init_params[:,0]/(W-1), 2*boundaries[1]*init_params[:,1]/(H-1), boundaries[2]*init_params[:, 2]/np.pi
-    init_params[:, 3] = torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) ) # generates scalings appropriately
-    init_params[:, 4] = torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
+#     # Searching through initial conditions
+#     print('SAMPLING AND EVALUATING INITIAL CONDITIONS...')
+#     boundaries = torch.tensor([3.0, 3.0, 20*np.pi/180, 0.2, 0.2]) # symmetric for each dimension about zero
+#     losses = torch.zeros(npoints)
+#     engine = scipy.stats.qmc.LatinHypercube(d=5)
+#     init_params = 2*torch.tensor(engine.random(n=npoints)).to(torch.float32)-1 # scale from [0,1] to [-1, 1]
+#     init_params[:,0], init_params[:,1], init_params[:, 2] = 2*boundaries[0]*init_params[:,0]/(W-1), 2*boundaries[1]*init_params[:,1]/(H-1), boundaries[2]*init_params[:, 2]/np.pi
+#     init_params[:, 3] = torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) ) # generates scalings appropriately
+#     init_params[:, 4] = torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
 
-    init_params = init_params.to(device)
-    sda.train() # leave batch norm parameters adaptive
-    with torch.no_grad():
-        for npoint in tqdm(range(npoints)):
-            emg_grid_copy = emg_grid_transform.clone().detach()
-            # Set initial conditions
-            # sda.sal.xshift[0].data, sda.sal.yshift[0].data, sda.sal.rot_theta[0].data = init_params[npoint, :3]
-            # sda.sal.xscale[0].data, sda.sal.yscale[0].data = init_params[npoint, 3:]
-            sda.sal.xshift[0].copy_(init_params[npoint, 0])
-            sda.sal.yshift[0].copy_(init_params[npoint, 1])
-            sda.sal.rot_theta[0].copy_(init_params[npoint, 2])
-            sda.sal.xscale[0].copy_(init_params[npoint, 3])
-            sda.sal.yscale[0].copy_(init_params[npoint, 4])
-            # Evaluate loss function at given condition
-            outputs = sda(emg_grid_copy.to(device)).to(device)  # Shape will be (batch_size, num_classes)
+#     init_params = init_params.to(device)
+#     sda.train() # leave batch norm parameters adaptive
+#     with torch.no_grad():
+#         for npoint in tqdm(range(npoints)):
+#             emg_grid_copy = emg_grid_transform.clone().detach()
+#             # Set initial conditions
+#             # sda.sal.xshift[0].data, sda.sal.yshift[0].data, sda.sal.rot_theta[0].data = init_params[npoint, :3]
+#             # sda.sal.xscale[0].data, sda.sal.yscale[0].data = init_params[npoint, 3:]
+#             sda.sal.xshift[0].copy_(init_params[npoint, 0])
+#             sda.sal.yshift[0].copy_(init_params[npoint, 1])
+#             sda.sal.rot_theta[0].copy_(init_params[npoint, 2])
+#             sda.sal.xscale[0].copy_(init_params[npoint, 3])
+#             sda.sal.yscale[0].copy_(init_params[npoint, 4])
+#             # Evaluate loss function at given condition
+#             outputs = sda(emg_grid_copy.to(device)).to(device)  # Shape will be (batch_size, num_classes)
 
-            # Compute ICA Loss and backprop    
-            loss = ica_loss(outputs)
-            losses[npoint] = loss.item()
+#             # Compute ICA Loss and backprop    
+#             loss = ica_loss(outputs)
+#             losses[npoint] = loss.item()
 
-        if npoints > 0:
-            losses = losses / base_loss # normalize by baseline loss
-            # sda.sal.xshift[0].data, sda.sal.yshift[0].data, sda.sal.rot_theta[0].data = init_params[losses.argmax(), :3] # get best initialization
-            # sda.sal.xscale[0].data, sda.sal.yscale[0].data = init_params[losses.argmax(), 3:]
-            sda.sal.xshift[0].copy_(init_params[losses.argmax(), 0]) # get best initialization
-            sda.sal.yshift[0].copy_(init_params[losses.argmax(), 1])
-            sda.sal.rot_theta[0].copy_(init_params[losses.argmax(), 2])
-            sda.sal.xscale[0].copy_(init_params[losses.argmax(), 3])
-            sda.sal.yscale[0].copy_(init_params[losses.argmax(), 4])
+#         if npoints > 0:
+#             losses = losses / base_loss # normalize by baseline loss
+#             # sda.sal.xshift[0].data, sda.sal.yshift[0].data, sda.sal.rot_theta[0].data = init_params[losses.argmax(), :3] # get best initialization
+#             # sda.sal.xscale[0].data, sda.sal.yscale[0].data = init_params[losses.argmax(), 3:]
+#             sda.sal.xshift[0].copy_(init_params[losses.argmax(), 0]) # get best initialization
+#             sda.sal.yshift[0].copy_(init_params[losses.argmax(), 1])
+#             sda.sal.rot_theta[0].copy_(init_params[losses.argmax(), 2])
+#             sda.sal.xscale[0].copy_(init_params[losses.argmax(), 3])
+#             sda.sal.yscale[0].copy_(init_params[losses.argmax(), 4])
             
-            print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=torch.min(torch.tensor([npoints, 5])))}')
+#             print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=torch.min(torch.tensor([npoints, 5])))}')
 
-    # Make SAL parameters learnable
-    # for param in sda.sal.parameters():
-    if frozen_sep_mat:
-        for param in sda.sal.parameters():
-            param.requires_grad = True        
-    else:
-        for param in sda.parameters():
-            param.requires_grad = True
+#     # Make SAL parameters learnable
+#     # for param in sda.sal.parameters():
+#     if frozen_sep_mat:
+#         for param in sda.sal.parameters():
+#             param.requires_grad = True        
+#     else:
+#         for param in sda.parameters():
+#             param.requires_grad = True
 
-    # Loop through the DataLoader
-    print('TRAINING FROM BEST INIT. CONDITION...')
-    losses = []
-    for ne in tqdm(range(nepochs)):
-        # Forward pass through the model
-        outputs = sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
+#     # Loop through the DataLoader
+#     print('TRAINING FROM BEST INIT. CONDITION...')
+#     losses = []
+#     for ne in tqdm(range(nepochs)):
+#         # Forward pass through the model
+#         outputs = sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
 
-        # Compute ICA Loss and backprop    
-        loss = ica_loss(outputs)
-        optimizer.zero_grad()
-        loss.backward()
-        print('LOSS:', loss.item()/base_loss)
-        optimizer.step()
-        print(f'PARAMS:\n xshift: {(W-1)*sda.sal.xshift[0].item()/2}, yshift: {(H-1)*sda.sal.yshift[0].item()/2}, theta: {sda.sal.rot_theta[0].item()} ')
-        print(f'xscale: {sda.sal.xscale[0].item()}, yscale: {sda.sal.yscale[0].item()}')
-        # Collect outputs and loss
-        output_list.append(outputs)
-        losses.append(loss.item())
-        xshifts.append(sda.sal.xshift[0].item())
-        yshifts.append(sda.sal.yshift[0].item())
-        angles.append(sda.sal.rot_theta[0].item())
-        xscales.append(sda.sal.xscale[0].item())
-        yscales.append(sda.sal.yscale[0].item())
+#         # Compute ICA Loss and backprop    
+#         loss = ica_loss(outputs)
+#         optimizer.zero_grad()
+#         loss.backward()
+#         print('LOSS:', loss.item()/base_loss)
+#         optimizer.step()
+#         print(f'PARAMS:\n xshift: {(W-1)*sda.sal.xshift[0].item()/2}, yshift: {(H-1)*sda.sal.yshift[0].item()/2}, theta: {sda.sal.rot_theta[0].item()} ')
+#         print(f'xscale: {sda.sal.xscale[0].item()}, yscale: {sda.sal.yscale[0].item()}')
+#         # Collect outputs and loss
+#         output_list.append(outputs)
+#         losses.append(loss.item())
+#         xshifts.append(sda.sal.xshift[0].item())
+#         yshifts.append(sda.sal.yshift[0].item())
+#         angles.append(sda.sal.rot_theta[0].item())
+#         xscales.append(sda.sal.xscale[0].item())
+#         yscales.append(sda.sal.yscale[0].item())
 
-    # if plot:
-    #     fig, axs = plt.subplots(1, 2)
-    #     axs[0].plot(losses)
-    #     axs[0].set_title('Training Loss')
-    #     axs[1].plot(W*(np.array(xshifts).ravel())/2)
-    #     axs[1].plot(H*(np.array(yshifts).ravel())/2)
-    #     axs[1].plot(angles)
-    #     axs[1].plot(xscales)
-    #     axs[1].plot(yscales)
-    #     axs[1].hlines(y=[-params['Tx'], -params['Ty'], -params['theta'], 1/params['xscale'], 1/params['yscale']],
-    #                     xmin=0, xmax=len(np.array(xshifts).ravel()), linestyles='dashed', label='ground truth')
-    #     axs[1].legend(['xshift-pred','yshift-pred', 'theta', 'xscale', 'yscale'])
-    #     axs[1].set_title('Parameter Dynamics')
-    #     axs[1].set_ylim([-3.0, 3.0])
-    #     plt.savefig('learning.jpg')
+#     # if plot:
+#     #     fig, axs = plt.subplots(1, 2)
+#     #     axs[0].plot(losses)
+#     #     axs[0].set_title('Training Loss')
+#     #     axs[1].plot(W*(np.array(xshifts).ravel())/2)
+#     #     axs[1].plot(H*(np.array(yshifts).ravel())/2)
+#     #     axs[1].plot(angles)
+#     #     axs[1].plot(xscales)
+#     #     axs[1].plot(yscales)
+#     #     axs[1].hlines(y=[-params['Tx'], -params['Ty'], -params['theta'], 1/params['xscale'], 1/params['yscale']],
+#     #                     xmin=0, xmax=len(np.array(xshifts).ravel()), linestyles='dashed', label='ground truth')
+#     #     axs[1].legend(['xshift-pred','yshift-pred', 'theta', 'xscale', 'yscale'])
+#     #     axs[1].set_title('Parameter Dynamics')
+#     #     axs[1].set_ylim([-3.0, 3.0])
+#     #     plt.savefig('learning.jpg')
 
-    # Get final outputs, i.e. optimal souces
-    with torch.no_grad():
-        final_outputs = sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
+#     # Get final outputs, i.e. optimal souces
+#     with torch.no_grad():
+#         final_outputs = sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
 
-    sources = final_outputs.detach().cpu()
-    return sources, losses
+#     sources = final_outputs.detach().cpu()
+#     return sources, losses

@@ -11,7 +11,7 @@ import sal_decomposition.utils.simulation_utils as sutils
 from sal_decomposition.utils import utils
 from sal_decomposition.sda import SpatialDecompositionAdaptation
 
-from sal_decomposition.simulation_study.sda_pipeline import SDAExperiment
+from sal_decomposition.simulation_study._sda_pipeline import SDAExperiment
 
 # Define experimental checklist to include all conditions already tried and ran
 # this will allow us to continue where we left off if the system breaks
@@ -61,11 +61,11 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let m
 Nt = 50
 Txs, Tys = np.random.uniform(-1.2, 1.2, size=Nt), np.random.uniform(-1.2, 1.2, size=Nt)
 thetas = np.random.uniform(-20*np.pi/180, 20*np.pi/180, size=Nt)
-# xscales, yscales = np.random.uniform(0.8, 1.2, size=Nt), np.random.uniform(0.8, 1.2, size=Nt)
-xscales, yscales = np.random.uniform(1.0, 1.0, size=Nt), np.random.uniform(1.0, 1.0, size=Nt)
+xscales, yscales = np.random.uniform(0.8, 1.2, size=Nt), np.random.uniform(0.8, 1.2, size=Nt)
+# xscales, yscales = np.random.uniform(1.0, 1.0, size=Nt), np.random.uniform(1.0, 1.0, size=Nt)
 
 
-for fxmax in tqdm(fxmaxs[2:]):
+for fxmax in tqdm(fxmaxs):
     for SNR in SNRs:
         for opt in opts:
             # If in checklist, already run, continue to next condition
@@ -179,19 +179,12 @@ for fxmax in tqdm(fxmaxs[2:]):
 
                 # Optimization
                 if opt == 'fit':
-                    # sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=0, nepochs=nepochs, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
-                    sources, losses = sutils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=0, nepochs=nepochs, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
-                    # losses = sutils.search_fit_sda(emg_grid_test, sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=500, nepochs=50, lr=1e-3, boundaries=(Tx_max, Ty_max, theta_max), device='cuda')
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=0, nepochs=nepochs, batch_size=2048, boundaries=(1.2, 1.2, 20*np.pi/180, 0.01, 0.01), lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
 
                 elif opt == 'search_fit':
-                    # exp.sep_mat = sep_mat
-                    # exp.params = {'R':R}
-                    # exp.base_loss = base_loss
-                    # sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=2*nepochs//2, nepochs=nepochs//2, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
-                    sources, losses = sutils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=2*nepochs//2, nepochs=nepochs//2, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=2*nepochs, nepochs=nepochs//2, batch_size=2048, boundaries=(1.2, 1.2, 20*np.pi/180, 0.01, 0.01), lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
                 else: # search only
-                    # sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=2*nepochs, nepochs=0, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
-                    sources, losses = sutils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=2*nepochs, nepochs=0, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=3*nepochs, nepochs=0, batch_size=2048, boundaries=(1.2, 1.2, 20*np.pi/180, 0.01, 0.01), lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
 
                 # Get learned transformations
                 Tx_opt, Ty_opt = (W-1)*sda.sal.xshift[0].item()/2, (H-1)*sda.sal.yshift[0].item()/2
