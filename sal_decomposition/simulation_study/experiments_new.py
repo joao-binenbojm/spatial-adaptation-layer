@@ -145,7 +145,9 @@ for fxmax in tqdm(fxmaxs):
                 params.update({
                     'sils_base_avg': np.mean(sils_base), 'sils_base_std': np.std(sils_base),
                     'sensitivity_base_avg': np.mean(sensitivities), 'sensitivity_base_std': np.std(sensitivities),
-                    'precision_base_avg': np.mean(precisions), 'precision_base_std': np.std(precisions)
+                    'precision_base_avg': np.mean(precisions), 'precision_base_std': np.std(precisions),
+                    'f1_score_base_avg': np.mean(f1_scores), 'f1_score_base_std': np.std(f1_scores)
+
                     })
 
                 with torch.no_grad():
@@ -174,7 +176,8 @@ for fxmax in tqdm(fxmaxs):
                     print('F1 Scores Post-Transform:', np.mean(f1_scores_transform))
                     params.update({
                     'sensitivity_transform_avg': np.mean(sensitivities), 'sensitivity_transform_std': np.std(sensitivities),
-                    'precision_transform_avg': np.mean(precisions), 'precision_transform_std': np.std(precisions)
+                    'precision_transform_avg': np.mean(precisions), 'precision_transform_std': np.std(precisions),
+                    'f1_score_transform_avg': np.mean(f1_scores), 'f1_score_transform_std': np.std(f1_scores)
                     })
 
                 # Optimization
@@ -205,7 +208,9 @@ for fxmax in tqdm(fxmaxs):
 
                 params.update({'sils_avg': np.mean(sils), 'sils_std': np.std(sils),
                             'sensitivity_avg': np.mean(sensitivities), 'sensitivity_std': np.std(sensitivities),
-                            'precision_avg': np.mean(precisions), 'precision_std': np.std(precisions)})
+                            'precision_avg': np.mean(precisions), 'precision_std': np.std(precisions),
+                            'f1_score_avg': np.mean(f1_scores), 'f1_score_std': np.std(f1_scores)
+                })
 
                 # Finish wandb run with all scores and parameters of the system
                 wandb.log(params)
