@@ -99,7 +99,7 @@ class SDAExperiment:
         self.params.update(params)# keep track of chosing experimental parameters
 
         N, C, H, W = emg_grid.shape
-        Tx, Ty = torch.tensor(2*Tx*sampfactor/W), torch.tensor(2*sampfactor*Ty/H) # Normalize translation values automatically
+        Tx, Ty = torch.tensor(2*Tx*sampfactor/(W-1)), torch.tensor(2*sampfactor*Ty/(H-1)) # Normalize translation values automatically
         theta, xscale, yscale = torch.tensor(theta) / torch.pi, torch.tensor(xscale), torch.tensor(yscale)
 
         T = torch.cat([ # Translation Matrix
@@ -236,7 +236,7 @@ class SDAExperiment:
         params = {'nepochs': nepochs, 'lr': lr}
         self.params.update(params)# keep track of chosing experimental parameter
         
-        N, C, H, W = emg_grid_transform.shape
+        _, _, H, W = emg_grid_transform.shape
         self.sda = SpatialDecompositionAdaptation(grid_shape=(H, W), sep_mat=self.sep_mat, extension_factor=self.params['R']).to(device)
         if loss == 'kurtosis':
             ica_loss = KurtosisLoss()
@@ -250,7 +250,7 @@ class SDAExperiment:
         losses = []
         xshifts,yshifts,angles,xscales,yscales = [], [], [], [], []
 
-        # Freeze all parameters except for SAL parameters
+        # Freeze all parameters
         for param in self.sda.parameters():
             param.requires_grad = False
         
@@ -260,7 +260,7 @@ class SDAExperiment:
         losses = torch.zeros(npoints)
         engine = scipy.stats.qmc.LatinHypercube(d=5)
         init_params = 2*torch.tensor(engine.random(n=npoints)).to(torch.float32)-1 # scale from [0,1] to [-1, 1]
-        init_params[:,0], init_params[:,1], init_params[:, 2] = 2*boundaries[0]*init_params[:,0]/W, 2*boundaries[1]*init_params[:,1]/H, boundaries[2]*init_params[:, 2]/np.pi
+        init_params[:,0], init_params[:,1], init_params[:, 2] = 2*boundaries[0]*init_params[:,0]/(W-1), 2*boundaries[1]*init_params[:,1]/(H-1), boundaries[2]*init_params[:, 2]/np.pi
         init_params[:, 3] = torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) ) # generates scalings appropriately
         init_params[:, 4] = torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
 
@@ -268,11 +268,12 @@ class SDAExperiment:
         self.sda.train() # leave batch norm parameters adaptive
         with torch.no_grad():
             for npoint in tqdm(range(npoints)):
+                emg_grid_copy = emg_grid_transform.clone().detach()
                 # Set initial conditions
-                self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = init_params[npoint, :3]
-                self.sda.sal.xscale.data, self.sda.sal.yscale.data = init_params[npoint, 3:]
+                self.sda.sal.xshift[0].data, self.sda.sal.yshift[0].data, self.sda.sal.rot_theta[0].data = init_params[npoint, :3]
+                self.sda.sal.xscale[0].data, self.sda.sal.yscale[0].data = init_params[npoint, 3:]
                 # Evaluate loss function at given condition
-                outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
+                outputs = self.sda(emg_grid_copy.to(device)).to(device)  # Shape will be (batch_size, num_classes)
 
                 # Compute ICA Loss and backprop    
                 loss = ica_loss(outputs)
@@ -280,8 +281,8 @@ class SDAExperiment:
 
             if npoints > 0:
                 losses = losses / self.base_loss # normalize by baseline loss
-                self.sda.sal.xshift.data, self.sda.sal.yshift.data, self.sda.sal.rot_theta.data = init_params[losses.argmax(), :3] # get best initialization
-                self.sda.sal.xscale.data, self.sda.sal.yscale.data = init_params[losses.argmax(), 3:]
+                self.sda.sal.xshift[0].data, self.sda.sal.yshift[0].data, self.sda.sal.rot_theta[0].data = init_params[losses.argmax(), :3] # get best initialization
+                self.sda.sal.xscale[0].data, self.sda.sal.yscale[0].data = init_params[losses.argmax(), 3:]
                 print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=torch.min(torch.tensor([npoints, 5])))}')
 
         # Make SAL parameters learnable
@@ -306,16 +307,16 @@ class SDAExperiment:
             loss.backward()
             print('LOSS:', loss.item()/self.base_loss)
             optimizer.step()
-            print(f'PARAMS:\n xshift: {W*self.sda.sal.xshift.item()/2}, yshift: {H*self.sda.sal.yshift.item()/2}, theta: {self.sda.sal.rot_theta.item()} ')
-            print(f'xscale: {self.sda.sal.xscale.item()}, yscale: {self.sda.sal.yscale.item()}')
+            print(f'PARAMS:\n xshift: {W*self.sda.sal.xshift[0].item()/2}, yshift: {H*self.sda.sal.yshift[0].item()/2}, theta: {self.sda.sal.rot_theta[0].item()} ')
+            print(f'xscale: {self.sda.sal.xscale[0].item()}, yscale: {self.sda.sal.yscale[0].item()}')
             # Collect outputs and loss
             output_list.append(outputs)
             losses.append(loss.item())
-            xshifts.append(self.sda.sal.xshift.item())
-            yshifts.append(self.sda.sal.yshift.item())
-            angles.append(self.sda.sal.rot_theta.item())
-            xscales.append(self.sda.sal.xscale.item())
-            yscales.append(self.sda.sal.yscale.item())
+            xshifts.append(self.sda.sal.xshift[0].item())
+            yshifts.append(self.sda.sal.yshift[0].item())
+            angles.append(self.sda.sal.rot_theta[0].item())
+            xscales.append(self.sda.sal.xscale[0].item())
+            yscales.append(self.sda.sal.yscale[0].item())
 
         if plot:
             fig, axs = plt.subplots(1, 2)
@@ -388,16 +389,16 @@ class SDAExperiment:
 
                 # Display updates
                 print('LOSS:', loss.item()/self.base_loss)
-                print(f'PARAMS:\n xshift: {W*self.sda.sal.xshift.item()/2}, yshift: {H*self.sda.sal.yshift.item()/2}, theta: {self.sda.sal.rot_theta.item()} ')
-                print(f'xscale: {self.sda.sal.xscale.item()}, yscale: {self.sda.sal.yscale.item()}')
+                print(f'PARAMS:\n xshift: {W*self.sda.sal.xshift[0].item()/2}, yshift: {H*self.sda.sal.yshift[0].item()/2}, theta: {self.sda.sal.rot_theta[0].item()} ')
+                print(f'xscale: {self.sda.sal.xscale[0].item()}, yscale: {self.sda.sal.yscale[0].item()}')
                 # Collect outputs and loss
                 # output_list.append(outputs)
                 losses.append(loss.item())
-                xshifts.append(self.sda.sal.xshift.item())
-                yshifts.append(self.sda.sal.yshift.item())
-                angles.append(self.sda.sal.rot_theta.item())
-                xscales.append(self.sda.sal.xscale.item())
-                yscales.append(self.sda.sal.yscale.item())
+                xshifts.append(self.sda.sal.xshift[0].item())
+                yshifts.append(self.sda.sal.yshift[0].item())
+                angles.append(self.sda.sal.rot_theta[0].item())
+                xscales.append(self.sda.sal.xscale[0].item())
+                yscales.append(self.sda.sal.yscale[0].item())
 
         if plot:
             fig, axs = plt.subplots(1, 2)
@@ -445,8 +446,8 @@ class SDAExperiment:
             for xidx, xi in enumerate(tqdm(x)):
                 for yidx, yi in enumerate(y):
                     emg_grid_test = emg_grid_transform.clone().detach()
-                    sda.sal.yshift.copy_(torch.tensor(2*yi/H).to(device))
-                    sda.sal.xshift.copy_(torch.tensor(2*xi/W).to(device))
+                    sda.sal.yshift[0].data = torch.tensor(2*yi/(H-1)).to(device)
+                    sda.sal.xshift[0].data = (torch.tensor(2*xi/(W-1)).to(device))
 
                     outputs = sda(emg_grid_test.to(device))
                     loss = ica_loss(outputs)

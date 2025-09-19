@@ -108,7 +108,6 @@ if __name__ == '__main__':
                                         'Tx': Tx, 'Ty': Ty, 'theta': theta, '#mu':len(mu_dts)}
                             )
 
-
                             # Crop observations and get new sep_mat
                             print(f'CROPS: XCROP: {xcrop}, YCROP: {ycrop}')
                             emg_grid_crop_train = emg_grid[:, :, ycrop:emg_grid.shape[2]-ycrop, xcrop:emg_grid.shape[3]-xcrop].clone()
@@ -149,8 +148,8 @@ if __name__ == '__main__':
                             # Add optimal parameters for testing
                             sda.sep_mat.weight = torch.nn.Parameter(sep_mat_valid)
                             with torch.no_grad():
-                                sda.sal.xshift.copy_(-2*Tx/W)
-                                sda.sal.yshift.copy_(-2*Ty/H)
+                                sda.sal.xshift.copy_(-2*Tx/(W-1))
+                                sda.sal.yshift.copy_(-2*Ty/(H-1))
                                 sda.sal.rot_theta.copy_(-theta/np.pi)
 
                             # Test on optimal inverse transformation

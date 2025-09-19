@@ -24,15 +24,15 @@ Tmean, ISV = 60, 0.2 # sample statistics of spikes # equivalent of 30Hz with fs=
 H, W, L = 25, 10, 50
 R = 16
 sampfactor=15
-SNR = 1
+SNR = 30
 Tx, Ty = 1.5, -2.5 # chosen parameters for the translation
-num_points = 100 # generate loss landscape
+num_points = 20 # generate loss landscape
 loss = 'kurtosis'
 device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on     
 
 with torch.no_grad():
     for mu_count in mu_counts:
-        for fxmax in fxmaxs:
+        for fxmax in fxmaxs[1:]:
             exp = SDAExperiment()
             print('GENERATING MUAPS....')
             muaps = exp.generate_gaussian_muaps(mu_count, H, W, L, fxmax / (fsx/2), sampfactor) # generate MUAPs

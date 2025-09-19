@@ -52,11 +52,11 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let m
 
 # Create range of spatial transformations to be used equally for every single condition
 Nt = 50
-Txs, Tys = np.random.uniform(-3.0, 3.0, size=Nt), np.random.uniform(-3.0, 3.0, size=Nt)
+Txs, Tys = np.random.uniform(-1.2, 1.2, size=Nt), np.random.uniform(-1.2, 1.2, size=Nt)
 thetas = np.random.uniform(-20*np.pi/180, 20*np.pi/180, size=Nt)
 xscales, yscales = np.random.uniform(0.8, 1.2, size=Nt), np.random.uniform(0.8, 1.2, size=Nt)
 
-for fxmax in tqdm(fxmaxs):
+for fxmax in tqdm(fxmaxs[:2]):
     for SNR in SNRs:
         for opt in opts:
             # If in checklist, already run, continue to next condition
@@ -117,8 +117,8 @@ for fxmax in tqdm(fxmaxs):
                     emg_grid_transform = exp.downsample_grid(emg_grid_transform, sampfactor)
 
                     print('CENTERING...')
-                    mean = (emg_grid_down.mean(dim=0, keepdim=True) + emg_grid_transform.mean(dim=0, keepdim=True))/2
-                    emg_grid_down, emg_grid_transform = emg_grid_down - mean, emg_grid_transform - mean 
+                    # mean = (emg_grid_down.mean(dim=0, keepdim=True) + emg_grid_transform.mean(dim=0, keepdim=True))/2
+                    # emg_grid_down, emg_grid_transform = emg_grid_down - mean, emg_grid_transform - mean 
 
                     print('MINIMAL SOURCE ESTIMATE')
                     sources_transform = exp.get_source_estimate(emg_grid_transform)
@@ -138,9 +138,9 @@ for fxmax in tqdm(fxmaxs):
                     sources, losses = exp.search_fit_sda(emg_grid_transform.to(torch.float32), npoints=2*nepochs, nepochs=0, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
             
                 # Get learned transformations
-                Tx_opt, Ty_opt = W*exp.sda.sal.xshift.item()/2, H*exp.sda.sal.yshift.item()/2
-                theta_opt = np.pi*exp.sda.sal.rot_theta.item()
-                xscale_opt, yscale_opt = exp.sda.sal.xscale.item(), exp.sda.sal.yscale.item()
+                Tx_opt, Ty_opt = (W-1)*exp.sda.sal.xshift[0].item()/2, (H-1)*exp.sda.sal.yshift[0].item()/2
+                theta_opt = np.pi*exp.sda.sal.rot_theta[0].item()
+                xscale_opt, yscale_opt = exp.sda.sal.xscale[0].item(), exp.sda.sal.yscale[0].item()
 
                 params.update({'Tx_opt': Tx_opt, 'Ty_opt':Ty_opt, 'theta_opt': theta_opt,
                             'xscale_opt':xscale_opt, 'yscale_opt': yscale_opt})

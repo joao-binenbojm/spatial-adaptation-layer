@@ -8,7 +8,7 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         super(SpatialDecompositionAdaptation, self).__init__()
         self.grid_shape = grid_shape
         self.nchans = torch.prod(torch.tensor(grid_shape))
-        self.sal = SpatialAdaptation(input_shape=grid_shape, T=True, R=True, Sc=False, Sh=False, mode=mode)
+        self.sal = SpatialAdaptation(input_shape=grid_shape, T=True, R=True, Sc=True, Sh=False, mode=mode, circular=False, constrain_params=False)
         self.bn = torch.nn.BatchNorm2d(1)
         self.lcrop, self.rcrop = xcrop, xcrop
         self.bcrop, self.tcrop = ycrop, ycrop

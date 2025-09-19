@@ -21,7 +21,7 @@ def apply_affine(emg_grid, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, mode='biline
     '''Applies an affine transformation to grid coordinates prior to downsampling to simulate a near-perfect interpolation.'''
 
     N, C, H, W = emg_grid.shape
-    Tx, Ty = torch.tensor(2*Tx/W), torch.tensor(2*Ty/H) # Normalize translation values automatically
+    Tx, Ty = torch.tensor(2*Tx/(W-1)), torch.tensor(2*Ty/(H-1)) # Normalize translation values automatically
     theta, xscale, yscale = torch.tensor(theta) / torch.pi, torch.tensor(xscale), torch.tensor(yscale)
 
     T = torch.cat([ # Translation Matrix
@@ -120,7 +120,7 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
     # engine = scipy.stats.qmc.LatinHypercube(d=5)
     engine = scipy.stats.qmc.LatinHypercube(d=3)
     init_params = 2*torch.tensor(engine.random(n=npoints)).to(torch.float64)-1 # scale from [0,1] to [-1, 1]
-    init_params[:,0], init_params[:,1], init_params[:, 2] = 2*boundaries[0]*init_params[:,0]/W, 2*boundaries[1]*init_params[:,1]/H, boundaries[2]*init_params[:, 2]/np.pi
+    init_params[:,0], init_params[:,1], init_params[:, 2] = 2*boundaries[0]*init_params[:,0]/(W-1), 2*boundaries[1]*init_params[:,1]/(H-1), boundaries[2]*init_params[:, 2]/np.pi
     # init_params[:, 3] = torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) ) # generates scalings appropriately
     # init_params[:, 4] = torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
 
@@ -130,7 +130,7 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
         
         for npoint in tqdm(range(npoints)):
             # Set initial conditions
-            sda.sal.xshift.data, sda.sal.yshift.data, sda.sal.rot_theta.data = init_params[npoint, :3]
+            sda.sal.xshift[0].data, sda.sal.yshift[0].data, sda.sal.rot_theta[0].data = init_params[npoint, :3]
             # sda.sal.xscale.data, sda.sal.yscale.data = init_params[npoint, 3:]
 
             # Evaluate loss function at given condition across batches
@@ -152,7 +152,7 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
 
         if npoints > 0:
             losses = losses / base_loss # normalize by baseline loss
-            sda.sal.xshift.data, sda.sal.yshift.data, sda.sal.rot_theta.data = init_params[losses.argmax(), :3] # get best initialization
+            sda.sal.xshift[0].data, sda.sal.yshift[0].data, sda.sal.rot_theta[0].data = init_params[losses.argmax(), :3] # get best initialization
             # sda.sal.xscale.data, sda.sal.yscale.data = init_params[losses.argmax(), 3:]
             print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=torch.min(torch.tensor([npoints, 5])))}')
 
@@ -632,7 +632,6 @@ def handle_outliers(emg_grid):
 
     return emg_grid
 
-
 def get_min_distance(grid_shape, Tx, Ty, theta):
     '''Obtain minimum distance of a given electrode in transformed grid to an electrode in the old grid coordiantes, averaged across electrodes.'''
     H, W = grid_shape
@@ -707,7 +706,7 @@ def refine_sep_mat(emg_grid_transform, sda, base_loss=1.00, nepochs=50, batch_si
         
         for npoint in tqdm(range(npoints)):
             # Set initial conditions
-            sda.sal.xshift.data, sda.sal.yshift.data, sda.sal.rot_theta.data = init_params[npoint, :3]
+            sda.sal.xshift[0].data, sda.sal.yshift[0].data, sda.sal.rot_theta[0].data = init_params[npoint, :3]
             # sda.sal.xscale.data, sda.sal.yscale.data = init_params[npoint, 3:]
 
             # Evaluate loss function at given condition across batches
