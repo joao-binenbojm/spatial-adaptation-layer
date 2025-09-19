@@ -29,9 +29,9 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         return extended_emg
 
     # Extend, whiten and separate sources
-    def forward(self, emg):
+    def forward(self, emg, inverse=False):
         # emg = self.bn(emg) # apply batch norm
-        emg_sal = self.sal(emg).squeeze()
+        emg_sal = self.sal(emg, inverse=inverse).squeeze()
         emg_sal = emg_sal[:, self.tcrop:emg_sal.shape[1]-self.bcrop, self.lcrop:emg_sal.shape[2]-self.rcrop]
         extended_emg = self.extend_emg(emg_sal.reshape(emg_sal.shape[0], -1))
         sources = self.sep_mat(extended_emg)

@@ -12,50 +12,95 @@ from sal_decomposition.utils import utils
 import wandb
                  
 
-# Arnault's matrix reshaping
-index_matrix4 = np.array([[63, 38, 37, 12, 11, 63, 38, 37, 12, 11], # ankle
-                [62, 39, 36, 13, 10, 62, 39, 36, 13, 10],
-                [61, 40, 35, 14,  9, 61, 40, 35, 14,  9],
-                [60, 41, 34, 15,  8, 60, 41, 34, 15,  8],
-                [59, 42, 33, 16,  7, 59, 42, 33, 16,  7],
-                [58, 43, 32, 17,  6, 58, 43, 32, 17,  6],
-                [57, 44, 31, 18,  5, 57, 44, 31, 18,  5],
-                [56, 45, 30, 19,  4, 56, 45, 30, 19,  4],
-                [55, 46, 29, 20,  3, 55, 46, 29, 20,  3],
-                [54, 47, 28, 21,  2, 54, 47, 28, 21,  2],
-                [53, 48, 27, 22,  1, 53, 48, 27, 22,  1],
-                [52, 49, 26, 23,  0, 52, 49, 26, 23,  0],
-                [51, 50, 25, 24,  0, 51, 50, 25, 24,  0],
-                [0, 24, 25, 50, 51,  0, 24, 25, 50, 51],
-                [0, 23, 26, 49, 52,  0, 23, 26, 49, 52],
-                [1, 22, 27, 48, 53,  1, 22, 27, 48, 53],
-                [2, 21, 28, 47, 54,  2, 21, 28, 47, 54],
-                [3, 20, 29, 46, 55,  3, 20, 29, 46, 55],
-                [4, 19, 30, 45, 56,  4, 19, 30, 45, 56],
-                [5, 18, 31, 44, 57,  5, 18, 31, 44, 57],
-                [6, 17, 32, 43, 58,  6, 17, 32, 43, 58],
-                [7, 16, 33, 42, 59,  7, 16, 33, 42, 59],
-                [8, 15, 34, 41, 60,  8, 15, 34, 41, 60],
-                [9, 14, 35, 40, 61,  9, 14, 35, 40, 61],
-                [10, 13, 36, 39, 62, 10, 13, 36, 39, 62],
-                [11, 12, 37, 38, 63, 11, 12, 37, 38, 63]]) # knee
+# # Arnault's matrix reshaping
+# index_matrix4 = np.array([[63, 38, 37, 12, 11, 63, 38, 37, 12, 11], # ankle
+#                 [62, 39, 36, 13, 10, 62, 39, 36, 13, 10],
+#                 [61, 40, 35, 14,  9, 61, 40, 35, 14,  9],
+#                 [60, 41, 34, 15,  8, 60, 41, 34, 15,  8],
+#                 [59, 42, 33, 16,  7, 59, 42, 33, 16,  7],
+#                 [58, 43, 32, 17,  6, 58, 43, 32, 17,  6],
+#                 [57, 44, 31, 18,  5, 57, 44, 31, 18,  5],
+#                 [56, 45, 30, 19,  4, 56, 45, 30, 19,  4],
+#                 [55, 46, 29, 20,  3, 55, 46, 29, 20,  3],
+#                 [54, 47, 28, 21,  2, 54, 47, 28, 21,  2],
+#                 [53, 48, 27, 22,  1, 53, 48, 27, 22,  1],
+#                 [52, 49, 26, 23,  0, 52, 49, 26, 23,  0],
+#                 [51, 50, 25, 24,  0, 51, 50, 25, 24,  0],
+#                 [0, 24, 25, 50, 51,  0, 24, 25, 50, 51],
+#                 [0, 23, 26, 49, 52,  0, 23, 26, 49, 52],
+#                 [1, 22, 27, 48, 53,  1, 22, 27, 48, 53],
+#                 [2, 21, 28, 47, 54,  2, 21, 28, 47, 54],
+#                 [3, 20, 29, 46, 55,  3, 20, 29, 46, 55],
+#                 [4, 19, 30, 45, 56,  4, 19, 30, 45, 56],
+#                 [5, 18, 31, 44, 57,  5, 18, 31, 44, 57],
+#                 [6, 17, 32, 43, 58,  6, 17, 32, 43, 58],
+#                 [7, 16, 33, 42, 59,  7, 16, 33, 42, 59],
+#                 [8, 15, 34, 41, 60,  8, 15, 34, 41, 60],
+#                 [9, 14, 35, 40, 61,  9, 14, 35, 40, 61],
+#                 [10, 13, 36, 39, 62, 10, 13, 36, 39, 62],
+#                 [11, 12, 37, 38, 63, 11, 12, 37, 38, 63]]) # knee
 
-# In the order of the cables, it is
+# In the order of the cables, it is -----> OLD AND WRONG VERSION
 # GRID 4    GRID 3
 # GRID 1    GRID 2
 # So taking the 256 signals in signal.data as input, one must reshape in
 # the following way:
 
-index_matrix4[13:26,5:10] =  index_matrix4[13:26,5:10] + 64 
-index_matrix4[0:13,5:10] = index_matrix4[0:13,5:10] + 64 + 64 
-index_matrix4[0:13,0:5] = index_matrix4[0:13,0:5] + 64 + 64 + 64
+# index_matrix4[13:26,5:10] =  index_matrix4[13:26,5:10] + 64 
+# index_matrix4[0:13,5:10] = index_matrix4[0:13,5:10] + 64 + 64 
+# index_matrix4[0:13,0:5] = index_matrix4[0:13,0:5] + 64 + 64 + 64
+
+
+
+# Matrix reshaping!
+index_matrix4 = np.array([
+    [-1, 63, 62, 64, 52, 49, 47, 40, 48, -1],
+    [53, 55, 54, 50, 51, 52, 42, 41, 33, 43],
+    [56, 61, 42, 41, 49, 53, 50, 51, 44, 34],
+    [57, 58, 45, 44, 43, 54, 55, 39, 45, 46],
+    [59, 60, 48, 47, 46, 56, 64, 35, 36, 38],
+    [33, 34, 38, 39, 40, 63, 62, 26, 37, 27],
+    [2, 1, 25, 36, 37, 61, 60, 28, 29, 31],
+    [3, 15, 27, 26, 35, 59, 58, 19, 30, 32],
+    [4, 24, 32, 31, 28, 57, 1, 4, 20, 21],
+    [16, 21, 22, 23, 29, 2, 3, 16, 22, 23],
+    [8, 18, 19, 20, 30, 5, 6, 11, 24, 25],
+    [6, 7, 10, 9, 17, 7, 15, 12, 17, 18],
+    [14, 5, 13, 12, 11, 8, 14, 13, 9, 10],
+    [62, 53, 52, 51, 50, 54, 50, 42, 40, 43],
+    [54, 49, 42, 43, 44, 64, 53, 52, 45, 44],
+    [55, 41, 45, 46, 47, 62, 63, 51, 47, 46],
+    [56, 64, 48, 40, 39, 60, 61, 55, 41, 48],
+    [63, 57, 38, 37, 36, 57, 58, 56, 49, 35],
+    [58, 59, 35, 30, 31, 2, 1, 59, 37, 36],
+    [60, 61, 29, 32, 24, 4, 3, 34, 39, 38],
+    [34, 33, 25, 23, 22, 6, 5, 26, 25, 33],
+    [26, 27, 28, 21, 20, 8, 7, 29, 28, 27],
+    [1, 2, 3, 19, 18, 16, 15, 14, 11, 30],
+    [4, 16, 15, 17, 9, 12, 13, 31, 32, 23],
+    [14, 5, 6, 11, 10, 17, 19, 22, 21, 24],             # B AT BOTTOM RIGHT HAD ORIGINALLY TWO 19s and no 9. I SWAPPED THE BOTTOM 19 FOR THE 9
+    [-1, 7, 8, 13, 12, 10, 9, 18, 20, -1]
+])
+index_matrix4 = index_matrix4 - 1
+
+# In the order of the cables, it is -----> OLD AND WRONG VERSION
+# GRID 3    GRID 4
+# GRID 1    GRID 2
+
+index_matrix4[13:26, 5:10] =  index_matrix4[13:26,5:10] + 64
+index_matrix4[0:13, 0:5] = index_matrix4[0:13,0:5] + 64 + 64
+index_matrix4[0:13, 5:10] = index_matrix4[0:13,5:10] + 64 + 64 + 64
+
+# index_matrix4[13:26,5:10] =  index_matrix4[13:26,5:10] + 64 
+# index_matrix4[0:13,5:10] = index_matrix4[0:13,5:10] + 64 + 64 
+# index_matrix4[0:13,0:5] = index_matrix4[0:13,0:5] + 64 + 64 + 64
 
 if __name__ == '__main__':
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     fsamp = 2048
     batch_size = 16384
-    Tx_max, Ty_max, theta_max  = 2, 2, 10*np.pi/180
+    Tx_max, Ty_max, theta_max  = 2, 2, 0*np.pi/180
 
     for sub_idx in range(2):
         DIR = f'/home/joao/Desktop/datasets/emanuele_arnault/s{sub_idx+1}_edited'
@@ -78,10 +123,10 @@ if __name__ == '__main__':
                 H, W = emg_grid.shape[2], emg_grid.shape[3]
                 Nch = H*W
 
-                # Compute outliers as channels average of neighbours
-                print('HANDLING OUTLIER CHANNELS...')
-                emg_grid = utils.handle_outliers(emg_grid)
-                emg_grid = emg_grid / (emg_grid.std() + 1e-12)
+                # # Compute outliers as channels average of neighbours
+                # print('HANDLING OUTLIER CHANNELS...')
+                # emg_grid = utils.handle_outliers(emg_grid)
+                # emg_grid = emg_grid / (emg_grid.std() + 1e-12)
 
                 # Get separation matrix
                 dts = edition['Dischargetimes']
@@ -91,9 +136,10 @@ if __name__ == '__main__':
                 # Get conservative crop
                 delta_width, delta_height = utils.out_of_bounds_pixels(H, W, theta_max)
                 xcrop, ycrop = Tx_max + floor(delta_width + 0.5), Ty_max + floor(delta_height + 0.5)
+                # xcrop, ycrop = 0, 0
 
                 # Loop over extension factor, explained variance, and transformations
-                for R in [8, 16, 32]:
+                for R in [16]:#[8, 16, 32]:
                     for explained_var in [1-1e-2, 1-1e-3, 1-1e-4, 1-1e-6]:
                         for trans_idx in range(30): # thirty random transformations
                             Tx, Ty, theta = np.random.uniform([-Tx_max, -Ty_max, -theta_max], [Tx_max, Ty_max, theta_max]) # sample random transformation parameters
@@ -105,7 +151,8 @@ if __name__ == '__main__':
                                 name=f'sub_{sub_idx+1}_ses_{ses_idx+1}_mvc_{mvc}',
                                 config={'Subject': sub_idx+1, 'Session':ses_idx+1, 'MVC': mvc,
                                         'Extension Factor': R, 'Explained Variance': explained_var, 
-                                        'Tx': Tx, 'Ty': Ty, 'theta': theta, '#mu':len(mu_dts)}
+                                        'Tx': Tx, 'Ty': Ty, 'theta': theta, '#mu':len(mu_dts)},
+                                mode='disabled'
                             )
 
                             # Crop observations and get new sep_mat
@@ -119,14 +166,15 @@ if __name__ == '__main__':
                             wandb.log({'min_distance': min_distance})
 
                             # Create mask based on transformed coordinates being within convex 
-                            lcrop, rcrop, bcrop, tcrop = utils.get_min_conservative_crop((H, W), transformed_grid, original_grid)
+                            # lcrop, rcrop, bcrop, tcrop = utils.get_min_conservative_crop((H, W), transformed_grid, original_grid)
+                            lcrop, rcrop, bcrop, tcrop = 0,0,0,0
 
                             # Test that masking channels is a valid solution
                             print('TESTING MASKING CHANNELS...')
                             emg_grid_valid = emg_grid[:, :, tcrop:H-bcrop, lcrop:W-rcrop]
                             extended_emg_valid = utils.extend_emg_torch(emg_grid_valid.squeeze().reshape(emg_grid_valid.shape[0], -1), R).T
-                            inv_cov_valid = utils.get_inv_cov_torch(extended_emg_valid, explained_var=explained_var)
-                            inv_cov_valid_train = utils.get_inv_cov_torch(extended_emg_valid, explained_var=1-1e-12)
+                            inv_cov_valid = utils.get_inv_cov_torch(extended_emg_valid, explained_var=1-1e-2)
+                            inv_cov_valid_train = utils.get_inv_cov_torch(extended_emg_valid, explained_var=1-1e-2)
                             sep_mat = utils.get_sep_mat_torch(extended_emg_valid, mu_dts)
                             sep_mat_valid = sep_mat @ inv_cov_valid
                             sep_mat_valid_train = sep_mat @ inv_cov_valid_train
@@ -148,13 +196,13 @@ if __name__ == '__main__':
                             # Add optimal parameters for testing
                             sda.sep_mat.weight = torch.nn.Parameter(sep_mat_valid)
                             with torch.no_grad():
-                                sda.sal.xshift.copy_(-2*Tx/(W-1))
-                                sda.sal.yshift.copy_(-2*Ty/(H-1))
-                                sda.sal.rot_theta.copy_(-theta/np.pi)
+                                sda.sal.xshift[0].copy_(2*Tx/(W-1))
+                                sda.sal.yshift[0].copy_(2*Ty/(H-1))
+                                sda.sal.rot_theta[0].copy_(theta/np.pi)
 
                             # Test on optimal inverse transformation
                             with torch.no_grad():
-                                source_est_valid = sda(emg_grid_test)
+                                source_est_valid = sda(emg_grid_test, inverse=True)
                             pred_dts, sils = utils.get_silohuette(source_est_valid)
                             matches, f1_scores, sensitivities, precisions = utils.spike_matching(mu_dts, pred_dts, fs=fsamp)
                             print('F1 Scores Optimal:', np.mean(f1_scores))
@@ -173,17 +221,17 @@ if __name__ == '__main__':
 
                             # Reset SDA-SAL parameters
                             with torch.no_grad():
-                                sda.sal.xshift.copy_(0.0)
-                                sda.sal.yshift.copy_(0.0)
-                                sda.sal.rot_theta.copy_(0.0)
+                                sda.sal.xshift[0].copy_(0.0)
+                                sda.sal.yshift[0].copy_(0.0)
+                                sda.sal.rot_theta[0].copy_(0.0)
 
                             base_loss = utils.get_base_loss(emg_grid.to(torch.float64), sda, batch_size=batch_size, loss='kurtosis', device='cpu')
 
                             sda.sal.mode = 'bilinear'
-                            losses = utils.search_fit_sda(emg_grid_test, sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=500, nepochs=50, lr=1e-3, boundaries=(Tx_max, Ty_max, theta_max), device='cuda')
+                            sources, losses = utils.search_fit_sda(emg_grid_test, sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=500, nepochs=50, lr=1e-3, boundaries=(Tx_max, Ty_max, theta_max), device='cuda')
 
                             # Log parameters
-                            wandb.log({'Tx_est':sda.sal.xshift.item(), 'Ty_est':sda.sal.yshift.item(), 'theta_est':sda.sal.rot_theta.item()})
+                            wandb.log({'Tx_est':sda.sal.xshift[0].item(), 'Ty_est':sda.sal.yshift[0].item(), 'theta_est':sda.sal.rot_theta[0].item()})
 
                             # Update sda for testing
                             sda = sda.to('cpu')
@@ -207,6 +255,7 @@ if __name__ == '__main__':
                             pred_dts, sils = utils.get_silohuette(sources)
                             matches, f1_scores, sensitivities, precisions = utils.spike_matching(mu_dts, pred_dts, fs=fsamp)
                             print(f1_scores)
+                            print('#mu_test: ', sum([f1_score > 0.8 for f1_score in f1_scores]))
                             wandb.log({'f1_test': np.mean(f1_scores)})
                             wandb.log({'#mu_test': sum([f1_score > 0.8 for f1_score in f1_scores])})
 
@@ -225,6 +274,7 @@ if __name__ == '__main__':
                             pred_dts, sils = utils.get_silohuette(sources)
                             matches, f1_scores, sensitivities, precisions = utils.spike_matching(mu_dts, pred_dts, fs=fsamp)
                             print(f1_scores)
+                            print('#mu_refine:', sum([f1_score > 0.8 for f1_score in f1_scores]))
                             wandb.log({'f1_refine': np.mean(f1_scores)})
                             wandb.log({'#mu_refine': sum([f1_score > 0.8 for f1_score in f1_scores])})
                             wandb.finish()

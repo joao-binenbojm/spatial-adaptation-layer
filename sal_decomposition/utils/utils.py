@@ -437,6 +437,13 @@ def squeeze_dts(dts):
 def make_grid(emg, index_matrix):
     '''Function that converts EMG grid into the dimensions of a batch of images, expected by the affine transforms and decomposition module. (Input shape H, W, T)'''
     emg_grid = torch.tensor(emg[index_matrix, :]).to(torch.float64)
+
+    # Add cornel pixel as average of 3 neighbours
+    emg_grid[0,0,:] = (emg_grid[0,1,:] + emg_grid[1,0,:] + emg_grid[1,1,:])/3
+    emg_grid[0,-1,:] = (emg_grid[0,-2,:] + emg_grid[1,-1,:] + emg_grid[1,-2,:])/3
+    emg_grid[-1,0,:] = (emg_grid[-2,0,:] + emg_grid[-1,1,:] + emg_grid[-2,1,:])/3
+    emg_grid[-1,-1,:] = (emg_grid[-2,-1,:] + emg_grid[-1,-2,:] + emg_grid[-2,-2,:])/3
+
     emg_grid = emg_grid.permute(2, 0, 1).unsqueeze(1)
     return emg_grid
 
@@ -446,6 +453,7 @@ def get_sep_mat_torch(extended_emg, dts):
     sep_mat = torch.zeros((N, extended_emg.shape[0])).to(torch.float64)
     for idx in range(N):
         sep_mat[idx, :] = (extended_emg[:, dts[idx].astype(int)]).mean(dim=1)
+        sep_mat[idx, :] = sep_mat[idx, :] / (torch.norm(sep_mat[idx, :])**2 + 1e-10)
     return sep_mat
 
 def get_sep_mat_pseudo_inv(extended_emg, dts, rcond=1e-3):
@@ -456,7 +464,48 @@ def get_sep_mat_pseudo_inv(extended_emg, dts, rcond=1e-3):
     for idx in range(N):
         spike_trains[idx, dts[idx]] = 1.0
     sep_mat = spike_trains @ y_inv
+    sep_mat = sep_mat / (torch.norm(sep_mat, dim=1, keepdim=True)**2 + 1e-10) # ensure each sep_mat row has norm 1
     return sep_mat
+
+def get_sta_muaps(emg_grid, discharge_times, L, spacing=1.2):
+    '''Takes in extended EMG and dischage times from different MUs and returns separation matrix all in PyTorch.'''
+    T, _, H, W = emg_grid.shape
+    half = L // 2
+    if isinstance(discharge_times, list):
+        discharge_times = torch.tensor(discharge_times, device=emg_grid.device)
+
+    # Keep only valid spikes (so window fits)
+    valid_times = discharge_times[
+        (discharge_times >= half) & (discharge_times < T - half + 1)
+    ]
+
+    if len(valid_times) == 0:
+        return torch.zeros(L, H, W, device=emg_grid.device)
+
+    # Collect snippets: (n_spikes, L, 1, H, W)
+    snippets = torch.stack([
+        emg_grid[i-half:i+half] for i in valid_times
+    ], dim=0)
+
+    # Average across spikes → (L, H, W)
+    sta = snippets.mean(dim=0).squeeze(1)
+    sta = (sta - sta.min()) / (sta.max() - sta.min() + 1e-9)
+
+    # Plot in the same grid in a tiled fashio
+    time = np.arange(L)
+    plt.figure(figsize=(W/2, H/2))
+    for h in range(H):
+        for w in range(W):
+            y = sta[:, h, w]
+            # shift by electrode position
+            y_offset = h * spacing
+            x_offset = w * L * spacing / W  # scale horizontally
+            plt.plot(time + x_offset, 15.0*y + y_offset, color="k", lw=0.6)
+
+    plt.axis("off")
+    plt.title("MUAP waveforms (STA)")
+    plt.show()
+
 
 def kurt_filt_sources(Y):
     # Y is assumed to have shape (batch_size, num_components)
