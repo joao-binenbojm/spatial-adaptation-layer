@@ -1,5 +1,6 @@
 import numpy as np
 import scipy
+from scipy import signal
 from scipy.io import loadmat
 import os
 import matplotlib.pyplot as plt
@@ -44,8 +45,8 @@ def apply_affine(emg_grid, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, mode='biline
     theta = T @ R @ Sc
     theta = theta[0:2,:] # slice into submatrix expected by affine_grid
     theta = theta.repeat(N,1,1)
-    grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=False)
-    xresamp = torch.nn.functional.grid_sample(emg_grid, grid, mode=mode)
+    grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=True)
+    xresamp = torch.nn.functional.grid_sample(emg_grid, grid, mode=mode, align_corners=True)
     
     return xresamp
 
@@ -274,8 +275,8 @@ def loss_sampling(emg_grid_transform, sda, base_loss=1.0, T=(0.0, 0.0), bounds=(
             grid_end_idx = min(grid_idx + grid_batch_size, total_points)
             
             # Set shifts for this batch of grid points
-            xshifts_batch = 2 * xflat[grid_idx:grid_end_idx] / W
-            yshifts_batch = 2 * yflat[grid_idx:grid_end_idx] / H
+            xshifts_batch = 2 * xflat[grid_idx:grid_end_idx] / (W-1)
+            yshifts_batch = 2 * yflat[grid_idx:grid_end_idx] / (H-1)
             
             batch_losses = []
             # Process EMG data in batches for each grid point
@@ -317,7 +318,7 @@ def get_transformed_grid(grid_shape, Tx=0, Ty=0, theta=0, xscale=1, yscale=1):
     '''Computes the transformed grid coordinates for euclidina distance comparison.'''
 
     N, C, H, W = grid_shape
-    Tx, Ty = torch.tensor(2*Tx/W), torch.tensor(2*Ty/H) # Normalize translation values automatically
+    Tx, Ty = torch.tensor(2*Tx/(W-1)), torch.tensor(2*Ty/(H-1)) # Normalize translation values automatically
     theta, xscale, yscale = torch.tensor(theta) / torch.pi, torch.tensor(xscale), torch.tensor(yscale)
 
     T = torch.cat([ # Translation Matrix
@@ -342,9 +343,9 @@ def get_transformed_grid(grid_shape, Tx=0, Ty=0, theta=0, xscale=1, yscale=1):
     theta = theta.repeat(N,1,1)
 
     # Obtain transformed grid in pixel units
-    grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=False)
-    grid[:,:,:,0] = W*(1 + grid[:,:,:,0])/2
-    grid[:,:,:,1] = H*(1 + grid[:,:,:,1])/2
+    grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=True)
+    grid[:,:,:,0] = (W-1)*(1 + grid[:,:,:,0])/2
+    grid[:,:,:,1] = (H-1)*(1 + grid[:,:,:,1])/2
     return grid
 
 def get_inv_cov_torch(signal, explained_var=0.99):
@@ -467,6 +468,49 @@ def get_sep_mat_pseudo_inv(extended_emg, dts, rcond=1e-3):
     sep_mat = sep_mat / (torch.norm(sep_mat, dim=1, keepdim=True)**2 + 1e-10) # ensure each sep_mat row has norm 1
     return sep_mat
 
+def get_spectral_flatness_ar2(data, fs=2048, n_fft=512):
+    """
+    Compute spectral flatness (Wiener entropy) from AR(2) model for each channel.
+
+    Parameters:
+        data: np.ndarray of shape (T, Ch) - input signal window
+        fs: Sampling frequency in Hz
+        n_fft: Number of frequency points to evaluate PSD
+
+    Returns:
+        flatness: np.ndarray of shape (1, Ch)
+    """
+    T, H, W = data.shape
+    flatness = np.zeros((H, W))
+    freqs = np.linspace(0, fs / 2, n_fft)
+
+    from statsmodels.regression.linear_model import yule_walker
+
+    for h in range(H):
+        for w in range(W):
+            x = data[:, h, w]
+
+            try:
+                ar_coeffs, sigma2 = yule_walker(x, order=2, method='mle')
+            except Exception:
+                flatness[h, w] = 1.0  # fallback: flat
+                continue
+
+            # Evaluate PSD over frequency grid using parametric AR model
+            a = np.concatenate([[1], -ar_coeffs])  # AR polynomial
+            omega = 2 * np.pi * freqs / fs
+            exp_terms = np.exp(-1j * np.outer(omega, np.arange(len(a))))
+            H = 1 / (exp_terms @ a)
+            psd = sigma2 * np.abs(H) ** 2
+
+            # Spectral flatness: geometric mean / arithmetic mean (Wiener entropy)
+            psd = np.maximum(psd, 1e-12)  # to avoid log(0)
+            geo_mean = np.exp(np.mean(np.log(psd)))
+            arith_mean = np.mean(psd)
+            flatness[h, w] = geo_mean / arith_mean
+
+    return flatness
+
 def get_sta_muaps(emg_grid, discharge_times, L, spacing=1.2):
     '''Takes in extended EMG and dischage times from different MUs and returns separation matrix all in PyTorch.'''
     T, _, H, W = emg_grid.shape
@@ -498,14 +542,13 @@ def get_sta_muaps(emg_grid, discharge_times, L, spacing=1.2):
         for w in range(W):
             y = sta[:, h, w]
             # shift by electrode position
-            y_offset = h * spacing
+            y_offset = (H-1-h) * spacing
             x_offset = w * L * spacing / W  # scale horizontally
             plt.plot(time + x_offset, 15.0*y + y_offset, color="k", lw=0.6)
 
     plt.axis("off")
     plt.title("MUAP waveforms (STA)")
-    plt.show()
-
+    plt.savefig('muaps.jpg')
 
 def kurt_filt_sources(Y):
     # Y is assumed to have shape (batch_size, num_components)
@@ -689,31 +732,109 @@ def out_of_bounds_pixels(height: int, width: int, theta: float):
     
     return delta_width, delta_height
 
+# def handle_outliers(emg_grid):
+#     '''Determine outlier channels based on spectral flatness, and replace them with average of neighbours.'''
+#     # Determine coordinates of outliers
+#     H, W = emg_grid.shape[2:]
+#     flatness = torch.tensor(get_spectral_flatness_ar2(emg_grid.squeeze()))
+#     Q1, Q3 = torch.quantile(flatness.flatten(), torch.tensor([0.25, 0.75]))
+#     IQR = Q3 - Q1
+#     upper = Q3 + 1.5*IQR
+#     y, x = torch.where(flatness >= upper) # only keep non-noisy channel
+#     y, x = y.tolist(), x.tolist()
+
+#     idx = 0
+#     while idx < len(y): # for each outlier
+#         l,r,b,t = x[idx] != 0, x[idx] != W-1, y[idx] != H-1, y[idx] != 0
+#         subgrid = emg_grid[:, :, y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten(start_dim=2, end_dim=3)
+#         subgrid_flatness = flatness[y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten()
+#         subgrid = subgrid[:, :, subgrid_flatness < upper] # remove outlier channels included
+#         if subgrid.shape[2] < 3: # if less than 3 valid neighbours, try again after filling in more channels
+#             y.append(y[idx])
+#             x.append(x[idx])
+#         else:
+#             emg_grid[:,:,y[idx], x[idx]] = subgrid.mean(dim=2) # compute as average of neighbours
+#         idx += 1
+
+#     return emg_grid
+
 def handle_outliers(emg_grid):
-    '''Determine outlier channels, and replace them with average of neighbours.'''
-    # Determine coordinates of outliers
+    '''Determine outlier channels, and replace them with average of neighbours, 
+       prioritizing those with the fewest outlier neighbours.'''
+
+    emg_grid = emg_grid.numpy()
     H, W = emg_grid.shape[2:]
-    emg_grid_var = emg_grid.var(dim=[0,1])
-    Q1, Q3 = torch.quantile(emg_grid_var.flatten(), 0.25), torch.quantile(emg_grid_var.flatten(), 0.75)
+
+    flatness = get_spectral_flatness_ar2(emg_grid.squeeze())
+    Q1, Q3 = np.quantile(flatness.flatten(), [0.25, 0.75])
     IQR = Q3 - Q1
-    lower, upper = Q1 -3.0*IQR, Q3 + 3.0*IQR
-    y, x = torch.where(torch.logical_or(emg_grid_var >= upper, emg_grid_var <= lower)) # only keep non-noisy channel
-    y, x = y.tolist(), x.tolist()
+    upper = Q3 + 1.5*IQR
+    outlier_mask = flatness >= upper  # boolean mask of outliers
 
-    idx = 0
-    while idx < len(y): # for each outlier
-        l,r,b,t = x[idx] != 0, x[idx] != W-1, y[idx] != H-1, y[idx] != 0
-        subgrid = emg_grid[:, :, y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten(start_dim=2, end_dim=3)
-        subgridvar = emg_grid_var[y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten()
-        subgrid = subgrid[:, :, torch.logical_and(subgridvar < upper, subgridvar > lower)] # remove outlier channels included
-        if subgrid.shape[2] < 3: # if less than 3 valid neighbours, try again after filling in more channels
-            y.append(y[idx])
-            x.append(x[idx])
-        else:
-            emg_grid[:,:,y[idx], x[idx]] = subgrid.mean(dim=2) # compute as average of neighbours
-        idx += 1
+    # 1. Count outlier neighbors for each pixel
+    kernel = np.array([[1,1,1],[1,0,1],[1,1,1]], dtype=np.uint8)
+    neighbor_count_img = signal.convolve2d(outlier_mask.astype(np.uint8), kernel, mode='same', boundary='fill', fillvalue=0)
 
-    return emg_grid
+    # 2. Add 3 to all edge pixels
+    neighbor_count_img[0, :] += 3
+    neighbor_count_img[-1, :] += 3
+    neighbor_count_img[:, 0] += 3
+    neighbor_count_img[:, -1] += 3
+
+    # 3. Add 2 more to corners
+    neighbor_count_img[0, 0] += 2
+    neighbor_count_img[0, -1] += 2
+    neighbor_count_img[-1, 0] += 2
+    neighbor_count_img[-1, -1] += 2
+
+    # 4. Get outlier indices and their neighbor counts
+    outlier_indices = np.argwhere(outlier_mask)
+    neighbor_counts = neighbor_count_img[outlier_mask]
+
+    # 5. Sort outliers by neighbor count (ascending)
+    sorted_indices = np.argsort(neighbor_counts)
+    outlier_indices = outlier_indices[sorted_indices]
+
+    # 6. Fill outliers with mean of valid neighbors
+    for y, x in outlier_indices:
+        y0, y1 = max(0, y-1), min(H, y+2)
+        x0, x1 = max(0, x-1), min(W, x+2)
+        neighbor_mask = ~outlier_mask[y0:y1, x0:x1].copy()
+        center_rel_y = y - y0
+        center_rel_x = x - x0
+        neighbor_mask[center_rel_y, center_rel_x] = False  # exclude center
+        neighbors = emg_grid[..., y0:y1, x0:x1][..., neighbor_mask]
+        if neighbors.size > 0:
+            emg_grid[..., y, x] = neighbors.mean(axis=-1)
+        # else: leave as is
+
+    return torch.tensor(emg_grid)
+
+# def handle_outliers_old(emg_grid):
+#     '''Determine outlier channels, and replace them with average of neighbours.'''
+#     # Determine coordinates of outliers
+#     H, W = emg_grid.shape[2:]
+#     emg_grid_var = emg_grid.var(dim=[0,1])
+#     Q1, Q3 = torch.quantile(emg_grid_var.flatten(), 0.25), torch.quantile(emg_grid_var.flatten(), 0.75)
+#     IQR = Q3 - Q1
+#     lower, upper = Q1 -3.0*IQR, Q3 + 3.0*IQR
+#     y, x = torch.where(torch.logical_or(emg_grid_var >= upper, emg_grid_var <= lower)) # only keep non-noisy channel
+#     y, x = y.tolist(), x.tolist()
+
+#     idx = 0
+#     while idx < len(y): # for each outlier
+#         l,r,b,t = x[idx] != 0, x[idx] != W-1, y[idx] != H-1, y[idx] != 0
+#         subgrid = emg_grid[:, :, y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten(start_dim=2, end_dim=3)
+#         subgridvar = emg_grid_var[y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten()
+#         subgrid = subgrid[:, :, torch.logical_and(subgridvar < upper, subgridvar > lower)] # remove outlier channels included
+#         if subgrid.shape[2] < 3: # if less than 3 valid neighbours, try again after filling in more channels
+#             y.append(y[idx])
+#             x.append(x[idx])
+#         else:
+#             emg_grid[:,:,y[idx], x[idx]] = subgrid.mean(dim=2) # compute as average of neighbours
+#         idx += 1
+
+#     return emg_grid
 
 def get_min_distance(grid_shape, Tx, Ty, theta):
     '''Obtain minimum distance of a given electrode in transformed grid to an electrode in the old grid coordiantes, averaged across electrodes.'''
@@ -728,8 +849,8 @@ def get_min_distance(grid_shape, Tx, Ty, theta):
 def get_min_conservative_crop(grid_shape, transformed_grid, original_grid):
     '''Given a transformed grid and original grid coordinates, find the smallest crop for each side such that no dead channels are included.'''
     H, W = grid_shape
-    transformed_coordinates = transformed_grid[0, :, :, :2].cpu().numpy().reshape(-1, 2)
-    original_coordinates = original_grid[0, :, :, :2].cpu().numpy().reshape(-1, 2)
+    transformed_coordinates = transformed_grid[0, :, :, :].cpu().numpy().reshape(-1, 2)
+    original_coordinates = original_grid[0, :, :, :].cpu().numpy().reshape(-1, 2)
     hull = ConvexHull(transformed_coordinates)
     delaunay = Delaunay(transformed_coordinates[hull.vertices])
     inside = delaunay.find_simplex(original_coordinates) >= 0

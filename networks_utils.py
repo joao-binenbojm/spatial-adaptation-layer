@@ -18,6 +18,53 @@ def wrap_grid_horizontally(grid):
 
     return torch.stack([x_wrapped, y], dim=-1)
 
+def get_P(H, W, theta):
+    """
+    Build dense bilinear interpolation matrix P for HxW grid given affine theta.
+    P @ y_flat maps the EMG grid y into the transformed grid.
+    """
+    M = H * W
+    # Generate normalized affine sampling grid
+    grid = torch.nn.functional.affine_grid(theta.unsqueeze(0), size=(1, 1, H, W), align_corners=True)[0]  # H x W x 2
+
+    # Convert normalized coords to pixel indices
+    x = ((grid[..., 0] + 1) * (W - 1) / 2).flatten()
+    y = ((grid[..., 1] + 1) * (H - 1) / 2).flatten()
+
+    # Neighbors
+    x0 = torch.floor(x).long().clamp(0, W - 1)
+    x1 = torch.ceil(x).long().clamp(0, W - 1)
+    y0 = torch.floor(y).long().clamp(0, H - 1)
+    y1 = torch.ceil(y).long().clamp(0, H - 1)
+
+    # Weights
+    dx = x - x0.float()
+    dy = y - y0.float()
+
+    w00 = (1 - dx) * (1 - dy)
+    w01 = dx * (1 - dy)
+    w10 = (1 - dx) * dy
+    w11 = dx * dy
+
+    def idx(y_idx, x_idx):
+        return y_idx * W + x_idx
+
+    i00 = idx(y0, x0)
+    i01 = idx(y0, x1)
+    i10 = idx(y1, x0)
+    i11 = idx(y1, x1)
+
+    # Assemble dense P
+    P = torch.zeros((M, M), dtype=torch.float32, device=theta.device)
+    rows = torch.arange(M, device=theta.device)
+
+    P[rows, i00] += w00
+    P[rows, i01] += w01
+    P[rows, i10] += w10
+    P[rows, i11] += w11
+
+    return P
+
 # Precursor of the spatial adaptation layer
 # class Shift(torch.nn.Module):
 #     def __init__(self, input_shape):
@@ -72,10 +119,10 @@ class SpatialAdaptation(torch.nn.Module):
 
         return xshift, yshift, rot_theta, xscale, yscale, xshear, yshear
 
-    def forward(self, x, sal_idx=0, inverse=False):
-        '''Regrids input image based on affine transformation parameters.'''
-        dev = x.device # assuming x and model are on the same device
-        N, C, H, W = x.shape
+    def get_affine_transform(self, sal_idx=0, inverse=False):
+        '''Returns the affine transformation matrix given the current model parameters.'''
+        H, W = self.input_shape
+        dev = self.xshift[sal_idx].device
         # Apply soft constraints to parameters
         if self.boundaries and self.constrain_params:
             xshift, yshift, rot_theta, xscale, yscale, xshear, yshear = self.get_constrained_params(sal_idx=sal_idx)
@@ -89,23 +136,23 @@ class SpatialAdaptation(torch.nn.Module):
             yshear = self.yshear[sal_idx]
 
         T = torch.cat([ # Translation Matrix
-            torch.stack([torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev), xshift.to(dev)]).unsqueeze(0),
-            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev), yshift.to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev), xshift]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev), yshift]).unsqueeze(0),
             torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
         ], dim=0)
         R = torch.cat([ # Rotation Matrix
-            torch.stack([torch.cos(rot_theta.to(dev)), -torch.sin(rot_theta.to(dev)), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-            torch.stack([torch.sin(rot_theta.to(dev)), torch.cos(rot_theta.to(dev)), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.cos(rot_theta), -torch.sin(rot_theta), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.sin(rot_theta), torch.cos(rot_theta), torch.tensor(0.0).to(dev)]).unsqueeze(0),
             torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
         ], dim=0)
         Sc = torch.cat([ # Scaling Matrix
-            torch.stack([xscale.to(dev), torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-            torch.stack([torch.tensor(0.0).to(dev), yscale.to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([xscale, torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(0.0).to(dev), yscale, torch.tensor(0.0).to(dev)]).unsqueeze(0),
             torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
         ], dim=0)
         Sh = torch.cat([ # Shear Matrix
-            torch.stack([torch.tensor(1.0).to(dev), xshear.to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-            torch.stack([yshear.to(dev), torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([torch.tensor(1.0).to(dev), xshear, torch.tensor(0.0).to(dev)]).unsqueeze(0),
+            torch.stack([yshear, torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
             torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
         ], dim=0)
 
@@ -114,8 +161,54 @@ class SpatialAdaptation(torch.nn.Module):
         if inverse:
             # Invert the transformation matrix
             theta = torch.linalg.inv(theta)
-
         theta = theta[0:2,:] # slice into submatrix expected by affine_grid
+        return theta
+
+    def forward(self, x, sal_idx=0, inverse=False):
+        '''Regrids input image based on affine transformation parameters.'''
+        dev = x.device # assuming x and model are on the same device
+        N, C, H, W = x.shape
+        # # Apply soft constraints to parameters
+        # if self.boundaries and self.constrain_params:
+        #     xshift, yshift, rot_theta, xscale, yscale, xshear, yshear = self.get_constrained_params(sal_idx=sal_idx)
+        # else:
+        #     xshift = self.xshift[sal_idx]
+        #     yshift = self.yshift[sal_idx]
+        #     rot_theta = self.rot_theta[sal_idx]
+        #     xscale = self.xscale[sal_idx]
+        #     yscale = self.yscale[sal_idx]
+        #     xshear = self.xshear[sal_idx]
+        #     yshear = self.yshear[sal_idx]
+
+        # T = torch.cat([ # Translation Matrix
+        #     torch.stack([torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev), xshift.to(dev)]).unsqueeze(0),
+        #     torch.stack([torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev), yshift.to(dev)]).unsqueeze(0),
+        #     torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
+        # ], dim=0)
+        # R = torch.cat([ # Rotation Matrix
+        #     torch.stack([torch.cos(rot_theta.to(dev)), -torch.sin(rot_theta.to(dev)), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+        #     torch.stack([torch.sin(rot_theta.to(dev)), torch.cos(rot_theta.to(dev)), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+        #     torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
+        # ], dim=0)
+        # Sc = torch.cat([ # Scaling Matrix
+        #     torch.stack([xscale.to(dev), torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+        #     torch.stack([torch.tensor(0.0).to(dev), yscale.to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+        #     torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
+        # ], dim=0)
+        # Sh = torch.cat([ # Shear Matrix
+        #     torch.stack([torch.tensor(1.0).to(dev), xshear.to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+        #     torch.stack([yshear.to(dev), torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
+        #     torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
+        # ], dim=0)
+
+        # theta = T @ R @ Sc @ Sh
+
+        # if inverse:
+        #     # Invert the transformation matrix
+        #     theta = torch.linalg.inv(theta)
+
+        # theta = theta[0:2,:] # slice into submatrix expected by affine_grid
+        theta = self.get_affine_transform(sal_idx=sal_idx, inverse=inverse).to(dev)
         theta = theta.repeat(N,1,1)
         grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=False)
         if self.circular:
@@ -134,6 +227,7 @@ class SpatialAdaptation(torch.nn.Module):
                 self.yscale[sal_idx].copy_(yscale[sal_idx])
                 self.xshear[sal_idx].copy_(xshear[sal_idx])
                 self.yshear[sal_idx].copy_(yshear[sal_idx])
+
         
     # def restart(self):
     #     '''Reinitialize the parameters of the affine transformation.'''
