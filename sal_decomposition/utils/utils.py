@@ -132,7 +132,6 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
         init_params[:, 4] = torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
 
     init_params = init_params.to(device)
-    sda.train() # leave batch norm parameters adaptive
     with torch.no_grad():
         
         for npoint in tqdm(range(npoints)):
@@ -448,13 +447,13 @@ def make_grid(emg, index_matrix):
     emg_grid = emg_grid.permute(2, 0, 1).unsqueeze(1)
     return emg_grid
 
-def get_sep_mat_torch(extended_emg, dts):
+def get_sta_templates(extended_emg, dts):
     '''Takes in extended EMG and dischage times from different MUs and returns separation matrix all in PyTorch.'''
     N = len(dts) # number of MUs
     sep_mat = torch.zeros((N, extended_emg.shape[0])).to(torch.float64)
     for idx in range(N):
         sep_mat[idx, :] = (extended_emg[:, dts[idx].astype(int)]).mean(dim=1)
-        sep_mat[idx, :] = sep_mat[idx, :] / (torch.norm(sep_mat[idx, :])**2 + 1e-10)
+        sep_mat[idx, :] = sep_mat[idx, :] / (torch.norm(sep_mat[idx, :])**2 + 1e-12)
     return sep_mat
 
 def get_sep_mat_pseudo_inv(extended_emg, dts, rcond=1e-3):
@@ -578,7 +577,7 @@ def extend_emg_torch(emg, R):
     extended_emg = torch.zeros((emg.shape[0] + R - 1, nchans*R)).to(torch.float64).to(device)
     for idx in range(R):
         extended_emg[idx:emg.shape[0]+idx, idx*nchans:(idx+1)*nchans] = emg
-    return extended_emg
+    return extended_emg[:-(R-1),:]
 
 def get_silohuette(sources_pred, distance=4):
     '''Get silhouette values given source predictions.'''

@@ -96,13 +96,13 @@ def reg_pinv(P, lam=1e-3):
     I = torch.eye(n, device=P.device, dtype=P.dtype)
     return torch.linalg.solve(Pt @ P + lam * I, Pt)
 
-def get_P_inv_extended(sal, R, sal_idx=0):
+def get_P_inv_extended(sal, R, sal_idx=0, inverse=False):
     """
     Build block-diagonal extended inverse P for temporal extension.
     P: [M, M] dense
     R: number of temporal taps
     """
-    P_inv = get_P(sal, sal_idx=0)  # [M, M]
+    P_inv = get_P(sal, sal_idx=sal_idx, inverse=inverse)  # [M, M]
     # P_inv = reg_pinv(P)  # dense for simplicity
     blocks = [P_inv for _ in range(R)]
     P_inv_ext = torch.block_diag(*blocks)  # [M*R, M*R]
@@ -112,7 +112,7 @@ def get_P_inv_extended(sal, R, sal_idx=0):
 
 class SpatialDecompositionAdaptation(torch.nn.Module):    
     # build the constructor
-    def __init__(self, grid_shape, sep_mat, ycrop=0, xcrop=0, extension_factor=17, mode='bilinear'):
+    def __init__(self, grid_shape, STA, inv_cov, ycrop=0, xcrop=0, extension_factor=17, mode='bilinear'):
         super(SpatialDecompositionAdaptation, self).__init__()
         self.grid_shape = grid_shape
         self.nchans = torch.prod(torch.tensor(grid_shape))
@@ -124,12 +124,16 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
 
         ## TESTING
         self.register_buffer("P_inv_extended", torch.eye(self.nchans*self.extension_factor), persistent=False) # initialize as identity
-        self.register_buffer("P_sep_mat", torch.randn_like(sep_mat), persistent=False) # initialize as identity
-        self.register_buffer("sep_mat", sep_mat) # initialize as identity
+        # self.register_buffer("P_sep_mat", torch.randn_like(sep_mat), persistent=False) # initialize as identity
+        # self.register_buffer("sep_mat", sep_mat) # initialize as identity
         # self.sep_mat = torch.nn.Linear(sep_mat.shape[1], sep_mat.shape[0], bias=False)
         # with torch.no_grad():
             # self.sep_mat.weight.copy_(sep_mat)
         
+        self.register_buffer("STA", STA)
+        self.register_buffer("inv_cov", inv_cov)
+
+
     def extend_emg(self, emg):
         '''Extend the original EMG batch given extension factor.'''
         device = emg.device
@@ -137,14 +141,15 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         extended_emg = torch.zeros((emg.shape[0] + self.extension_factor - 1, nchans*self.extension_factor)).to(device)
         for idx in range(self.extension_factor):
             extended_emg[idx:emg.shape[0]+idx, idx*nchans:(idx+1)*nchans] = emg
-        return extended_emg.T
+        return extended_emg[:-(self.extension_factor-1),:].T
 
     # Extend, whiten and separate sources
     def forward(self, emg, inverse=False):
         # emg = self.bn(emg) # apply batch norm
         if self.training:
-            self.P_inv_extended = get_P_inv_extended(self.sal, self.extension_factor, sal_idx=0) # if testing, assume we have P_inv_extended available to use
-            self.P_sep_mat = self.sep_mat @ self.P_inv_extended # updated separation matrix based on current transformation
+            self.P_inv_extended = get_P_inv_extended(self.sal, self.extension_factor, sal_idx=0, inverse=False) # if testing, assume we have P_inv_extended available to use
+            self.P_sep_mat = self.STA @ self.P_inv_extended.T @ self.inv_cov
+            # self.P_sep_mat = self.sep_mat @ self.P_inv_extended # updated separation matrix based on current transformation
         # emg_sal = self.sal(emg, inverse=inverse).squeeze()
         # emg_sal = emg_sal[:, self.tcrop:emg_sal.shape[1]-self.bcrop, self.lcrop:emg_sal.shape[2]-self.rcrop]
         # extended_emg = self.extend_emg(emg_sal.reshape(emg_sal.shape[0], -1))
@@ -155,7 +160,7 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
 
     def apply_affine(self, emg):
         '''Apply the current affine transformation to the EMG grid.'''
-        P = get_P(self.sal, sal_idx=0, inverse=True)
+        P = get_P(self.sal, sal_idx=0, inverse=False)
         emg_transform = apply_P_to_emg(emg, P)
         return emg_transform
 

@@ -191,7 +191,7 @@ if __name__ == '__main__':
                         explained_var = 1-1e-4
                         for trans_idx in range(30): # thirty random transformations
                             # Tx, Ty, theta = torch.tensor(np.random.uniform([-Tx_max, -Ty_max, -theta_max], [Tx_max, Ty_max, theta_max])).to(torch.float32) # sample random transformation parameters
-                            Tx, Ty, theta = torch.tensor([2.0, 2.0, 0.0]).to(torch.float32)
+                            Tx, Ty, theta = torch.tensor([1.5, 1.5, 0.0]).to(torch.float32)
 
                             # Initialize wandb run
                             run = wandb.init(
@@ -209,38 +209,22 @@ if __name__ == '__main__':
                             original_grid, transformed_grid, min_distance = utils.get_min_distance((H, W), Tx, Ty, theta)
                             print(f'MIN DISTANCE BETWEEN PIXELS: {min_distance} pixels')
                             wandb.log({'min_distance': min_distance})
-                            lcrop, rcrop, bcrop, tcrop = utils.get_min_conservative_crop((H, W), transformed_grid, original_grid)
-                            # emg_grid[:,:,:tcrop,:] = emg_grid[:,:,0:1,:].clone()
-                            # emg_grid[:,:,H-bcrop:,:] = emg_grid[:,:,-2:-1,:].clone()
-                            # emg_grid[:,:,:,:lcrop] = emg_grid[:,:,:,0:1].clone()
-                            # emg_grid[:,:,:,W-rcrop:] = emg_grid[:,:,:,-2:-1].clone()
-                            # emg_grid_original = emg_grid.clone()
-                            # emg_grid = emg_grid[:,:,:-2, :-2]
-                            # emg_grid_test = emg_grid_original[:,:,2:, 2:]
-                            # H, W = H - 2, W - 2
-                            
-                            emg_grid[:,:,:tcrop,:] = 0.0
-                            emg_grid[:,:,H-bcrop:,:] = 0.0
-                            emg_grid[:,:,:,:lcrop] = 0.0
-                            emg_grid[:,:,:,W-rcrop:] = 0.0
-
                             ########################################################################################################
 
                             # Test that masking channels is a valid solution
                             print('TESTING MASKING CHANNELS...')
                             extended_emg = utils.extend_emg_torch(emg_grid.squeeze().reshape(emg_grid.shape[0], -1), R).T
-                            inv_cov = utils.get_inv_cov_torch(extended_emg, explained_var=explained_var)
-                            sep_mat = utils.get_sep_mat_torch(extended_emg, mu_dts)
-                            sep_mat = (sep_mat @ inv_cov).to(torch.float32)
+                            inv_cov = utils.get_inv_cov_torch(extended_emg, explained_var=explained_var).to(torch.float32)
+                            STA = utils.get_sta_templates(extended_emg, mu_dts).to(torch.float32) # gets STA templates from Session 1 from the raw data
+                            # sep_mat = (STA @ inv_cov).to(torch.float32)
 
-                            sda = SpatialDecompositionAdaptation(grid_shape=(H, W), sep_mat=sep_mat, extension_factor=R)
-                            sda.train()
+                            sda = SpatialDecompositionAdaptation(grid_shape=(H, W), STA=STA, inv_cov=inv_cov, extension_factor=R)
                             base_loss = utils.get_base_loss(emg_grid, sda, batch_size=batch_size, loss='kurtosis', device='cpu')
 
                             # Test on original grid with non-regularized whitening matrix
                             with torch.no_grad():
-                                source_est_valid = sda(emg_grid)
-                            pred_dts, sils = utils.get_silohuette(source_est_valid)
+                                source_est = sda(emg_grid)
+                            pred_dts, sils = utils.get_silohuette(source_est)
                             matches, f1_scores, sensitivities, precisions = utils.spike_matching(mu_dts, pred_dts, fs=fsamp)
                             print('F1 Scores Training:', np.mean(f1_scores))
                             print('#mu_train:', sum([f1_score > 0.8 for f1_score in f1_scores]))
@@ -275,15 +259,18 @@ if __name__ == '__main__':
 
                             # extended_emg = utils.extend_emg_torch(emg_grid.squeeze().reshape(emg_grid.shape[0], -1), R).T
                             # inv_cov = utils.get_inv_cov_torch(extended_emg, explained_var=explained_var)
-                            # sep_mat = utils.get_sep_mat_torch(extended_emg, mu_dts)
+                            # sep_mat = utils.get_sta_templates(extended_emg, mu_dts)
                             # sep_mat = (sep_mat @ inv_cov).to(torch.float32)
                             # sda.sep_mat = sep_mat
                             
                             #################################################################################################
 
 
-
                             # Test on optimal inverse transformation
+                            extended_emg = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T
+                            inv_cov = utils.get_inv_cov_torch(extended_emg, explained_var=explained_var).to(torch.float32)
+                            sda.inv_cov = inv_cov # update inverse covariance
+                            
                             with torch.no_grad():
                                 source_est_valid = sda(emg_grid_test)
                             pred_dts, sils = utils.get_silohuette(source_est_valid)
@@ -303,16 +290,18 @@ if __name__ == '__main__':
 
                             # Log parameters
                             wandb.log({'Tx_est':(W-1)*sda.sal.xshift[0].item()/2, 'Ty_est':(H-1)*sda.sal.yshift[0].item()/2, 'theta_est':np.pi*sda.sal.rot_theta[0].item()})
-
-                            # Update sda for testing
-                            sda = sda.to('cpu')
-                            # sda.sal.mode = 'bicubic'
-                            sda.eval()
+                            # sda.eval()
     
-                            # Get initial source estimates
-                            with torch.no_grad():
-                                sources = sda(emg_grid_test)
-                            pred_dts, sils = utils.get_silohuette(sources)
+                            # # Get initial source estimates
+                            # with torch.no_grad():
+                            #     sources_batches = []
+                            #     n_samples = emg_grid_test.shape[0]
+                            #     for i in range(0, n_samples, batch_size):
+                            #         batch = emg_grid_test[i:i+batch_size]
+                            #         sources_batches.append(sda(batch.to(device)))
+                            #     sources = torch.cat(sources_batches, dim=0)
+
+                            pred_dts, sils = utils.get_silohuette(sources.to('cpu'))
                             matches, f1_scores, sensitivities, precisions = utils.spike_matching(mu_dts, pred_dts, fs=fsamp)
                             print(f1_scores)
                             print('#mu_test: ', sum([f1_score > 0.8 for f1_score in f1_scores]))
@@ -320,14 +309,11 @@ if __name__ == '__main__':
                             wandb.log({'#mu_test': sum([f1_score > 0.8 for f1_score in f1_scores])})
 
                             # Get sep mat based on real test data
-                            print('Getting separation matrix based on real test data...')
-                            sda.lcrop, sda.rcrop, sda.bcrop, sda.tcrop = 0, 0, 0, 0
-                            if R == '1000/ch':
-                                R = 1000/(emg_grid_test.shape[2]*emg_grid_test.shape[3])
+                            print('Refining STA templates based on predicted discharge times...')
                             extended_emg_test = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T
                             inv_cov_test = utils.get_inv_cov_torch(extended_emg_test, explained_var=explained_var)
-                            sep_mat_test = utils.get_sep_mat_torch(extended_emg_test, pred_dts)
-                            sep_mat_test = sep_mat_test @ inv_cov_test
+                            STA = utils.get_sta_templates(extended_emg_test, pred_dts)
+                            sep_mat_test = STA @ inv_cov_test
                             with torch.no_grad():
                                 sources = (sep_mat_test @ extended_emg_test).T
 
