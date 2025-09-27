@@ -205,7 +205,7 @@ class SpatialDecompositionAdaptationOld(torch.nn.Module):
         # emg = self.bn(emg) # apply batch norm
         emg_sal = self.sal(emg).squeeze()
         emg_sal = emg_sal[:, self.tcrop:emg_sal.shape[1]-self.bcrop, self.lcrop:emg_sal.shape[2]-self.rcrop]
-        extended_emg = self.extend_emg(emg_sal.reshape(emg_sal.shape[0], -1))
+        extended_emg = self.extend_emg(emg_sal.reshape(emg_sal.shape[0], -1))[:-(self.extension_factor-1)]
         sources = self.sep_mat(extended_emg)
         return sources
 

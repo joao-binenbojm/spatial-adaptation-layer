@@ -72,7 +72,7 @@ for fxmax in tqdm(fxmaxs):
             if (fxmax, SNR, opt) in checklist:
                 continue
             with torch.no_grad():
-                exp = SDAExperiment()
+                # exp = SDAExperiment()
                 print('GENERATING MUAPS....')
                 # muaps = exp.generate_gaussian_muaps(mu_count, H, W, L, fxmax / (fsx/2), sampfactor) # generate MUAPs
                 muaps = sutils.generate_gaussian_muaps(mu_count, H, W, L, fxmax / (fsx/2), sampfactor) # generate MUAPs
@@ -140,7 +140,22 @@ for fxmax in tqdm(fxmaxs):
 
                 with torch.no_grad():
                     print('APPLY TRANSFORM...')
-                    emg_grid_transform = utils.apply_affine(emg_grid.detach().cpu().clone(), Tx*sampfactor, Ty*sampfactor, theta, xscale, yscale, mode='bicubic')
+                    # emg_grid_transform = utils.apply_affine(emg_grid.detach().cpu().clone(), Tx*sampfactor, Ty*sampfactor, theta, xscale, yscale, mode='bicubic')
+                    with torch.no_grad():
+                        sda.sal.xshift[0].copy_(-2*Tx/(W-1)) # sampfactor gets cancelled out by normalization
+                        sda.sal.yshift[0].copy_(-2*Ty/(H-1))
+                        sda.sal.rot_theta[0].copy_(-theta/np.pi)
+                        sda.sal.xscale[0].copy_(xscale)
+                        sda.sal.yscale[0].copy_(yscale)
+
+                        emg_grid_transform = sda.apply_affine(emg_grid.detach().cpu().clone())
+
+                        with torch.no_grad():
+                            sda.sal.xshift[0].copy_(0.0) # sampfactor gets cancelled out by normalization
+                            sda.sal.yshift[0].copy_(0.0)
+                            sda.sal.rot_theta[0].copy_(0.0)
+                            sda.sal.xscale[0].copy_(1.0)
+                            sda.sal.yscale[0].copy_(1.0)
 
                     print('DOWNSAMPLING...')
                     emg_grid_transform = sutils.downsample_grid(emg_grid_transform, sampfactor).to(device)

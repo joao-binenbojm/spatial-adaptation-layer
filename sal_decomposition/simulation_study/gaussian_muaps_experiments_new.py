@@ -48,10 +48,11 @@ H, W, L = 26, 10, 50
 # H, W, L = 5, 5, 20
 R = 16
 sampfactor=14
+explained_var = 1-1e-2
 delay = (torch.floor(torch.tensor([L + R])/2) - 1).to(torch.int) # delay introduced by causality of triggering process
 
 # Training params
-batch_size = 10000
+batch_size = 2048
 nepochs=120
 lr = 5e-3
 loss = 'kurtosis' # loss function for optimization
@@ -65,14 +66,14 @@ thetas = np.random.uniform(-bounds[2], bounds[2], size=Nt)
 xscales, yscales = np.random.uniform(1/bounds[3], bounds[3], size=Nt), np.random.uniform(1/bounds[4], bounds[4], size=Nt)
 
 
-for fxmax in tqdm(fxmaxs):
+for fxmax in tqdm(fxmaxs[2:]):
     for SNR in SNRs:
         for opt in opts:
             # If in checklist, already run, continue to next condition
             if (fxmax, SNR, opt) in checklist:
                 continue
             with torch.no_grad():
-                exp = SDAExperiment()
+                # exp = SDAExperiment()
                 print('GENERATING MUAPS....')
                 # muaps = exp.generate_gaussian_muaps(mu_count, H, W, L, fxmax / (fsx/2), sampfactor) # generate MUAPs
                 muaps = sutils.generate_gaussian_muaps(mu_count, H, W, L, fxmax / (fsx/2), sampfactor) # generate MUAPs
@@ -88,7 +89,7 @@ for fxmax in tqdm(fxmaxs):
                 # muaps_down = exp.downsample_muaps(muaps, sampfactor) # downsample MUAPs
                 muaps_down = sutils.downsample_muaps(muaps, sampfactor).to('cpu') # downsample MUAPs
                 # B = exp.get_separation_vectors(muaps_down, R=R)
-                B = sutils.get_sta_templates(muaps_down, R=R, delay=delay)
+                STA = sutils.get_sta_templates(muaps_down, R=R, delay=delay)
                 
                 # noisy_emg = exp.add_noise(emg, SNR) # add noise to synthetic signal
                 noisy_emg = sutils.add_noise(emg, SNR) # add noise to synthetic signal
@@ -100,21 +101,16 @@ for fxmax in tqdm(fxmaxs):
 
                 # Right multiply inverse covariance matrix
                 extended_emg = utils.extend_emg_torch(emg_grid_down.squeeze().reshape(emg_grid_down.shape[0], -1), R).T
-                inv_cov = utils.get_inv_cov_torch(extended_emg, explained_var=1-1e-2).to(torch.float32)
-                sep_mat = B @ inv_cov
+                inv_cov = utils.get_inv_cov_torch(extended_emg, explained_var=explained_var).to(torch.float32)
+                sep_mat = STA @ inv_cov
 
                 print('GET SEPARATION VECTORS & WHITENING...')
                 sda = SpatialDecompositionAdaptationOld(grid_shape=(H, W), extension_factor=R, sep_mat=sep_mat).to(device) # create SAL-Decomposition model
                 base_loss = utils.get_base_loss(emg_grid_down, sda, batch_size=batch_size, loss='kurtosis', device=device) # get baseline loss
                 print('BASELINE LOSS:', base_loss)
 
-                # with torch.no_grad():
-                #     source_est = sda(emg_grid_down)
                 with torch.no_grad():
                     source_est = sda(emg_grid_down.to(device))
-
-                # source_est = exp.process_sep_mat(emg_grid_down, B, R=R)
-                # exp.get_base_loss(emg_grid_down.to(torch.float32), loss=loss, device=device) # get baseline loss
                 
                 # Get baseline performance metrics before transform (mainly to evaluate initial decomp.)
                 # pred_dts, sils_base = exp.get_silohuette(source_est.detach().cpu().numpy().T)
@@ -159,11 +155,6 @@ for fxmax in tqdm(fxmaxs):
                     # emg_grid_transform = exp.downsample_grid(emg_grid_transform, sampfactor)
                     emg_grid_transform = sutils.downsample_grid(emg_grid_transform, sampfactor).to(device)
 
-                    # print('CENTERING...')
-                    # emg_grid_down = emg_grid_down.to(device)
-                    # mean = (emg_grid_down.mean(dim=0, keepdim=True) + emg_grid_transform.mean(dim=0, keepdim=True))/2
-                    # emg_grid_down, emg_grid_transform = emg_grid_down - mean, emg_grid_transform - mean 
-
                     print('POST-TRANSFORM SOURCE ESTIMATE')
                     # sources_transform = exp.get_source_estimate(emg_grid_transform)
                     with torch.no_grad():
@@ -182,12 +173,12 @@ for fxmax in tqdm(fxmaxs):
 
                 # Optimization
                 if opt == 'fit':
-                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=0, nepochs=nepochs, batch_size=2048, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=0, nepochs=nepochs, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
 
                 elif opt == 'search_fit':
-                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=2*nepochs, nepochs=nepochs//2, batch_size=2048, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=2*nepochs, nepochs=nepochs//2, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
                 else: # search only
-                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=3*nepochs, nepochs=0, batch_size=2048, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=3*nepochs, nepochs=0, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
 
                 # Get learned transformations
                 Tx_opt, Ty_opt = (W-1)*sda.sal.xshift[0].item()/2, (H-1)*sda.sal.yshift[0].item()/2
@@ -198,9 +189,7 @@ for fxmax in tqdm(fxmaxs):
                             'xscale_opt':xscale_opt, 'yscale_opt': yscale_opt})
 
                 # Performance metrics based on output sources
-                # pred_dts, sils = exp.get_silohuette(sources.detach().cpu().numpy())
                 pred_dts, sils = utils.get_silohuette(sources.detach().cpu().numpy())
-                # scores = exp.spike_scores(dts, pred_dts)
                 matches, f1_scores, sensitivities, precisions = utils.spike_matching(dts, pred_dts, fs=fsamp)
                 print('SILS:', sils)
                 print()

@@ -105,7 +105,7 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
         ica_loss = NegentropyLoss()
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, sda.parameters()),
                                                 lr=lr)                 
-
+ 
     # Collect output tensors
     output_list = []
     losses = []
@@ -127,9 +127,9 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
     if d > 2:
         init_params[:,2] = boundaries[2]*init_params[:, 2]/np.pi
     if d > 3:
-        init_params[:, 3] = (init_params[:, 3] - 1/boundaries[3]) / (boundaries[3] - 1/boundaries[3]) #torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) )
+        init_params[:, 3] = (boundaries[3] - 1/boundaries[3])*(init_params[:, 3] + 1 )/2 + 1/boundaries[3] #torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) )
     if d > 4:
-        init_params[:, 4] = (init_params[:, 4] - 1/boundaries[4]) / (boundaries[4] - 1/boundaries[4]) # torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
+        init_params[:, 4] = (boundaries[4] - 1/boundaries[4])*(init_params[:, 4] + 1 )/2 + 1/boundaries[4]  # torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
 
     init_params = init_params.to(device)
     with torch.no_grad():
@@ -608,6 +608,7 @@ def get_silohuette(sources_pred, distance=4):
             sil = (inter_sums - intra_sums) / max(intra_sums, inter_sums)  
         else:
             sil = 0
+            spikes = np.array([])
         sils[mu_idx] = sil
         pred_dts.append(spikes)
     return pred_dts, sils

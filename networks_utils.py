@@ -210,10 +210,10 @@ class SpatialAdaptation(torch.nn.Module):
         # theta = theta[0:2,:] # slice into submatrix expected by affine_grid
         theta = self.get_affine_transform(sal_idx=sal_idx, inverse=inverse).to(dev)
         theta = theta.repeat(N,1,1)
-        grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=False)
+        grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=True)
         if self.circular:
             grid = wrap_grid_horizontally(grid) # wrap x coordinates if electrodes around arm
-        xresamp = torch.nn.functional.grid_sample(x, grid, mode=self.mode, align_corners=False)
+        xresamp = torch.nn.functional.grid_sample(x, grid, mode=self.mode, align_corners=True)
         return xresamp
     
     def reset_params(self, Tx=torch.tensor([0.0,0.0]), Ty=torch.tensor([0.0,0.0]), rot_theta=torch.tensor([0.0,0.0]), xscale=torch.tensor([1.0,1.0]), yscale=torch.tensor([1.0,1.0]), xshear=torch.tensor([0.0,0.0]), yshear=torch.tensor([0.0,0.0])):
