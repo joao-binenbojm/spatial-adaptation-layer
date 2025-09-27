@@ -40,7 +40,7 @@ fs = 2000 # Hz
 fsx = 250 # m^-1
 duration = 20000 # number of time samples in EMG, equivalent of 10s with fs=2000Hz
 Tmean, ISV = 60, 0.2 # sample statistics of spikes # equivalent of 30Hz with fs=2000Hz
-H, W, L = 25, 10, 50
+H, W, L = 26, 10, 50
 R = 16
 sampfactor=14
 

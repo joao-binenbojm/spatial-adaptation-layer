@@ -9,7 +9,7 @@ import pandas as pd
 
 import sal_decomposition.utils.simulation_utils as sutils
 from sal_decomposition.utils import utils
-from sal_decomposition.sda import SpatialDecompositionAdaptationOld
+from sal_decomposition.sda import SpatialDecompositionAdaptation
 
 from sal_decomposition.simulation_study._sda_pipeline import SDAExperiment
 
@@ -44,7 +44,7 @@ fsamp = 2000 # Hz
 fsx = 250 # m^-1
 duration = 20000 # number of time samples in EMG, equivalent of 10s with fs=2000Hz
 Tmean, ISV = 60, 0.2 # sample statistics of spikes # equivalent of 30Hz with fs=2000Hz
-H, W, L = 25, 10, 50
+H, W, L = 26, 10, 50
 # H, W, L = 5, 5, 20
 R = 16
 sampfactor=14
@@ -88,7 +88,7 @@ for fxmax in tqdm(fxmaxs):
                 # muaps_down = exp.downsample_muaps(muaps, sampfactor) # downsample MUAPs
                 muaps_down = sutils.downsample_muaps(muaps, sampfactor).to('cpu') # downsample MUAPs
                 # B = exp.get_separation_vectors(muaps_down, R=R)
-                B = sutils.get_separation_vectors(muaps_down, R=R, delay=delay)
+                STA = sutils.get_sta_templates(muaps_down, R=R, delay=delay)
                 
                 # noisy_emg = exp.add_noise(emg, SNR) # add noise to synthetic signal
                 noisy_emg = sutils.add_noise(emg, SNR) # add noise to synthetic signal
@@ -101,25 +101,21 @@ for fxmax in tqdm(fxmaxs):
                 # Right multiply inverse covariance matrix
                 extended_emg = utils.extend_emg_torch(emg_grid_down.squeeze().reshape(emg_grid_down.shape[0], -1), R).T
                 inv_cov = utils.get_inv_cov_torch(extended_emg, explained_var=1-1e-2).to(torch.float32)
-                sep_mat = B @ inv_cov
+                # sep_mat = B @ inv_cov
 
                 print('GET SEPARATION VECTORS & WHITENING...')
-                sda = SpatialDecompositionAdaptationOld(grid_shape=(H, W), extension_factor=R, sep_mat=sep_mat).to(device) # create SAL-Decomposition model
-                base_loss = utils.get_base_loss(emg_grid_down, sda, batch_size=batch_size, loss='kurtosis', device=device) # get baseline loss
+                sda_train = SpatialDecompositionAdaptation(grid_shape=(H, W), STA=STA, inv_cov=inv_cov, extension_factor=R).to(device) # create SAL-Decomposition model
+                base_loss = utils.get_base_loss(emg_grid_down, sda_train, batch_size=batch_size, loss='kurtosis', device=device) # get baseline loss
                 print('BASELINE LOSS:', base_loss)
 
                 # with torch.no_grad():
                 #     source_est = sda(emg_grid_down)
                 with torch.no_grad():
-                    source_est = sda(emg_grid_down.to(device))
+                    source_est = sda_train(emg_grid_down.to(device))
 
-                # source_est = exp.process_sep_mat(emg_grid_down, B, R=R)
-                # exp.get_base_loss(emg_grid_down.to(torch.float32), loss=loss, device=device) # get baseline loss
                 
                 # Get baseline performance metrics before transform (mainly to evaluate initial decomp.)
-                # pred_dts, sils_base = exp.get_silohuette(source_est.detach().cpu().numpy().T)
                 pred_dts, sils_base = utils.get_silohuette(source_est.detach().cpu().numpy())
-                # scores_base = exp.spike_scores(dts, pred_dts)
                 matches, f1_scores, sensitivities, precisions = utils.spike_matching(dts, pred_dts, fs=fsamp)
                 print('F1 Scores Training:', np.mean(f1_scores))
                 # wandb.log({'f1_train': np.mean(f1_scores)})

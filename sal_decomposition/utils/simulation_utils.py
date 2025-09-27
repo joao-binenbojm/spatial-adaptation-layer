@@ -61,7 +61,7 @@ def downsample_muaps(muaps, sampfactor=10):
     '''Downsample the MUAPs before generating separation vectors.'''
     return muaps[:, ::sampfactor, ::sampfactor, :] # downsample muaps along spatial coordinates
 
-def get_separation_vectors(muaps, R=None, delay=None, xcrop=0, ycrop=0):
+def get_sta_templates(muaps, R=None, delay=None, xcrop=0, ycrop=0):
     ''' Based on MUAPs, just generate the separation vectors neccessary.'''
     R = R if R is not None else muaps.shape[-1]
     N, H, W, L = muaps.shape

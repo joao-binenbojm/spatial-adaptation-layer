@@ -183,7 +183,7 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
 class SpatialDecompositionAdaptationOld(torch.nn.Module):    
     # build the constructor
     def __init__(self, grid_shape, sep_mat, ycrop=0, xcrop=0, extension_factor=17, mode='bilinear'):
-        super(SpatialDecompositionAdaptation, self).__init__()
+        super(SpatialDecompositionAdaptationOld, self).__init__()
         self.grid_shape = grid_shape
         self.nchans = torch.prod(torch.tensor(grid_shape))
         self.sal = SpatialAdaptation(input_shape=grid_shape, T=True, R=True, Sc=False, Sh=False, mode=mode)
