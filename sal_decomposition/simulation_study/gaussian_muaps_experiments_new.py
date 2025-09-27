@@ -58,11 +58,11 @@ loss = 'kurtosis' # loss function for optimization
 device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
 # Create range of spatial transformations to be used equally for every single condition
+bounds = [2.0, 2.0, 20*np.pi/180, 1.2, 1.2]
 Nt = 50
-Txs, Tys = np.random.uniform(-1.2, 1.2, size=Nt), np.random.uniform(-1.2, 1.2, size=Nt)
-thetas = np.random.uniform(-20*np.pi/180, 20*np.pi/180, size=Nt)
-xscales, yscales = np.random.uniform(0.8, 1.2, size=Nt), np.random.uniform(0.8, 1.2, size=Nt)
-# xscales, yscales = np.random.uniform(1.0, 1.0, size=Nt), np.random.uniform(1.0, 1.0, size=Nt)
+Txs, Tys = np.random.uniform(-bounds[0], bounds[0], size=Nt), np.random.uniform(-bounds[1], bounds[1], size=Nt)
+thetas = np.random.uniform(-bounds[2], bounds[2], size=Nt)
+xscales, yscales = np.random.uniform(1/bounds[3], bounds[3], size=Nt), np.random.uniform(1/bounds[4], bounds[4], size=Nt)
 
 
 for fxmax in tqdm(fxmaxs):
@@ -88,7 +88,7 @@ for fxmax in tqdm(fxmaxs):
                 # muaps_down = exp.downsample_muaps(muaps, sampfactor) # downsample MUAPs
                 muaps_down = sutils.downsample_muaps(muaps, sampfactor).to('cpu') # downsample MUAPs
                 # B = exp.get_separation_vectors(muaps_down, R=R)
-                B = sutils.get_separation_vectors(muaps_down, R=R, delay=delay)
+                B = sutils.get_sta_templates(muaps_down, R=R, delay=delay)
                 
                 # noisy_emg = exp.add_noise(emg, SNR) # add noise to synthetic signal
                 noisy_emg = sutils.add_noise(emg, SNR) # add noise to synthetic signal
@@ -182,12 +182,12 @@ for fxmax in tqdm(fxmaxs):
 
                 # Optimization
                 if opt == 'fit':
-                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=0, nepochs=nepochs, batch_size=2048, boundaries=(1.2, 1.2, 20*np.pi/180, 0.01, 0.01), lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=0, nepochs=nepochs, batch_size=2048, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
 
                 elif opt == 'search_fit':
-                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=2*nepochs, nepochs=nepochs//2, batch_size=2048, boundaries=(1.2, 1.2, 20*np.pi/180, 0.01, 0.01), lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=2*nepochs, nepochs=nepochs//2, batch_size=2048, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
                 else: # search only
-                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=3*nepochs, nepochs=0, batch_size=2048, boundaries=(1.2, 1.2, 20*np.pi/180, 0.01, 0.01), lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=3*nepochs, nepochs=0, batch_size=2048, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
 
                 # Get learned transformations
                 Tx_opt, Ty_opt = (W-1)*sda.sal.xshift[0].item()/2, (H-1)*sda.sal.yshift[0].item()/2

@@ -127,9 +127,9 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
     if d > 2:
         init_params[:,2] = boundaries[2]*init_params[:, 2]/np.pi
     if d > 3:
-        init_params[:, 3] = torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) )
+        init_params[:, 3] = (init_params[:, 3] - 1/boundaries[3]) / (boundaries[3] - 1/boundaries[3]) #torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) )
     if d > 4:
-        init_params[:, 4] = torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
+        init_params[:, 4] = (init_params[:, 4] - 1/boundaries[4]) / (boundaries[4] - 1/boundaries[4]) # torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
 
     init_params = init_params.to(device)
     with torch.no_grad():

@@ -48,6 +48,7 @@ H, W, L = 26, 10, 50
 # H, W, L = 5, 5, 20
 R = 16
 sampfactor=14
+explained_var = 1e-2
 delay = (torch.floor(torch.tensor([L + R])/2) - 1).to(torch.int) # delay introduced by causality of triggering process
 
 # Training params
@@ -58,12 +59,11 @@ loss = 'kurtosis' # loss function for optimization
 device = 'cuda' if torch.cuda.is_available() else 'cpu' # choose device to let model training happen on 
 
 # Create range of spatial transformations to be used equally for every single condition
+bounds = [2.0, 2.0, 20*np.pi/180, 1.2, 1.2]
 Nt = 50
-Txs, Tys = np.random.uniform(-1.2, 1.2, size=Nt), np.random.uniform(-1.2, 1.2, size=Nt)
-thetas = np.random.uniform(-20*np.pi/180, 20*np.pi/180, size=Nt)
-xscales, yscales = np.random.uniform(0.8, 1.2, size=Nt), np.random.uniform(0.8, 1.2, size=Nt)
-# xscales, yscales = np.random.uniform(1.0, 1.0, size=Nt), np.random.uniform(1.0, 1.0, size=Nt)
-
+Txs, Tys = np.random.uniform(-bounds[0], bounds[0], size=Nt), np.random.uniform(-bounds[1], bounds[1], size=Nt)
+thetas = np.random.uniform(-bounds[2], bounds[2], size=Nt)
+xscales, yscales = np.random.uniform(1/bounds[3], bounds[3], size=Nt), np.random.uniform(1/bounds[4], bounds[4], size=Nt)
 
 for fxmax in tqdm(fxmaxs):
     for SNR in SNRs:
@@ -83,36 +83,28 @@ for fxmax in tqdm(fxmaxs):
                 emg = sutils.generate_emg(spts, muaps, device=device).to('cpu') # make synthetic EMG from simulated MUAPs and spike trains
                 spts, dts = torch.roll(spts, (0, delay), dims=(0,1)), [dt + delay for dt in dts] # account for MUAP length delay
                 spts[:, :delay] = 0.0 # remove any spikes that may have been rolled over the start of the signal
-                # emg = exp.generate_emg(spts, muaps, R=R) # make synthetic EMG from simulated MUAPs and spike trains
-                # Get separation vector
-                # muaps_down = exp.downsample_muaps(muaps, sampfactor) # downsample MUAPs
+                
+                # Get STA templates for separation vectors
                 muaps_down = sutils.downsample_muaps(muaps, sampfactor).to('cpu') # downsample MUAPs
-                # B = exp.get_separation_vectors(muaps_down, R=R)
                 STA = sutils.get_sta_templates(muaps_down, R=R, delay=delay)
                 
-                # noisy_emg = exp.add_noise(emg, SNR) # add noise to synthetic signal
+                # Add noise, make grid and downsample EMG
                 noisy_emg = sutils.add_noise(emg, SNR) # add noise to synthetic signal
                 noisy_emg = (noisy_emg - noisy_emg.mean()) / (noisy_emg.std() + 1e-12) # standardize noisy emg
-                # emg_grid = exp.make_grid(noisy_emg) # reshape into EMG grid
                 emg_grid = sutils.simulation_make_grid(noisy_emg) # reshape into EMG grid
-                # emg_grid_down = exp.downsample_grid(emg_grid, sampfactor) # downsample EMG grid
                 emg_grid_down = sutils.downsample_grid(emg_grid, sampfactor) # downsample EMG grid
 
                 # Right multiply inverse covariance matrix
                 extended_emg = utils.extend_emg_torch(emg_grid_down.squeeze().reshape(emg_grid_down.shape[0], -1), R).T
-                inv_cov = utils.get_inv_cov_torch(extended_emg, explained_var=1-1e-2).to(torch.float32)
-                # sep_mat = B @ inv_cov
+                inv_cov = utils.get_inv_cov_torch(extended_emg, explained_var=explained_var).to(torch.float32)
 
                 print('GET SEPARATION VECTORS & WHITENING...')
-                sda_train = SpatialDecompositionAdaptation(grid_shape=(H, W), STA=STA, inv_cov=inv_cov, extension_factor=R).to(device) # create SAL-Decomposition model
-                base_loss = utils.get_base_loss(emg_grid_down, sda_train, batch_size=batch_size, loss='kurtosis', device=device) # get baseline loss
+                sda = SpatialDecompositionAdaptation(grid_shape=(H, W), STA=STA, inv_cov=inv_cov, extension_factor=R).to(device) # create SAL-Decomposition model
+                base_loss = utils.get_base_loss(emg_grid_down, sda, batch_size=batch_size, loss='kurtosis', device=device) # get baseline loss
                 print('BASELINE LOSS:', base_loss)
 
-                # with torch.no_grad():
-                #     source_est = sda(emg_grid_down)
                 with torch.no_grad():
-                    source_est = sda_train(emg_grid_down.to(device))
-
+                    source_est = sda(emg_grid_down.to(device))
                 
                 # Get baseline performance metrics before transform (mainly to evaluate initial decomp.)
                 pred_dts, sils_base = utils.get_silohuette(source_est.detach().cpu().numpy())
@@ -130,7 +122,7 @@ for fxmax in tqdm(fxmaxs):
                 # Start the wandb run
                 wandb.init(
                     # set the wandb project where this run will be logged
-                    project="sal-decomposition-simulations-freeze",
+                    project="sal-decomposition-simulations-new-trick",
                     name=f'{opt}-{SNR}-{fxmax}',
                     # mode='disabled',
                 )
@@ -148,26 +140,16 @@ for fxmax in tqdm(fxmaxs):
 
                 with torch.no_grad():
                     print('APPLY TRANSFORM...')
-                    # emg_grid_transform = exp.apply_affine(emg_grid.detach().clone(), Tx, Ty, theta, xscale, yscale, sampfactor)
                     emg_grid_transform = utils.apply_affine(emg_grid.detach().cpu().clone(), Tx*sampfactor, Ty*sampfactor, theta, xscale, yscale, mode='bicubic')
 
                     print('DOWNSAMPLING...')
-                    # emg_grid_transform = exp.downsample_grid(emg_grid_transform, sampfactor)
                     emg_grid_transform = sutils.downsample_grid(emg_grid_transform, sampfactor).to(device)
 
-                    # print('CENTERING...')
-                    # emg_grid_down = emg_grid_down.to(device)
-                    # mean = (emg_grid_down.mean(dim=0, keepdim=True) + emg_grid_transform.mean(dim=0, keepdim=True))/2
-                    # emg_grid_down, emg_grid_transform = emg_grid_down - mean, emg_grid_transform - mean 
-
                     print('POST-TRANSFORM SOURCE ESTIMATE')
-                    # sources_transform = exp.get_source_estimate(emg_grid_transform)
                     with torch.no_grad():
                         sources_transform = sda(emg_grid_transform.to(torch.float32))
 
-                    # pred_dts, sils_transform = exp.get_silohuette(sources_transform.detach().cpu().numpy().T)
                     pred_dts, sils_transform = utils.get_silohuette(sources_transform.detach().cpu().numpy())
-                    # scores_transform = exp.spike_scores(dts, pred_dts)
                     matches, f1_scores_transform, sensitivities_transform, precisions_transform = utils.spike_matching(dts, pred_dts, fs=fsamp)
                     print('F1 Scores Post-Transform:', np.mean(f1_scores_transform))
                     params.update({
@@ -175,15 +157,20 @@ for fxmax in tqdm(fxmaxs):
                     'precision_transform_avg': np.mean(precisions), 'precision_transform_std': np.std(precisions),
                     'f1_score_transform_avg': np.mean(f1_scores), 'f1_score_transform_std': np.std(f1_scores)
                     })
+                
+                # Update the statistics of the SDA module with the inverse covariance of the transformed grid, then we perform the same things
+                extended_emg = utils.extend_emg_torch(emg_grid_transform.squeeze().reshape(emg_grid_transform.shape[0], -1), R).T
+                inv_cov = utils.get_inv_cov_torch(extended_emg, explained_var=explained_var).to(torch.float32)
+                sda.inv_cov = inv_cov
 
                 # Optimization
                 if opt == 'fit':
-                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=0, nepochs=nepochs, batch_size=2048, boundaries=(1.2, 1.2, 20*np.pi/180, 0.01, 0.01), lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=0, nepochs=nepochs, batch_size=2048, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
 
                 elif opt == 'search_fit':
-                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=2*nepochs, nepochs=nepochs//2, batch_size=2048, boundaries=(1.2, 1.2, 20*np.pi/180, 0.01, 0.01), lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=2*nepochs, nepochs=nepochs//2, batch_size=2048, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
                 else: # search only
-                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=3*nepochs, nepochs=0, batch_size=2048, boundaries=(1.2, 1.2, 20*np.pi/180, 0.01, 0.01), lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=3*nepochs, nepochs=0, batch_size=2048, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
 
                 # Get learned transformations
                 Tx_opt, Ty_opt = (W-1)*sda.sal.xshift[0].item()/2, (H-1)*sda.sal.yshift[0].item()/2
@@ -194,9 +181,7 @@ for fxmax in tqdm(fxmaxs):
                             'xscale_opt':xscale_opt, 'yscale_opt': yscale_opt})
 
                 # Performance metrics based on output sources
-                # pred_dts, sils = exp.get_silohuette(sources.detach().cpu().numpy())
                 pred_dts, sils = utils.get_silohuette(sources.detach().cpu().numpy())
-                # scores = exp.spike_scores(dts, pred_dts)
                 matches, f1_scores, sensitivities, precisions = utils.spike_matching(dts, pred_dts, fs=fsamp)
                 print('SILS:', sils)
                 print()
