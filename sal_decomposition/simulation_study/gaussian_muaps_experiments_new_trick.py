@@ -48,11 +48,11 @@ H, W, L = 26, 10, 50
 # H, W, L = 5, 5, 20
 R = 16
 sampfactor=14
-explained_var = 1e-2
+explained_var = 1-1e-2
 delay = (torch.floor(torch.tensor([L + R])/2) - 1).to(torch.int) # delay introduced by causality of triggering process
 
 # Training params
-batch_size = 10000
+batch_size = 2048
 nepochs=120
 lr = 5e-3
 loss = 'kurtosis' # loss function for optimization
@@ -122,9 +122,9 @@ for fxmax in tqdm(fxmaxs):
                 # Start the wandb run
                 wandb.init(
                     # set the wandb project where this run will be logged
-                    project="sal-decomposition-simulations-new-trick",
+                    project="sal-decomposition-simulations-trick",
                     name=f'{opt}-{SNR}-{fxmax}',
-                    # mode='disabled',
+                    mode='disabled',
                 )
             
                 # Keep track of experimental parameters of the run
@@ -140,29 +140,14 @@ for fxmax in tqdm(fxmaxs):
 
                 with torch.no_grad():
                     print('APPLY TRANSFORM...')
-                    # emg_grid_transform = utils.apply_affine(emg_grid.detach().cpu().clone(), Tx*sampfactor, Ty*sampfactor, theta, xscale, yscale, mode='bicubic')
-                    with torch.no_grad():
-                        sda.sal.xshift[0].copy_(-2*Tx/(W-1)) # sampfactor gets cancelled out by normalization
-                        sda.sal.yshift[0].copy_(-2*Ty/(H-1))
-                        sda.sal.rot_theta[0].copy_(-theta/np.pi)
-                        sda.sal.xscale[0].copy_(xscale)
-                        sda.sal.yscale[0].copy_(yscale)
-
-                        emg_grid_transform = sda.apply_affine(emg_grid.detach().cpu().clone())
-
-                        with torch.no_grad():
-                            sda.sal.xshift[0].copy_(0.0) # sampfactor gets cancelled out by normalization
-                            sda.sal.yshift[0].copy_(0.0)
-                            sda.sal.rot_theta[0].copy_(0.0)
-                            sda.sal.xscale[0].copy_(1.0)
-                            sda.sal.yscale[0].copy_(1.0)
+                    emg_grid_transform = utils.apply_affine(emg_grid.detach().cpu().clone(), Tx*sampfactor, Ty*sampfactor, theta, xscale, yscale, mode='bicubic')
 
                     print('DOWNSAMPLING...')
                     emg_grid_transform = sutils.downsample_grid(emg_grid_transform, sampfactor).to(device)
 
                     print('POST-TRANSFORM SOURCE ESTIMATE')
                     with torch.no_grad():
-                        sources_transform = sda(emg_grid_transform.to(torch.float32))
+                        sources_transform = sda(emg_grid_transform)
 
                     pred_dts, sils_transform = utils.get_silohuette(sources_transform.detach().cpu().numpy())
                     matches, f1_scores_transform, sensitivities_transform, precisions_transform = utils.spike_matching(dts, pred_dts, fs=fsamp)
@@ -180,12 +165,12 @@ for fxmax in tqdm(fxmaxs):
 
                 # Optimization
                 if opt == 'fit':
-                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=0, nepochs=nepochs, batch_size=2048, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=0, nepochs=nepochs, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
 
                 elif opt == 'search_fit':
-                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=2*nepochs, nepochs=nepochs//2, batch_size=2048, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=2*nepochs, nepochs=nepochs//2, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
                 else: # search only
-                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=3*nepochs, nepochs=0, batch_size=2048, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+                    sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=3*nepochs, nepochs=0, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
 
                 # Get learned transformations
                 Tx_opt, Ty_opt = (W-1)*sda.sal.xshift[0].item()/2, (H-1)*sda.sal.yshift[0].item()/2
