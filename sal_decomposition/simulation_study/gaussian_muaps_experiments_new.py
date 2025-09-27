@@ -66,7 +66,7 @@ thetas = np.random.uniform(-bounds[2], bounds[2], size=Nt)
 xscales, yscales = np.random.uniform(1/bounds[3], bounds[3], size=Nt), np.random.uniform(1/bounds[4], bounds[4], size=Nt)
 
 
-for fxmax in tqdm(fxmaxs[2:]):
+for fxmax in tqdm(fxmaxs):
     for SNR in SNRs:
         for opt in opts:
             # If in checklist, already run, continue to next condition
@@ -131,7 +131,7 @@ for fxmax in tqdm(fxmaxs[2:]):
                 wandb.init(
                     # set the wandb project where this run will be logged
                     project="sal-decomposition-simulations-new",
-                    name=f'{opt}-{SNR}-{fxmax}',
+                    name=f'{opt}-{SNR}-{fxmax}-{trans_idx}',
                     # mode='disabled',
                 )
             
