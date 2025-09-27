@@ -9,7 +9,7 @@ import pandas as pd
 
 import sal_decomposition.utils.simulation_utils as sutils
 from sal_decomposition.utils import utils
-from sal_decomposition.sda import SpatialDecompositionAdaptation
+from sal_decomposition.sda import SpatialDecompositionAdaptationOld
 
 from sal_decomposition.simulation_study._sda_pipeline import SDAExperiment
 
@@ -104,7 +104,7 @@ for fxmax in tqdm(fxmaxs):
                 sep_mat = B @ inv_cov
 
                 print('GET SEPARATION VECTORS & WHITENING...')
-                sda = SpatialDecompositionAdaptation(grid_shape=(H, W), extension_factor=R, sep_mat=sep_mat).to(device) # create SAL-Decomposition model
+                sda = SpatialDecompositionAdaptationOld(grid_shape=(H, W), extension_factor=R, sep_mat=sep_mat).to(device) # create SAL-Decomposition model
                 base_loss = utils.get_base_loss(emg_grid_down, sda, batch_size=batch_size, loss='kurtosis', device=device) # get baseline loss
                 print('BASELINE LOSS:', base_loss)
 

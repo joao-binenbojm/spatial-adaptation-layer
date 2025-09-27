@@ -7,7 +7,7 @@ from tqdm import tqdm
 from math import floor
 
 from sal_decomposition.MUEdit.processing_tools import bandpass_filter, notch_filter
-from sal_decomposition.sda import SpatialDecompositionAdaptation
+from sal_decomposition.sda import SpatialDecompositionAdaptationOld
 from sal_decomposition.utils import utils
 import wandb
                  
@@ -245,7 +245,7 @@ if __name__ == '__main__':
                             sep_mat_valid = sep_mat @ inv_cov_valid
                             sep_mat_valid_train = sep_mat @ inv_cov_valid_train
 
-                            sda = SpatialDecompositionAdaptation(grid_shape=(H, W), sep_mat=sep_mat_valid_train, xcrop=xcrop, ycrop=ycrop, extension_factor=R)
+                            sda = SpatialDecompositionAdaptationOld(grid_shape=(H, W), sep_mat=sep_mat_valid_train, xcrop=xcrop, ycrop=ycrop, extension_factor=R)
                             sda.lcrop, sda.rcrop = lcrop, rcrop
                             sda.bcrop, sda.tcrop = bcrop, tcrop
                             sda.sal.mode = 'bicubic'

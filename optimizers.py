@@ -1,6 +1,6 @@
 from typing import List, Dict, Callable, Iterable, Optional
 import torch
-import torch_pso
+# import torch_pso
 
 # Adapting base PSO optimizer to account for different sizes/magnitudes of our parameters in SAL
 class ParticleDifferentScales(torch_pso.optim.ParticleSwarmOptimizer.Particle):

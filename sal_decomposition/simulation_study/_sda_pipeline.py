@@ -7,13 +7,13 @@ import torch
 import seaborn as sns
 from sklearn.cluster import KMeans
 # from torch_pso import ParticleSwarmOptimizer
-from optimizers import ParticleSwarmOptimizerCustom
+# from optimizers import ParticleSwarmOptimizerCustom
 # from test import ParticleSwarmOptimizer
 
 from sal_decomposition.MUEdit.processing_tools import extend_emg, whiten_emg, get_silohuette, maxk
 # from sal_decomposition.MUEdit.processing_tools import batch_process_filters as get_pulse_trains
 from loss_functions import KurtosisLoss, NegentropyLoss
-from sal_decomposition.sda import SpatialDecompositionAdaptation
+from sal_decomposition.sda import SpatialDecompositionAdaptationOld
 from networks_utils import SpatialAdaptation
 
 class SDAExperiment:
@@ -223,7 +223,7 @@ class SDAExperiment:
     def get_base_loss(self, emg_grid, loss='kurtosis', device='cpu'):
         '''Getting base loss.'''
         N, C, H, W = emg_grid.shape
-        sda = SpatialDecompositionAdaptation(grid_shape=(H, W), sep_mat=self.sep_mat, extension_factor=self.params['R']).to(device)
+        sda = SpatialDecompositionAdaptationOld(grid_shape=(H, W), sep_mat=self.sep_mat, extension_factor=self.params['R']).to(device)
         if loss == 'kurtosis':
             ica_loss = KurtosisLoss()
         else:
@@ -237,7 +237,7 @@ class SDAExperiment:
         self.params.update(params)# keep track of chosing experimental parameter
         
         _, _, H, W = emg_grid_transform.shape
-        self.sda = SpatialDecompositionAdaptation(grid_shape=(H, W), sep_mat=self.sep_mat, extension_factor=self.params['R']).to(device)
+        self.sda = SpatialDecompositionAdaptationOld(grid_shape=(H, W), sep_mat=self.sep_mat, extension_factor=self.params['R']).to(device)
         if loss == 'kurtosis':
             ica_loss = KurtosisLoss()
         else:
@@ -341,87 +341,87 @@ class SDAExperiment:
         sources = final_outputs.detach().cpu()
         return sources, losses
 
-    def particle_swarm_sda(self, emg_grid_transform, nepochs=100, n_particles=5, w=0.8, c1=0.1, c2=0.1, device='cpu', loss='kurtosis', plot=1):
-        ''' Fit SDA to emg_grid data to find optimal affine parameters. If plot, plot learning of all parameters and loss over iterations.'''
-        params = {'nepochs': nepochs, 'lr': lr}
-        self.params.update(params)# keep track of chosing experimental parameter
+    # def particle_swarm_sda(self, emg_grid_transform, nepochs=100, n_particles=5, w=0.8, c1=0.1, c2=0.1, device='cpu', loss='kurtosis', plot=1):
+    #     ''' Fit SDA to emg_grid data to find optimal affine parameters. If plot, plot learning of all parameters and loss over iterations.'''
+    #     params = {'nepochs': nepochs, 'lr': lr}
+    #     self.params.update(params)# keep track of chosing experimental parameter
         
-        N, C, H, W = emg_grid_transform.shape
-        self.sda = SpatialDecompositionAdaptation(grid_shape=(H, W), sep_mat=self.sep_mat, extension_factor=self.params['R']).to(device)
-        if loss == 'kurtosis':
-            ica_loss = KurtosisLoss()
-        else:
-            ica_loss = NegentropyLoss()
-        print('INITIALIZING OPTIMIZER...')
+    #     N, C, H, W = emg_grid_transform.shape
+    #     self.sda = SpatialDecompositionAdaptationOld(grid_shape=(H, W), sep_mat=self.sep_mat, extension_factor=self.params['R']).to(device)
+    #     if loss == 'kurtosis':
+    #         ica_loss = KurtosisLoss()
+    #     else:
+    #         ica_loss = NegentropyLoss()
+    #     print('INITIALIZING OPTIMIZER...')
 
-        # Initializing optimizer
-        max_params = [3.0/W, 3.0/H, 20/180, 1.2, 1.2, 0.0, 0.0]
-        min_params = [-3.0/W, -3.0/H, -20/180, 1/1.2, 1/1.2, 0.0, 0.0]
-        optimizer = ParticleSwarmOptimizerCustom(self.sda.sal.parameters(), inertial_weight=w,
-                                            num_particles=n_particles, cognitive_coefficient=c1,
-                                            social_coefficient=c2, max_param_values=max_params, min_param_values=min_params)             
-        # Collect output tensors
-        output_list = []
-        losses = []
-        xshifts,yshifts,angles,xscales,yscales = [], [], [], [], []
+    #     # Initializing optimizer
+    #     max_params = [3.0/W, 3.0/H, 20/180, 1.2, 1.2, 0.0, 0.0]
+    #     min_params = [-3.0/W, -3.0/H, -20/180, 1/1.2, 1/1.2, 0.0, 0.0]
+    #     optimizer = ParticleSwarmOptimizerCustom(self.sda.sal.parameters(), inertial_weight=w,
+    #                                         num_particles=n_particles, cognitive_coefficient=c1,
+    #                                         social_coefficient=c2, max_param_values=max_params, min_param_values=min_params)             
+    #     # Collect output tensors
+    #     output_list = []
+    #     losses = []
+    #     xshifts,yshifts,angles,xscales,yscales = [], [], [], [], []
 
-        for param in self.sda.sal.parameters():
-            param.requires_grad = True        
+    #     for param in self.sda.sal.parameters():
+    #         param.requires_grad = True        
 
-        # Loop through the DataLoader
-        print('PSO optimization')
-        losses = []
-        with torch.no_grad():
-            for ne in tqdm(range(nepochs)):
-                # Forward pass through the model
-                outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
+    #     # Loop through the DataLoader
+    #     print('PSO optimization')
+    #     losses = []
+    #     with torch.no_grad():
+    #         for ne in tqdm(range(nepochs)):
+    #             # Forward pass through the model
+    #             outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
 
-                # Compute ICA Loss and backprop
-                def closure():
-                    optimizer.zero_grad()
-                    return ica_loss(outputs)
+    #             # Compute ICA Loss and backprop
+    #             def closure():
+    #                 optimizer.zero_grad()
+    #                 return ica_loss(outputs)
                 
-                loss = optimizer.step(closure)
-                # loss = ica_loss(outputs)
-                # optimizer.zero_grad()
-                # loss.backward()
-                # optimizer.step()
+    #             loss = optimizer.step(closure)
+    #             # loss = ica_loss(outputs)
+    #             # optimizer.zero_grad()
+    #             # loss.backward()
+    #             # optimizer.step()
 
-                # Display updates
-                print('LOSS:', loss.item()/self.base_loss)
-                print(f'PARAMS:\n xshift: {W*self.sda.sal.xshift[0].item()/2}, yshift: {H*self.sda.sal.yshift[0].item()/2}, theta: {self.sda.sal.rot_theta[0].item()} ')
-                print(f'xscale: {self.sda.sal.xscale[0].item()}, yscale: {self.sda.sal.yscale[0].item()}')
-                # Collect outputs and loss
-                # output_list.append(outputs)
-                losses.append(loss.item())
-                xshifts.append(self.sda.sal.xshift[0].item())
-                yshifts.append(self.sda.sal.yshift[0].item())
-                angles.append(self.sda.sal.rot_theta[0].item())
-                xscales.append(self.sda.sal.xscale[0].item())
-                yscales.append(self.sda.sal.yscale[0].item())
+    #             # Display updates
+    #             print('LOSS:', loss.item()/self.base_loss)
+    #             print(f'PARAMS:\n xshift: {W*self.sda.sal.xshift[0].item()/2}, yshift: {H*self.sda.sal.yshift[0].item()/2}, theta: {self.sda.sal.rot_theta[0].item()} ')
+    #             print(f'xscale: {self.sda.sal.xscale[0].item()}, yscale: {self.sda.sal.yscale[0].item()}')
+    #             # Collect outputs and loss
+    #             # output_list.append(outputs)
+    #             losses.append(loss.item())
+    #             xshifts.append(self.sda.sal.xshift[0].item())
+    #             yshifts.append(self.sda.sal.yshift[0].item())
+    #             angles.append(self.sda.sal.rot_theta[0].item())
+    #             xscales.append(self.sda.sal.xscale[0].item())
+    #             yscales.append(self.sda.sal.yscale[0].item())
 
-        if plot:
-            fig, axs = plt.subplots(1, 2)
-            axs[0].plot(losses)
-            axs[0].set_title('Training Loss')
-            axs[1].plot(W*(np.array(xshifts).ravel())/2)
-            axs[1].plot(H*(np.array(yshifts).ravel())/2)
-            axs[1].plot(angles)
-            axs[1].plot(xscales)
-            axs[1].plot(yscales)
-            axs[1].hlines(y=[-self.params['Tx'], -self.params['Ty'], -self.params['theta'], 1/self.params['xscale'], 1/self.params['yscale']],
-                          xmin=0, xmax=len(np.array(xshifts).ravel()), linestyles='dashed', label='ground truth')
-            axs[1].legend(['xshift-pred','yshift-pred', 'theta', 'xscale', 'yscale'])
-            axs[1].set_title('Parameter Dynamics')
-            axs[1].set_ylim([-3.0, 3.0])
-            plt.savefig('learning.jpg')
+    #     if plot:
+    #         fig, axs = plt.subplots(1, 2)
+    #         axs[0].plot(losses)
+    #         axs[0].set_title('Training Loss')
+    #         axs[1].plot(W*(np.array(xshifts).ravel())/2)
+    #         axs[1].plot(H*(np.array(yshifts).ravel())/2)
+    #         axs[1].plot(angles)
+    #         axs[1].plot(xscales)
+    #         axs[1].plot(yscales)
+    #         axs[1].hlines(y=[-self.params['Tx'], -self.params['Ty'], -self.params['theta'], 1/self.params['xscale'], 1/self.params['yscale']],
+    #                       xmin=0, xmax=len(np.array(xshifts).ravel()), linestyles='dashed', label='ground truth')
+    #         axs[1].legend(['xshift-pred','yshift-pred', 'theta', 'xscale', 'yscale'])
+    #         axs[1].set_title('Parameter Dynamics')
+    #         axs[1].set_ylim([-3.0, 3.0])
+    #         plt.savefig('learning.jpg')
 
-        # Get final outputs, i.e. optimal souces
-        with torch.no_grad():
-            final_outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
+    #     # Get final outputs, i.e. optimal souces
+    #     with torch.no_grad():
+    #         final_outputs = self.sda(emg_grid_transform.to(device)).to(device)  # Shape will be (batch_size, num_classes)
 
-        sources = final_outputs.detach().cpu()
-        return sources, losses
+    #     sources = final_outputs.detach().cpu()
+    #     return sources, losses
     
     def loss_sampling(self, emg_grid_transform, num_points=20, loss='kurtosis', device='cpu'):
         ''' Method used to sample the loss landscape.'''
@@ -429,7 +429,7 @@ class SDAExperiment:
         Tx, Ty = self.params['Tx'], self.params['Ty']
         self.params['loss'] = loss
         # emg_grid.requires_grad = True
-        sda = SpatialDecompositionAdaptation(grid_shape=(H, W), sep_mat=self.sep_mat, ycrop=self.params['ycrop'], xcrop=self.params['xcrop'], extension_factor=self.params['R']).to(device)
+        sda = SpatialDecompositionAdaptationOld(grid_shape=(H, W), sep_mat=self.sep_mat, ycrop=self.params['ycrop'], xcrop=self.params['xcrop'], extension_factor=self.params['R']).to(device)
         if loss == 'kurtosis':
             ica_loss = KurtosisLoss()
         else:
@@ -473,7 +473,7 @@ class SDAExperiment:
         true_theta = self.params['theta']
         self.params['loss'] = loss
         # emg_grid.requires_grad = True
-        sda = SpatialDecompositionAdaptation(grid_shape=(H, W), sep_mat=self.sep_mat, ycrop=self.params['ycrop'], xcrop=self.params['xcrop'], extension_factor=self.params['R']).to(device)
+        sda = SpatialDecompositionAdaptationOld(grid_shape=(H, W), sep_mat=self.sep_mat, ycrop=self.params['ycrop'], xcrop=self.params['xcrop'], extension_factor=self.params['R']).to(device)
         if loss == 'kurtosis':
             ica_loss = KurtosisLoss()
         else:
