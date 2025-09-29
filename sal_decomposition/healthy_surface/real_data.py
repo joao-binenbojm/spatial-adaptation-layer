@@ -12,7 +12,7 @@ from math import floor
 from sal_decomposition.MUEdit.processing_tools import bandpass_filter, notch_filter
 from sal_decomposition.sda import SpatialDecompositionAdaptation
 from sal_decomposition.utils import utils
-from sal_decomposition.utils.grid_indexing import index_matrix4
+from sal_decomposition.utils.grid_indexing import index_matrix4, index_matrix2
 
 if __name__ == '__main__':
 
@@ -23,7 +23,7 @@ if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     fsamp = 2048
     batch_size = 2048
-    bounds = [4, 12, 10*np.pi/180]
+    bounds = [4, 12] #, 10*np.pi/180]
     # torch.set_default_dtype(torch.float64)
     print(os.listdir(DIR))
 
@@ -32,7 +32,7 @@ if __name__ == '__main__':
     start, end = utils.get_target_boundaries(signal['target'].squeeze())
     print('FILTERING TRAINING DATA...')
     emg = signal['data'][:, start:end]
-    emg = (emg - emg.mean(axis=1, keepdims=True)) # centering emg
+    emg = (emg - emg.mean(axis=1, keepdims=True)) / (emg.std() + 1e-12) # centering emg
     emg = bandpass_filter(notch_filter(emg, fsamp=fsamp), fsamp=fsamp)
     emg_grid = utils.make_grid(emg, index_matrix4)
     H, W = emg_grid.shape[2], emg_grid.shape[3]
@@ -50,7 +50,7 @@ if __name__ == '__main__':
     signal2, edition2 = utils.open_mat_output(DIR, file2)
     start2, end2 = utils.get_target_boundaries(signal2['target'].squeeze())
     emg2 = signal2['data'][:, start2:end2]
-    emg2 = (emg2 - emg2.mean(axis=1, keepdims=True)) # centering emg
+    emg2 = (emg2 - emg2.mean(axis=1, keepdims=True)) / (emg2.std() + 1e-12) # centering emg
     print('FILTERING TEST DATA...')
     emg2 = bandpass_filter(notch_filter(emg2, fsamp=fsamp), fsamp=fsamp)
     emg_grid_test = utils.make_grid(emg2, index_matrix4)

@@ -127,9 +127,9 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
     if d > 2:
         init_params[:,2] = boundaries[2]*init_params[:, 2]/np.pi
     if d > 3:
-        init_params[:, 3] = (boundaries[3] - 1/boundaries[3])*(init_params[:, 3] + 1 )/2 + 1/boundaries[3] #torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) )
+        init_params[:, 3] = (boundaries[3] - 1/boundaries[3])*(init_params[:, 3] + 1 )/2 + 1/boundaries[3]
     if d > 4:
-        init_params[:, 4] = (boundaries[4] - 1/boundaries[4])*(init_params[:, 4] + 1 )/2 + 1/boundaries[4]  # torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
+        init_params[:, 4] = (boundaries[4] - 1/boundaries[4])*(init_params[:, 4] + 1 )/2 + 1/boundaries[4]
 
     init_params = init_params.to(device)
     with torch.no_grad():
@@ -221,11 +221,6 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
         # print(f'xscale: {sda.sal.xscale.item()}, yscale: {sda.sal.yscale.item()}')
         # Collect outputs and loss
         losses.append(epoch_loss)
-        # xshifts.append(sda.sal.xshift.item())
-        # yshifts.append(sda.sal.yshift.item())
-        # angles.append(sda.sal.rot_theta.item())
-        # xscales.append(sda.sal.xscale.item())
-        # yscales.append(sda.sal.yscale.item())
 
     # Get final outputs, i.e. optimal souces
     with torch.no_grad():
@@ -304,8 +299,8 @@ def loss_sampling(emg_grid_transform, sda, base_loss=1.0, T=(0.0, 0.0), bounds=(
     ax = sns.heatmap(np.array(loss_arr.cpu())/base_loss)
     ax.set(xlabel='Circumferential Shifts (mm)', ylabel='Longitudinal Shifts (mm)')
     if T:
-        ax.text(np.where(np.array(x.cpu())>=-Tx)[0][0] + 0.5, 
-                np.where(y.cpu()>=-Ty)[0][0]+0.5, 'X', 
+        ax.text(np.where(np.array(x.cpu())>=Tx)[0][0] + 0.5, 
+                np.where(y.cpu()>=Ty)[0][0]+0.5, 'X', 
             color='green', ha='center', va='center', fontsize=16)
     
     plt.savefig('loss_landscape.jpg')
