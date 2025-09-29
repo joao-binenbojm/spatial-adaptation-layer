@@ -120,7 +120,7 @@ for trans_idx in range(Nt):
     wandb.init(
         # set the wandb project where this run will be logged
         project="sal-decomposition-simulations-trick",
-        name=f'{opt}-{SNR}-{fxmax}',
+        name=f'{opt}-{SNR}-{fxmax}-{trans_idx}',
         # mode='disabled',
     )
 
