@@ -38,7 +38,7 @@ checklist = []
 mu_count = 20
 exp_name = sys.argv[1]  # First argument after script name
 
-with open(f"sal_decomposition/simulation_study/exp_conditions/{exp_name}.json", "r") as f:
+with open(f"sal_decomposition/simulation_study/{exp_name}.json", "r") as f:
     exp = json.load(f)
 
 SNR, opt, fxmax = exp['SNR'], exp['opt'], exp['fxmax']
