@@ -2,37 +2,99 @@ import torch
 from networks_utils import SpatialAdaptation
 
 
-### TEMPORARY UTILS TO BE INTEGRATED IN SDA LATER
+# ### TEMPORARY UTILS TO BE INTEGRATED IN SDA LATER
+# def get_P(sal, sal_idx=0, align_corners=True, inverse=False):
+#     """
+#     Build dense bilinear interpolation matrix P for HxW grid given affine theta.
+#     P @ y_flat maps the EMG grid y into the transformed grid.
+#     """
+#     H, W = sal.input_shape
+#     M = H * W
+#     theta = sal.get_affine_transform(sal_idx=sal_idx, inverse=inverse)
+#     # Generate normalized affine sampling grid
+#     grid = torch.nn.functional.affine_grid(theta.unsqueeze(0), size=(1, 1, H, W), align_corners=align_corners)[0]  # H x W x 2
+
+#     # Convert normalized coords to pixel indices
+#     if align_corners:
+#         x = ((grid[..., 0] + 1) * (W - 1) / 2).flatten() # align_corners=True
+#         y = ((grid[..., 1] + 1) * (H - 1) / 2).flatten()
+#     else:
+#         x = ((grid[..., 0] + 1) * W / 2 - 0.5).flatten() # align_corners=False
+#         y = ((grid[..., 1] + 1) * H / 2 - 0.5).flatten()
+
+#     # Neighbors
+#     # x0 = torch.floor(x).long().clamp(0, W - 1)
+#     # x1 = torch.ceil(x).long().clamp(0, W - 1)
+#     # y0 = torch.floor(y).long().clamp(0, H - 1)
+#     # y1 = torch.ceil(y).long().clamp(0, H - 1)
+#     x0 = torch.floor(x).long()
+#     x1 = torch.ceil(x).long()
+#     y0 = torch.floor(y).long()
+#     y1 = torch.ceil(y).long()
+
+#     # Weights
+#     dx = x - x0.float()
+#     dy = y - y0.float()
+
+#     w00 = (1 - dx) * (1 - dy)
+#     w01 = dx * (1 - dy)
+#     w10 = (1 - dx) * dy
+#     w11 = dx * dy
+
+#     def idx(y_idx, x_idx):
+#         return y_idx * W + x_idx
+
+#     i00 = idx(y0, x0)
+#     i01 = idx(y0, x1)
+#     i10 = idx(y1, x0)
+#     i11 = idx(y1, x1)
+
+#     # Mask for valid indices (inside grid) --> effectively treats out-of-bounds as zero-padding
+#     valid00 = (x0 >= 0) & (x0 < W) & (y0 >= 0) & (y0 < H)
+#     valid01 = (x1 >= 0) & (x1 < W) & (y0 >= 0) & (y0 < H)
+#     valid10 = (x0 >= 0) & (x0 < W) & (y1 >= 0) & (y1 < H)
+#     valid11 = (x1 >= 0) & (x1 < W) & (y1 >= 0) & (y1 < H)
+
+#     # Assemble dense P
+#     P = torch.zeros((M, M), dtype=torch.float32, device=theta.device)
+#     rows = torch.arange(M, device=theta.device)
+
+#     # P[rows, i00] += w00
+#     # P[rows, i01] += w01
+#     # P[rows, i10] += w10
+#     # P[rows, i11] += w11
+
+#     # Only add weights for valid indices
+#     P[rows[valid00], i00[valid00]] += w00[valid00]
+#     P[rows[valid01], i01[valid01]] += w01[valid01]
+#     P[rows[valid10], i10[valid10]] += w10[valid10]
+#     P[rows[valid11], i11[valid11]] += w11[valid11]
+
+#     return P
+
 def get_P(sal, sal_idx=0, align_corners=True, inverse=False):
     """
     Build dense bilinear interpolation matrix P for HxW grid given affine theta.
     P @ y_flat maps the EMG grid y into the transformed grid.
+    Out-of-boundary pixels are hard-zeroed (no mixing).
     """
     H, W = sal.input_shape
     M = H * W
     theta = sal.get_affine_transform(sal_idx=sal_idx, inverse=inverse)
-    # Generate normalized affine sampling grid
     grid = torch.nn.functional.affine_grid(theta.unsqueeze(0), size=(1, 1, H, W), align_corners=align_corners)[0]  # H x W x 2
 
-    # Convert normalized coords to pixel indices
     if align_corners:
-        x = ((grid[..., 0] + 1) * (W - 1) / 2).flatten() # align_corners=True
+        x = ((grid[..., 0] + 1) * (W - 1) / 2).flatten()
         y = ((grid[..., 1] + 1) * (H - 1) / 2).flatten()
     else:
-        x = ((grid[..., 0] + 1) * W / 2 - 0.5).flatten() # align_corners=False
+        x = ((grid[..., 0] + 1) * W / 2 - 0.5).flatten()
         y = ((grid[..., 1] + 1) * H / 2 - 0.5).flatten()
 
-    # Neighbors
-    # x0 = torch.floor(x).long().clamp(0, W - 1)
-    # x1 = torch.ceil(x).long().clamp(0, W - 1)
-    # y0 = torch.floor(y).long().clamp(0, H - 1)
-    # y1 = torch.ceil(y).long().clamp(0, H - 1)
     x0 = torch.floor(x).long()
     x1 = torch.ceil(x).long()
     y0 = torch.floor(y).long()
     y1 = torch.ceil(y).long()
 
-    # Weights
     dx = x - x0.float()
     dy = y - y0.float()
 
@@ -49,26 +111,25 @@ def get_P(sal, sal_idx=0, align_corners=True, inverse=False):
     i10 = idx(y1, x0)
     i11 = idx(y1, x1)
 
-    # Mask for valid indices (inside grid) --> effectively treats out-of-bounds as zero-padding
+    # Validity masks for all four neighbors
     valid00 = (x0 >= 0) & (x0 < W) & (y0 >= 0) & (y0 < H)
     valid01 = (x1 >= 0) & (x1 < W) & (y0 >= 0) & (y0 < H)
     valid10 = (x0 >= 0) & (x0 < W) & (y1 >= 0) & (y1 < H)
     valid11 = (x1 >= 0) & (x1 < W) & (y1 >= 0) & (y1 < H)
 
-    # Assemble dense P
+    # Only interpolate if all neighbors are valid
+    all_valid = valid00 & valid01 & valid10 & valid11
+
     P = torch.zeros((M, M), dtype=torch.float32, device=theta.device)
     rows = torch.arange(M, device=theta.device)
 
-    # P[rows, i00] += w00
-    # P[rows, i01] += w01
-    # P[rows, i10] += w10
-    # P[rows, i11] += w11
+    # Only add weights for fully valid pixels
+    P[rows[all_valid], i00[all_valid]] += w00[all_valid]
+    P[rows[all_valid], i01[all_valid]] += w01[all_valid]
+    P[rows[all_valid], i10[all_valid]] += w10[all_valid]
+    P[rows[all_valid], i11[all_valid]] += w11[all_valid]
 
-    # Only add weights for valid indices
-    P[rows[valid00], i00[valid00]] += w00[valid00]
-    P[rows[valid01], i01[valid01]] += w01[valid01]
-    P[rows[valid10], i10[valid10]] += w10[valid10]
-    P[rows[valid11], i11[valid11]] += w11[valid11]
+    # All other rows remain zero (hard-zeroed)
 
     return P
 
@@ -148,13 +209,14 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         if self.training:
             self.P_inv_extended = get_P_inv_extended(self.sal, self.extension_factor, sal_idx=0, inverse=inverse) # if testing, assume we have P_inv_extended available to use
             self.P_sep_mat = self.STA @ self.P_inv_extended.T @ self.inv_cov
+            # self.P_sep_mat = self.STA @ self.inv_cov @ self.P_inv_extended
         extended_emg = self.extend_emg(emg.reshape(emg.shape[0], -1))
         sources = self.P_sep_mat @ extended_emg
         return sources.T
 
-    def apply_affine(self, emg):
+    def apply_affine(self, emg, inverse=False):
         '''Apply the current affine transformation to the EMG grid.'''
-        P = get_P(self.sal, sal_idx=0, inverse=False)
+        P = get_P(self.sal, sal_idx=0, inverse=inverse)
         emg_transform = apply_P_to_emg(emg, P)
         return emg_transform
 
@@ -201,9 +263,9 @@ class SpatialDecompositionAdaptationOld(torch.nn.Module):
         return extended_emg
 
     # Extend, whiten and separate sources
-    def forward(self, emg):
+    def forward(self, emg, inverse=False):
         # emg = self.bn(emg) # apply batch norm
-        emg_sal = self.sal(emg).squeeze()
+        emg_sal = self.sal(emg, inverse=inverse).squeeze()
         emg_sal = emg_sal[:, self.tcrop:emg_sal.shape[1]-self.bcrop, self.lcrop:emg_sal.shape[2]-self.rcrop]
         extended_emg = self.extend_emg(emg_sal.reshape(emg_sal.shape[0], -1))[:-(self.extension_factor-1)]
         sources = self.sep_mat(extended_emg)

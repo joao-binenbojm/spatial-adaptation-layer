@@ -92,9 +92,9 @@ if __name__ == '__main__':
     base_loss = utils.get_base_loss(emg_grid.to(torch.float64), sda, batch_size=batch_size, loss='kurtosis', device='cpu')
     
     # Get inverse covariance of the test grid, and determine the spatial transformation required for the STA templates to become optimal separation vectors
-    extended_emg_test = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T
-    inv_cov_test = utils.get_inv_cov_torch(extended_emg_test, explained_var=explained_var).to(torch.float32)
-    sda.inv_cov = inv_cov_test
+    # extended_emg_test = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T
+    # inv_cov_test = utils.get_inv_cov_torch(extended_emg_test, explained_var=explained_var).to(torch.float32)
+    # sda.inv_cov = inv_cov_test
 
     sources, losses = utils.search_fit_sda(emg_grid_test, sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=500, nepochs=100, lr=5e-4, boundaries=bounds, device='cuda')
     

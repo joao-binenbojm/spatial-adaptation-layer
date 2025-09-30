@@ -37,7 +37,7 @@ if __name__ == '__main__':
                 emg = (emg - emg.mean(axis=1, keepdims=True)) / (emg.std() + 1e-12) # centering emg
                 emg = bandpass_filter(notch_filter(emg, fsamp=fsamp), fsamp=fsamp)
                 emg_grid = utils.make_grid(emg, index_matrix4).to(torch.float32)
-                emg_grid = emg_grid[:,:,:emg_grid.shape[2]//2, :emg_grid.shape[3]//2]
+                # emg_grid = emg_grid[:,:,:emg_grid.shape[2]//2, :emg_grid.shape[3]//2]
                 H, W = emg_grid.shape[2], emg_grid.shape[3]
                 Nch = H*W                
 
@@ -57,7 +57,7 @@ if __name__ == '__main__':
                         for trans_idx in range(30): # thirty random transformations
                             min_bounds = [-b if b_idx < 3 else 1/b for b_idx, b in enumerate(bounds)]
                             # Tx, Ty, theta, xscale, yscale = torch.tensor(np.random.uniform(min_bounds, bounds)).to(torch.float32) # sample random transformation parameters
-                            Tx, Ty, theta = torch.tensor([1.5, -1.2, 0.0]) #, 1.0, 1.0])
+                            Tx, Ty, theta = torch.tensor([2.0, -2.0, 0.0]) #, 1.0, 1.0])
                             # Tx, Ty, theta = torch.tensor(np.random.uniform(-bounds[:-2], bounds[:-2])).to(torch.float32)
                             print(f"Transformation parameters: Tx: {Tx}, Ty: {Ty}, rot_theta: {theta}")#, xscale: {xscale}, yscale: {yscale}")
 
@@ -98,15 +98,16 @@ if __name__ == '__main__':
 
                             # Add optimal parameters for testing
                             with torch.no_grad():
-                                # sda.sal.xshift[0].copy_(2*Tx/(W-1))
-                                # sda.sal.yshift[0].copy_(2*Ty/(H-1))
-                                # sda.sal.rot_theta[0].copy_(-theta/np.pi)
+                                sda.sal.xshift[0].copy_(2*Tx/(W-1))
+                                sda.sal.yshift[0].copy_(2*Ty/(H-1))
+                                sda.sal.rot_theta[0].copy_(theta/np.pi)
                                 # sda.sal.xscale[0].copy_(xscale)
                                 # sda.sal.yscale[0].copy_(yscale)
                                 # sda.sal.xshift[0].copy_(2*-1.5/(W-1))
                                 # sda.sal.yshift[0].copy_(2*1.8/(H-1))
                                 # Get simulated spatial perturbation
                                 emg_grid_test = sda.apply_affine(emg_grid)
+                                # emg_grid = sda.apply_affine(emg_grid_test, inverse=True) # invert spatial transformation to get zeroed out and mixedl channels
 
                             # Test on optimal inverse transformation
                             extended_emg = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T
@@ -114,7 +115,7 @@ if __name__ == '__main__':
                             sda.inv_cov = inv_cov # update inverse covariance
                             
                             # LOSS SAMPLING TO UNDERSTAND WHAT'S GOING ON
-                            utils.loss_sampling(emg_grid_test, sda, base_loss=base_loss, T=[-1.5, 1.8], bounds=[2.0, 2.0], batch_size=batch_size)
+                            # utils.loss_sampling(emg_grid_test, sda, base_loss=base_loss, T=[-1.5, 1.8], bounds=[2.0, 2.0], batch_size=batch_size)
 
                             with torch.no_grad():
                                 source_est_valid = sda(emg_grid_test)
@@ -134,7 +135,7 @@ if __name__ == '__main__':
                                 sda.sal.yscale[0].copy_(1.0)
 
                             # Fit SDA model to determine optimal spatial transformation
-                            sources, losses = utils.search_fit_sda(emg_grid_test, sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=500, nepochs=50, lr=1e-3, boundaries=bounds[:-2], device='cuda')
+                            sources, losses = utils.search_fit_sda(emg_grid_test, sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=2000, nepochs=0, lr=1e-3, boundaries=bounds[:-2], device='cuda')
 
                             # Log parameters
                             wandb.log({'Tx_est':(W-1)*sda.sal.xshift[0].item()/2, 'Ty_est':(H-1)*sda.sal.yshift[0].item()/2, 'theta_est':np.pi*sda.sal.rot_theta[0].item()})
