@@ -72,15 +72,19 @@ from networks_utils import SpatialAdaptation
 
 #     return P
 
-def get_P(sal, sal_idx=0, align_corners=True, inverse=False):
+def get_P(sal, sal_idx=0, input_shape=None, align_corners=True, inverse=False):
     """
     Build dense bilinear interpolation matrix P for HxW grid given affine theta.
     P @ y_flat maps the EMG grid y into the transformed grid.
     Out-of-boundary pixels are hard-zeroed (no mixing).
     """
-    H, W = sal.input_shape
+    if input_shape is not None:
+        H, W = input_shape
+    else:
+        H, W = sal.input_shape
+        input_shape = sal.input_shape
     M = H * W
-    theta = sal.get_affine_transform(sal_idx=sal_idx, inverse=inverse)
+    theta = sal.get_affine_transform(sal_idx=sal_idx, input_shape=input_shape, inverse=inverse)
     grid = torch.nn.functional.affine_grid(theta.unsqueeze(0), size=(1, 1, H, W), align_corners=align_corners)[0]  # H x W x 2
 
     if align_corners:
@@ -157,6 +161,11 @@ def reg_pinv(P, lam=1e-3):
     I = torch.eye(n, device=P.device, dtype=P.dtype)
     return torch.linalg.solve(Pt @ P + lam * I, Pt)
 
+def block_extension(matrix, extension_factor):
+    blocks = [matrix for _ in range(extension_factor)]
+    extended_matrix = torch.block_diag(*blocks)
+    return extended_matrix
+
 def get_P_inv_extended(sal, R, sal_idx=0, inverse=False):
     """
     Build block-diagonal extended inverse P for temporal extension.
@@ -164,9 +173,7 @@ def get_P_inv_extended(sal, R, sal_idx=0, inverse=False):
     R: number of temporal taps
     """
     P_inv = get_P(sal, sal_idx=sal_idx, inverse=inverse)  # [M, M]
-    # P_inv = reg_pinv(P)  # dense for simplicity
-    blocks = [P_inv for _ in range(R)]
-    P_inv_ext = torch.block_diag(*blocks)  # [M*R, M*R]
+    P_inv_ext = block_extension(P_inv, extension_factor=R)
     return P_inv_ext
 
 
@@ -180,20 +187,17 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         self.extension_factor = extension_factor
         self.sal = SpatialAdaptation(input_shape=grid_shape, T=True, R=True, Sc=True, Sh=False, mode=mode, circular=False, constrain_params=False)
         self.bn = torch.nn.BatchNorm2d(1)
+        self.xcrop, self.ycrop = xcrop, ycrop
         self.lcrop, self.rcrop = xcrop, xcrop
         self.bcrop, self.tcrop = ycrop, ycrop
 
         ## TESTING
         self.register_buffer("P_inv_extended", torch.eye(self.nchans*self.extension_factor), persistent=False) # initialize as identity
-        # self.register_buffer("P_sep_mat", torch.randn_like(sep_mat), persistent=False) # initialize as identity
-        # self.register_buffer("sep_mat", sep_mat) # initialize as identity
-        # self.sep_mat = torch.nn.Linear(sep_mat.shape[1], sep_mat.shape[0], bias=False)
-        # with torch.no_grad():
-            # self.sep_mat.weight.copy_(sep_mat)
-        
+        self.register_buffer("P_sep_mat", torch.randn_like(STA), persistent=False) # initialize as identity
+        self.channel_scales = torch.nn.Parameter(torch.ones(self.nchans))
+        self.register_buffer("crop_mask", self.get_crop_mask()) # initialize crop mask to be applied to extended_emg        
         self.register_buffer("STA", STA)
         self.register_buffer("inv_cov", inv_cov)
-
 
     def extend_emg(self, emg):
         '''Extend the original EMG batch given extension factor.'''
@@ -202,23 +206,96 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         extended_emg = torch.zeros((emg.shape[0] + self.extension_factor - 1, nchans*self.extension_factor)).to(device)
         for idx in range(self.extension_factor):
             extended_emg[idx:emg.shape[0]+idx, idx*nchans:(idx+1)*nchans] = emg
-        return extended_emg[:-(self.extension_factor-1),:].T
+        return extended_emg[:-(self.extension_factor-1),:] .T
 
     # Extend, whiten and separate sources
     def forward(self, emg, inverse=False):
-        if self.training:
-            self.P_inv_extended = get_P_inv_extended(self.sal, self.extension_factor, sal_idx=0, inverse=inverse) # if testing, assume we have P_inv_extended available to use
-            self.P_sep_mat = self.STA @ self.P_inv_extended.T @ self.inv_cov
-            # self.P_sep_mat = self.STA @ self.inv_cov @ self.P_inv_extended
+        # if self.training:
+        scalings = torch.diag(self.channel_scales)
+        D_inv_extended = block_extension(scalings, extension_factor=self.extension_factor)
+        # self.update_cropping()
+        # self.P_inv_extended = get_P_inv_extended(self.sal, self.extension_factor, sal_idx=0, inverse=inverse) # if testing, assume we have P_inv_extended available to use
+        # self.STA_transform = (self.STA @ self.P_inv_extended.T)[:, self.crop_mask] # 
+        # self.P_sep_mat = self.STA_transform @ self.inv_cov
+        sep_mat = self.STA @ self.inv_cov 
+        self.P_sep_mat = self.spatial_transform_filter(sep_mat)
+        self.P_sep_mat = self.P_sep_mat @ D_inv_extended
+
+        # emg = emg[:, :, self.tcrop:emg.shape[2]-self.bcrop, self.lcrop:emg.shape[3]-self.rcrop] # apply cropping
         extended_emg = self.extend_emg(emg.reshape(emg.shape[0], -1))
         sources = self.P_sep_mat @ extended_emg
         return sources.T
 
+    # def update_cropping(self):
+    #     """Every forward pass, assume transformation has changed and compute the new valid crop."""
+    #     H, W = self.grid_shape
+    #     Tx, Ty = (W-1)*self.sal.xshift[0]/2, (H-1)*self.sal.yshift[0]/2
+    #     self.lcrop = torch.ceil(Tx).to(torch.int) if Tx > 0 else torch.tensor([0])
+    #     self.rcrop = self.xcrop - self.lcrop
+    #     self.tcrop = torch.ceil(Ty).to(torch.int) if Ty > 0 else torch.tensor([0])
+    #     self.bcrop = self.ycrop - self.tcrop
+    #     self.crop_mask = self.get_crop_mask(grid_shape=self.grid_shape)
+
     def apply_affine(self, emg, inverse=False):
         '''Apply the current affine transformation to the EMG grid.'''
-        P = get_P(self.sal, sal_idx=0, inverse=inverse)
+        P = get_P(self.sal, input_shape=emg.shape[2:], sal_idx=0, inverse=inverse)
         emg_transform = apply_P_to_emg(emg, P)
         return emg_transform
+    
+    def spatial_transform_filter(
+        self,
+        B: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Applies a spatial transformation to a convolutive separation matrix
+        with the memory layout [M, (C_lag0, C_lag1, ...)].
+
+        Args:
+            B: The separation matrix of shape [M, (H*W)*L].
+            theta: The 2x3 affine transformation matrix.
+            H, W, L: The height, width, and extension factor (R).
+
+        Returns:
+            The spatially transformed separation matrix of shape [M, (H*W)*L].
+        """
+        H, W = self.grid_shape
+        M = B.shape[0]
+        C = H*W
+
+        # == 1. UNFOLD ==
+        # Start with shape [M, C*L], where data is grouped by lag.
+        # Reshape to isolate the time lag (L) and channel (C) dimensions.
+        B_unfolded = B.reshape(M, self.extension_factor, C)
+
+        # Further reshape to isolate the spatial H and W dimensions.
+        # The shape is now [M, self.extension_factor, H, W].
+        B_spatial = B_unfolded.reshape(M, self.extension_factor, H, W)
+
+        # Reshape for batch processing. We combine M and L into the batch dimension.
+        # The new shape is [M*self.extension_factor, 1, H, W] for grid_sample.
+        B_reshaped_for_grid_sample = B_spatial.reshape(M * self.extension_factor, 1, H, W)
+
+
+        # == 2. APPLY TRANSFORMATION ==
+        # Create the sampself.extension_factoring grid.
+        B_transformed = self.sal(B_reshaped_for_grid_sample)
+
+        # == 3. REFOLD ==
+        # Reshape back to separate the M and L dimensions: [M, self.extension_factor H, W].
+        B_refolded_spatial = B_transformed.reshape(M, self.extension_factor, H, W)
+
+        # Flatten back to the final desired shape [M, L*(H*W)] = [M, C*L].
+        B_final = B_refolded_spatial.reshape(M, self.extension_factor * C)
+
+        return B_final
+    
+    def get_crop_mask(self):
+        ''' Apply the equivalent cropping operation by transforming an equivalent binary mask the same way as the EMG image frames are transformed.'''
+        mask = torch.zeros(self.grid_shape[0], self.grid_shape[1])
+        mask[self.tcrop:mask.shape[0]-self.bcrop, self.lcrop:mask.shape[1]-self.rcrop] = 1 # channels to keep
+        mask = mask.reshape(-1)
+        extended_crop_mask = mask.repeat(self.extension_factor)
+        return extended_crop_mask.squeeze().to(torch.bool)
 
     def get_extended_emg(self, emg):
         '''Get the SAL, cropped + extended EMG from the original EMG.'''

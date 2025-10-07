@@ -2,6 +2,7 @@ import numpy as np
 import scipy
 from scipy import signal
 from scipy.io import loadmat
+import h5py
 import os
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -180,13 +181,15 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
             print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=torch.min(torch.tensor([npoints, 5])))}')
 
     # Make SAL parameters learnable
-    # for param in sda.sal.parameters():
     if frozen_sep_mat:
         for param in sda.sal.parameters():
             param.requires_grad = True        
     else:
         for param in sda.parameters():
             param.requires_grad = True
+
+    # Make channel scalings learnable
+    sda.channel_scales.requires_grad = True
 
     # Loop through the DataLoader
     print('TRAINING FROM BEST INIT. CONDITION...')
@@ -235,9 +238,84 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
 
     return sources, losses
 
-def loss_sampling(emg_grid_transform, sda, base_loss=1.0, T=(0.0, 0.0), bounds=(0.0, 0.0), batch_size=2048, num_points=20, loss='kurtosis', device='cpu'):
+# def loss_sampling(emg_grid_transform, sda, base_loss=1.0, T=(0.0, 0.0), bounds=(0.0, 0.0), batch_size=2048, num_points=20, loss='kurtosis', device='cpu'):
+#     ''' Method used to sample the loss landscape.'''
+#     N, C, H, W = emg_grid_transform.shape
+#     if loss == 'kurtosis':
+#         ica_loss = KurtosisLoss()
+#     else:
+#         ica_loss = NegentropyLoss()
+
+#     # Getting torch meshgrid
+#     if not T:
+#         Tx, Ty = W//2, H//2
+#     else:
+#         Tx, Ty = T
+#     xbounds, ybounds = bounds
+#     x = torch.linspace(-torch.tensor(xbounds), torch.tensor(xbounds), num_points)
+#     y = torch.linspace(-torch.tensor(ybounds), torch.tensor(ybounds), num_points)
+#     xx, yy = torch.meshgrid(x, y, indexing='xy')
+    
+#     # Reshape grid points into a batch
+#     xflat = xx.reshape(-1).to(device)
+#     yflat = yy.reshape(-1).to(device)
+    
+#     # Sample parameters
+#     sda.train()
+#     with torch.no_grad():
+#         # Process grid points in batches
+#         grid_batch_size = 100  # Number of grid points to process at once
+#         total_points = len(xflat)
+#         loss_flat = torch.zeros(total_points, device=device)
+        
+#         for grid_idx in tqdm(range(0, total_points, grid_batch_size)):
+#             grid_end_idx = min(grid_idx + grid_batch_size, total_points)
+            
+#             # Set shifts for this batch of grid points
+#             xshifts_batch = 2 * xflat[grid_idx:grid_end_idx] / (W-1)
+#             yshifts_batch = 2 * yflat[grid_idx:grid_end_idx] / (H-1)
+            
+#             batch_losses = []
+#             # Process EMG data in batches for each grid point
+#             for start_idx in range(0, N, batch_size):
+#                 end_idx = min(start_idx + batch_size, N)
+#                 emg_batch = emg_grid_transform[start_idx:end_idx].to(device)
+                
+#                 # Compute losses for all grid points in current batch
+#                 batch_outputs = []
+#                 for xshift, yshift in zip(xshifts_batch, yshifts_batch):
+#                     sda.sal.xshift[0].copy_(xshift)
+#                     sda.sal.yshift[0].copy_(yshift)
+#                     batch_output = sda(emg_batch)
+#                     batch_outputs.append(ica_loss(batch_output))
+                
+#                 batch_losses.append(batch_outputs)
+            
+#             # Average losses across EMG batches
+#             avg_losses = torch.tensor(batch_losses).mean(dim=0)
+#             loss_flat[grid_idx:grid_end_idx] = avg_losses
+
+#     # Reshape losses back to grid
+#     loss_arr = loss_flat.reshape(num_points, num_points)
+
+#     plt.figure()
+#     ax = sns.heatmap(np.array(loss_arr.cpu())/base_loss)
+#     ax.set(xlabel='Circumferential Shifts (mm)', ylabel='Longitudinal Shifts (mm)')
+#     if T:
+#         ax.text(np.where(np.array(x.cpu())>=Tx)[0][0] + 0.5, 
+#                 np.where(y.cpu()>=Ty)[0][0]+0.5, 'X', 
+#             color='green', ha='center', va='center', fontsize=16)
+    
+#     plt.savefig('loss_landscape.jpg')
+#     print()
+
+#     return loss_arr
+
+def loss_sampling(emg_grid_transform, sda, base_loss=1.0, T=(0.0, 0.0), bounds=(0.0, 0.0), 
+                  batch_size=2048, num_points=20, loss='kurtosis', device='cpu'):
     ''' Method used to sample the loss landscape.'''
     N, C, H, W = emg_grid_transform.shape
+    
     if loss == 'kurtosis':
         ica_loss = KurtosisLoss()
     else:
@@ -258,39 +336,47 @@ def loss_sampling(emg_grid_transform, sda, base_loss=1.0, T=(0.0, 0.0), bounds=(
     yflat = yy.reshape(-1).to(device)
     
     # Sample parameters
-    sda.train()
+    sda.eval()  # Use eval mode for consistent results
     with torch.no_grad():
-        # Process grid points in batches
-        grid_batch_size = 100  # Number of grid points to process at once
         total_points = len(xflat)
         loss_flat = torch.zeros(total_points, device=device)
         
-        for grid_idx in tqdm(range(0, total_points, grid_batch_size)):
-            grid_end_idx = min(grid_idx + grid_batch_size, total_points)
+        # For each grid point
+        for grid_idx in tqdm(range(total_points)):
+            # Set shift for this grid point
+            xshift = 2 * xflat[grid_idx] / (W-1)
+            yshift = 2 * yflat[grid_idx] / (H-1)
             
-            # Set shifts for this batch of grid points
-            xshifts_batch = 2 * xflat[grid_idx:grid_end_idx] / (W-1)
-            yshifts_batch = 2 * yflat[grid_idx:grid_end_idx] / (H-1)
+            sda.sal.xshift[0].copy_(xshift)
+            sda.sal.yshift[0].copy_(yshift)
             
-            batch_losses = []
-            # Process EMG data in batches for each grid point
+            # Accumulate loss across all EMG data batches
+            total_loss = 0.0
+            num_samples = 0
+            
             for start_idx in range(0, N, batch_size):
                 end_idx = min(start_idx + batch_size, N)
                 emg_batch = emg_grid_transform[start_idx:end_idx].to(device)
                 
-                # Compute losses for all grid points in current batch
-                batch_outputs = []
-                for xshift, yshift in zip(xshifts_batch, yshifts_batch):
-                    sda.sal.xshift[0].copy_(xshift)
-                    sda.sal.yshift[0].copy_(yshift)
-                    batch_output = sda(emg_batch)
-                    batch_outputs.append(ica_loss(batch_output))
+                # Apply transformation and compute loss
+                batch_output = sda(emg_batch)
+                batch_loss = ica_loss(batch_output)
                 
-                batch_losses.append(batch_outputs)
+                # Check if loss is per-sample or already reduced
+                if batch_loss.dim() == 0:  # Scalar loss
+                    # Loss is already averaged over batch
+                    total_loss += batch_loss.item() * (end_idx - start_idx)
+                    num_samples += (end_idx - start_idx)
+                else:  # Per-sample losses
+                    total_loss += batch_loss.sum().item()
+                    num_samples += batch_loss.numel()
+                
+                # Free GPU memory
+                del emg_batch, batch_output, batch_loss
+                torch.cuda.empty_cache()
             
-            # Average losses across EMG batches
-            avg_losses = torch.tensor(batch_losses).mean(dim=0)
-            loss_flat[grid_idx:grid_end_idx] = avg_losses
+            # Average loss across all samples for this grid point
+            loss_flat[grid_idx] = total_loss / num_samples
 
     # Reshape losses back to grid
     loss_arr = loss_flat.reshape(num_points, num_points)
@@ -307,6 +393,7 @@ def loss_sampling(emg_grid_transform, sda, base_loss=1.0, T=(0.0, 0.0), bounds=(
     print()
 
     return loss_arr
+
 
 def get_transformed_grid(grid_shape, Tx=0, Ty=0, theta=0, xscale=1, yscale=1):
     '''Computes the transformed grid coordinates for euclidina distance comparison.'''
@@ -386,18 +473,32 @@ def whitening_tikhonov(signal, reg=1e-6):
 
 def open_mat_output(DIR, name):
     ''' Open data from Emanuele's files so that it can be further processed'''
-    arr = loadmat(os.path.join(DIR, name), struct_as_record=False, mat_dtype=True)
-    
-    # Load acquisition signal
-    signal, edition = {}, {}
-    for attr in dir(arr['signal'][0,0]):
-        if attr[0] != '_': # only data relevant attributes
-            signal[attr] = getattr(arr['signal'][0,0], attr)
 
-    for attr in dir(arr['edition'][0,0]):
-        if attr[0] != '_': # only data relevant attributes
-            edition[attr] = getattr(arr['edition'][0,0], attr)
-    
+    try:
+        arr = loadmat(os.path.join(DIR, name), struct_as_record=False, mat_dtype=True)
+            # Load acquisition signal
+        signal, edition = {}, {}
+        for attr in dir(arr['signal'][0,0]):
+            if attr[0] != '_': # only data relevant attributes
+                signal[attr] = getattr(arr['signal'][0,0], attr)
+
+        for attr in dir(arr['edition'][0,0]):
+            if attr[0] != '_': # only data relevant attributes
+                edition[attr] = getattr(arr['edition'][0,0], attr)
+    # In case the matlab file is 
+    except:
+        signal, edition = {}, {}
+        with h5py.File(os.path.join(DIR, name), 'r') as f:
+            signal['data'] = f['signal']['data'][:, :256].T
+            signal['target'] = f['signal']['target'][:]
+            dts = []
+            for idx in range(4):
+                ref = f['edition']['Distimeclean'][idx, 0]
+                for pt_idx in range(f[ref].shape[0]):
+                    subref = f[ref][pt_idx, 0]
+                    dts.append(f[subref][:].squeeze())
+            edition['Dischargetimes'] = dts    
+
     return signal, edition
 
 def get_target_boundaries(target, threshold=0.9):
@@ -420,6 +521,9 @@ def squeeze_dts(dts):
     '''Takes in discharge times across motor units in an array of shape (4, Nmax), 
     being the maximum number of MUs per subgrid (4) Return a list where each elemnt is an array of discharge times. '''
     # Convert discharge times array into list of arrays, removing zeros/padding
+    if isinstance(dts, list):
+        return dts
+
     mu_dts = []
     for idx in range(dts.shape[0]):
         for jdx in range(dts.shape[1]):
@@ -429,15 +533,16 @@ def squeeze_dts(dts):
                 mu_dts.append(valid_dts.squeeze())
     return mu_dts
 
-def make_grid(emg, index_matrix):
+def make_grid(emg, index_matrix, ied=2):
     '''Function that converts EMG grid into the dimensions of a batch of images, expected by the affine transforms and decomposition module. (Input shape H, W, T)'''
     emg_grid = torch.tensor(emg[index_matrix, :]).to(torch.float64)
 
-    # Add cornel pixel as average of 3 neighbours
-    emg_grid[0,0,:] = (emg_grid[0,1,:] + emg_grid[1,0,:] + emg_grid[1,1,:])/3
-    emg_grid[0,-1,:] = (emg_grid[0,-2,:] + emg_grid[1,-1,:] + emg_grid[1,-2,:])/3
-    emg_grid[-1,0,:] = (emg_grid[-2,0,:] + emg_grid[-1,1,:] + emg_grid[-2,1,:])/3
-    emg_grid[-1,-1,:] = (emg_grid[-2,-1,:] + emg_grid[-1,-2,:] + emg_grid[-2,-2,:])/3
+    # # Add cornel pixel as average of 3 neighbours
+    # if ied == 2:
+    #     emg_grid[0,0,:] = (emg_grid[0,1,:] + emg_grid[1,0,:] + emg_grid[1,1,:])/3
+    #     emg_grid[0,-1,:] = (emg_grid[0,-2,:] + emg_grid[1,-1,:] + emg_grid[1,-2,:])/3
+    #     emg_grid[-1,0,:] = (emg_grid[-2,0,:] + emg_grid[-1,1,:] + emg_grid[-2,1,:])/3
+    #     emg_grid[-1,-1,:] = (emg_grid[-2,-1,:] + emg_grid[-1,-2,:] + emg_grid[-2,-2,:])/3
 
     emg_grid = emg_grid.permute(2, 0, 1).unsqueeze(1)
     return emg_grid
@@ -448,7 +553,7 @@ def get_sta_templates(extended_emg, dts):
     sep_mat = torch.zeros((N, extended_emg.shape[0])).to(torch.float64)
     for idx in range(N):
         sep_mat[idx, :] = (extended_emg[:, dts[idx].astype(int)]).mean(dim=1)
-        sep_mat[idx, :] = sep_mat[idx, :] / (torch.norm(sep_mat[idx, :])**2 + 1e-12)
+        sep_mat[idx, :] = sep_mat[idx, :] / (torch.norm(sep_mat[idx, :]) + 1e-12)
     return sep_mat
 
 def get_sep_mat_pseudo_inv(extended_emg, dts, rcond=1e-3):
@@ -505,16 +610,15 @@ def get_spectral_flatness_ar2(data, fs=2048, n_fft=512):
 
     return flatness
 
-def get_sta_muaps(emg_grid, discharge_times, L, spacing=1.2):
+def get_sta_muaps(emg_grid, discharge_times, L, spacing=15, plot=True):
     '''Takes in extended EMG and dischage times from different MUs and returns separation matrix all in PyTorch.'''
     T, _, H, W = emg_grid.shape
-    half = L // 2
     if isinstance(discharge_times, list):
         discharge_times = torch.tensor(discharge_times, device=emg_grid.device)
 
     # Keep only valid spikes (so window fits)
     valid_times = discharge_times[
-        (discharge_times >= half) & (discharge_times < T - half + 1)
+        (discharge_times >= L) & (discharge_times < T - L + 1)
     ]
 
     if len(valid_times) == 0:
@@ -522,27 +626,107 @@ def get_sta_muaps(emg_grid, discharge_times, L, spacing=1.2):
 
     # Collect snippets: (n_spikes, L, 1, H, W)
     snippets = torch.stack([
-        emg_grid[i-half:i+half] for i in valid_times
+        emg_grid[i-L:i+L+1] for i in valid_times if emg_grid[i-L:i+L+1].shape[0] == 2*L + 1
     ], dim=0)
 
     # Average across spikes → (L, H, W)
     sta = snippets.mean(dim=0).squeeze(1)
-    sta = (sta - sta.min()) / (sta.max() - sta.min() + 1e-9)
 
     # Plot in the same grid in a tiled fashio
-    time = np.arange(L)
-    plt.figure(figsize=(W/2, H/2))
+    time = np.arange(2*L + 1)
+    if plot:
+
+        # If plotting, the normalise so we can better visualize muaps
+        # sta = (sta - sta.mean()) / (sta.std() + 1e-9)
+        sta = (sta - sta.min()) / (sta.max() - sta.min() + 1e-9)
+        plt.figure(figsize=(W/2, H/2))
+        
+        for h in range(H):
+            for w in range(W):
+                y = sta[:, h, w]
+                # shift by electrode position
+                y_offset = (H-1-h) * spacing
+                x_offset = w * (2*L + 1) * spacing / W  # scale horizontally
+                plt.plot(time + x_offset, 15.0*y + y_offset, color="k", lw=0.6)
+                # plt.vlines((time + x_offset), )
+
+        plt.axis("off")
+        plt.title("MUAP waveforms (STA)")
+        plt.savefig('muaps.jpg')
+    return sta
+
+def plot_grid_psd(emg_grid, fs=2048, n_fft=512, spacing=1.2, plot=True):
+    """
+    Plots the PSD of each channel in the EMG grid in a tiled grid format.
+
+    Args:
+        emg_grid (torch.Tensor): Shape (T, 1, H, W)
+        fs (int): Sampling frequency in Hz
+        n_fft (int): Number of FFT points for PSD
+        spacing (float): Spacing for grid plot
+        plot (bool): Whether to plot and save the figure
+
+    Returns:
+        psd_grid (np.ndarray): PSD values for each channel, shape (n_freqs, H, W)
+        freqs (np.ndarray): Frequency axis
+    """
+    T, _, H, W = emg_grid.shape
+    emg_np = emg_grid.squeeze(1).cpu().numpy()  # Shape: (T, H, W)
+    psd_grid = np.zeros((n_fft//2+1, H, W))
+    freqs = None
+
     for h in range(H):
         for w in range(W):
-            y = sta[:, h, w]
-            # shift by electrode position
-            y_offset = (H-1-h) * spacing
-            x_offset = w * L * spacing / W  # scale horizontally
-            plt.plot(time + x_offset, 15.0*y + y_offset, color="k", lw=0.6)
+            f, Pxx = scipy.signal.welch(emg_np[:, h, w], fs=fs, nperseg=256, nfft=n_fft)
+            psd_grid[:, h, w] = Pxx
+            if freqs is None:
+                freqs = f
 
-    plt.axis("off")
-    plt.title("MUAP waveforms (STA)")
-    plt.savefig('muaps.jpg')
+    if plot:
+        plt.figure(figsize=(W/2, H/2))
+        for h in range(H):
+            for w in range(W):
+                y = 10 * np.log10(psd_grid[:, h, w] + 1e-12)
+                y_offset = (H-1-h) * spacing
+                x_offset = w * len(freqs) * spacing / W
+                plt.plot(freqs + x_offset, y + y_offset, color="b", lw=0.6)
+        plt.axis("off")
+        plt.title("PSD of EMG Channels (Welch)")
+        plt.savefig('grid_psd.jpg')
+    return psd_grid, freqs
+
+def plot_channel_psd(emg_grid, h, w, fs=2048, n_fft=512, plot=True):
+    """
+    Plots the PSD of a single channel (h, w) from the EMG grid.
+
+    Args:
+        emg_grid (torch.Tensor): Shape (T, 1, H, W)
+        h (int): Row index of the channel
+        w (int): Column index of the channel
+        fs (int): Sampling frequency in Hz
+        n_fft (int): Number of FFT points for PSD
+        plot (bool): Whether to plot and show the figure
+
+    Returns:
+        freqs (np.ndarray): Frequency axis
+        psd (np.ndarray): PSD values for the selected channel
+    """
+    T, _, H, W = emg_grid.shape
+    emg_np = emg_grid.squeeze(1).cpu().numpy()  # Shape: (T, H, W)
+    f, Pxx = scipy.signal.welch(emg_np[:, h, w], fs=fs, nperseg=256, nfft=n_fft)
+
+    if plot:
+        plt.figure(figsize=(6, 3))
+        plt.plot(f[:len(f)//3], Pxx[:len(f)//3], color="b", lw=1)
+        plt.xlabel("Frequency (Hz)")
+        plt.ylabel("PSD")
+        plt.title(f"PSD of Channel ({h}, {w})")
+        plt.grid(True)
+        plt.tight_layout()
+        # plt.show()
+        plt.savefig('psd')
+
+    return f, Pxx
 
 def kurt_filt_sources(Y):
     # Y is assumed to have shape (batch_size, num_components)
@@ -574,38 +758,186 @@ def extend_emg_torch(emg, R):
         extended_emg[idx:emg.shape[0]+idx, idx*nchans:(idx+1)*nchans] = emg
     return extended_emg[:-(R-1),:]
 
+# def get_silohuette(sources_pred, distance=4):
+#     '''Get silhouette values given source predictions.'''
+    
+#     # Step 4b:
+#     sils = np.zeros(sources_pred.shape[1])
+#     pred_dts = []
+#     for mu_idx in range(sources_pred.shape[1]):
+#         source_pred = sources_pred[:, mu_idx] # get a single source prediction
+#         source_pred = np.multiply(source_pred, source_pred) # get squared sources
+#         peaks, _ = scipy.signal.find_peaks(source_pred.squeeze(), distance=distance) # default about 2ms 
+#         source_pred /=  np.mean(maxk(source_pred[peaks], 10))
+#         if len(peaks) > 1:
+#             kmeans = KMeans(n_clusters = 2,init = 'k-means++',n_init = 1).fit(source_pred[peaks].reshape(-1,1)) # two classes: 1) spikes 2) noise
+#             # indices of the spike and noise clusters (the spike cluster should have a larger value)
+#             spikes_ind = np.argmax(kmeans.cluster_centers_)
+#             noise_ind = np.argmin(kmeans.cluster_centers_)
+#             # get the points that correspond to each of these clusters
+#             spikes = peaks[np.where(kmeans.labels_ == spikes_ind)]
+#             noise = peaks[np.where(kmeans.labels_ == noise_ind)]
+#             # calculate the centroids
+#             spikes_centroid = kmeans.cluster_centers_[spikes_ind]
+#             noise_centroid = kmeans.cluster_centers_[noise_ind]
+#             # difference between the within-cluster sums of point-to-centroid distances 
+#             intra_sums = (((source_pred[spikes]- spikes_centroid)**2).sum()) 
+#             # difference between the between-cluster sums of point-to-centroid distances
+#             inter_sums = (((source_pred[spikes] - noise_centroid)**2).sum())
+#             sil = (inter_sums - intra_sums) / max(intra_sums, inter_sums)  
+#         else:
+#             sil = 0
+#             spikes = np.array([])
+#         sils[mu_idx] = sil
+#         pred_dts.append(spikes)
+#     return pred_dts, sils
+
+import torch
+import torch.nn.functional as F
+
+def get_sta_templates_peeloff(emg_grid, discharge_times_list, R, L=20):
+    """
+    Update separation vectors using sequential peeling (no new discharge detection).
+    
+    Args:
+        emg_grid: (T, 1, H, W) original grid format EMG
+        discharge_times_list: list of N discharge time arrays (one per MU)
+        L: template length for MUAP
+        R: extension factor for extended observation
+        
+    Returns:
+        separation_vectors: (N, nchans*R) updated separation vectors
+        muap_templates: list of N MUAP templates (L, H, W)
+    """
+    T, _, H, W = emg_grid.shape
+    nchans = H * W
+    N = len(discharge_times_list)
+    device = emg_grid.device
+    
+    # Flatten and extend the original EMG
+    emg_flat = emg_grid.squeeze(1).reshape(T, nchans)  # (T, nchans)
+    extended_emg = extend_emg_torch(emg_flat, R)  # (T, nchans*R)
+    extended_emg_residual = extended_emg.clone()
+    
+    # Initialize outputs
+    separation_vectors = torch.zeros((N, nchans * R), dtype=torch.float64, device=device)
+    muap_templates = []
+        
+    # Sequential peeling (no ordering, just go through MUs in order)
+    for mu_idx in tqdm(range(N)):
+        dts = torch.tensor(discharge_times_list[mu_idx], device=device)
+                
+        # Keep only valid times for this MU
+        valid_times = dts[(dts >= L) & (dts < T - L)].long()
+
+        if len(valid_times) == 0:
+            muap_templates.append(torch.zeros(L, H, W, device=device))
+            continue
+        
+        # 1. Compute separation vector: STA at spike times in extended space (no windowing)
+        sep_vec = extended_emg_residual[valid_times, :].mean(dim=0)  # (nchans*R,)
+        sep_vec = sep_vec / (torch.norm(sep_vec) + 1e-12)
+        separation_vectors[mu_idx] = sep_vec
+        
+        # 2. Compute MUAP template on current residual for peeling
+        emg_residual_flat = extended_emg_residual[:, :nchans]  # Take delay-0 channels
+        emg_residual_grid = emg_residual_flat.reshape(T, 1, H, W)
+        
+        sta_muaps = get_sta_muaps(emg_residual_grid, valid_times, L, plot=False)
+        muap_templates.append(sta_muaps)
+        
+        # 3. Create spike train
+        spike_train = torch.zeros(T, device=device, dtype=torch.float64)
+        spike_train[valid_times.long()] = 1.0
+        spike_train = spike_train.view(1, 1, -1)  # (batch=1, in_ch=1, T)
+        
+        # 4. Convolve spike train with MUAP template (center aligned)
+        sta_flat = sta_muaps.reshape(2*L + 1, nchans)  # (L, nchans)
+        sta_flat = torch.flip(sta_flat, dims=[0]) # flip for it to make sense with cross-correlation
+        kernel = sta_flat.T.unsqueeze(1)         # (nchans, 1, L)        
+        kernel_full = torch.zeros(2*L + 1 + L, nchans, device=sta_flat.device, dtype=sta_flat.dtype)
+        # Put the STA template starting at index 'half'
+        kernel_full[L:L + 2*L + 1, :] = sta_flat
+        kernel_full = kernel_full.T.unsqueeze(1)  # shape (nchans, 1, kernel_size)
+
+        # Conv without padding (so kernel is placed starting at spike index)
+        muap_train = F.conv1d(spike_train, kernel, padding='same').squeeze().T  # (1, nchans, T-L+1)
+        
+        # 5. Extend the MUAP train
+        extended_muap_train = extend_emg_torch(muap_train, R)
+        
+        # 6. Peel: subtract from residual for next MU
+        extended_emg_residual = extended_emg_residual - extended_muap_train
+    
+    return separation_vectors
+
+
 def get_silohuette(sources_pred, distance=4):
     '''Get silhouette values given source predictions.'''
     
-    # Step 4b:
+    # Convert torch tensor to numpy if needed
+    if isinstance(sources_pred, torch.Tensor):
+        sources_pred = sources_pred.cpu().numpy()
+    
     sils = np.zeros(sources_pred.shape[1])
     pred_dts = []
+    
     for mu_idx in range(sources_pred.shape[1]):
-        source_pred = sources_pred[:, mu_idx] # get a single source prediction
-        source_pred = np.multiply(source_pred, source_pred) # get squared sources
-        peaks, _ = scipy.signal.find_peaks(source_pred.squeeze(), distance=distance) # default about 2ms 
-        source_pred /=  np.mean(maxk(source_pred[peaks], 10))
-        if len(peaks) > 1:
-            kmeans = KMeans(n_clusters = 2,init = 'k-means++',n_init = 1).fit(source_pred[peaks].reshape(-1,1)) # two classes: 1) spikes 2) noise
-            # indices of the spike and noise clusters (the spike cluster should have a larger value)
+        source_pred = sources_pred[:, mu_idx]
+        source_pred_sq = source_pred ** 2
+        
+        # Find peaks with only distance constraint
+        peaks, _ = scipy.signal.find_peaks(source_pred_sq.squeeze(), distance=distance)
+        
+        # Normalize
+        peak_values = source_pred_sq[peaks]
+        
+        if len(peak_values) > 0:
+            k = min(10, len(peak_values))
+            top_k_mean = np.mean(np.partition(peak_values, -k)[-k:])
+            if top_k_mean > 0:
+                peak_values = peak_values / top_k_mean
+        
+        # K-means clustering if we have at least 2 peaks
+        if len(peaks) >= 2:
+            kmeans = KMeans(
+                n_clusters=2, 
+                init='k-means++', 
+                n_init=10,
+                random_state=42
+            ).fit(peak_values.reshape(-1, 1))
+            
+            # Identify spike cluster (higher centroid)
             spikes_ind = np.argmax(kmeans.cluster_centers_)
             noise_ind = np.argmin(kmeans.cluster_centers_)
-            # get the points that correspond to each of these clusters
-            spikes = peaks[np.where(kmeans.labels_ == spikes_ind)]
-            noise = peaks[np.where(kmeans.labels_ == noise_ind)]
-            # calculate the centroids
-            spikes_centroid = kmeans.cluster_centers_[spikes_ind]
-            noise_centroid = kmeans.cluster_centers_[noise_ind]
-            # difference between the within-cluster sums of point-to-centroid distances 
-            intra_sums = (((source_pred[spikes]- spikes_centroid)**2).sum()) 
-            # difference between the between-cluster sums of point-to-centroid distances
-            inter_sums = (((source_pred[spikes] - noise_centroid)**2).sum())
-            sil = (inter_sums - intra_sums) / max(intra_sums, inter_sums)  
+            
+            spikes = peaks[kmeans.labels_ == spikes_ind]
+            
+            # Calculate silhouette
+            spike_vals = peak_values[kmeans.labels_ == spikes_ind]
+            noise_vals = peak_values[kmeans.labels_ == noise_ind]
+            
+            if len(spike_vals) > 0 and len(noise_vals) > 0:
+                spikes_centroid = kmeans.cluster_centers_[spikes_ind]
+                noise_centroid = kmeans.cluster_centers_[noise_ind]
+                
+                intra_dist = np.mean(np.abs(spike_vals - spikes_centroid))
+                inter_dist = np.mean(np.abs(spike_vals - noise_centroid))
+                
+                if max(intra_dist, inter_dist) > 0:
+                    sil = (inter_dist - intra_dist) / max(intra_dist, inter_dist)
+                else:
+                    sil = 0
+            else:
+                sil = 0
         else:
+            # Less than 2 peaks - keep all peaks
+            spikes = peaks
             sil = 0
-            spikes = np.array([])
+        
         sils[mu_idx] = sil
         pred_dts.append(spikes)
+    
     return pred_dts, sils
 
 def spike_scores(dts, dts_pred):
@@ -620,47 +952,8 @@ def spike_scores(dts, dts_pred):
         scores['precision'][mu_idx] = tps / (tps + fps) # how many fake spikes are assumed
     return scores
 
-def spike_match_jitter(dt_pred, dts, jitter=4):
-    '''
-    Check if a predicted spike time matches any ground truth spike within a jitter window.
-    
-    Args:
-        dt_pred: Single prediction time point
-        dts: Array of ground truth spike times
-        jitter: Number of time steps to check in each direction
-    '''
-    # Vectorized version of the jitter check
-    jitter_range = np.arange(-jitter, jitter + 1)
-    dt_preds = dt_pred + jitter_range[:, None]  # Broadcasting to create all jittered times
-    # Check if any jittered time matches any ground truth time
-    matches = np.isin(dt_preds, dts)
-    return np.any(matches)
 
-# def spike_matching(dts, dts_pred):
-#     ''' For each motor unit, compute the spiking accuracy, sensitivity and precision.'''
-#     # matches = [] # indices of the edited spikes that corresponds to the given predicted spike
-#     # match_scores = [] # score for the found matches
-#     precisions, sensitivities = torch.zeros(len(dts_pred), len(dts)), torch.zeros(len(dts_pred), len(dts))
-#     for idx, dt_pred in tqdm(enumerate(dts_pred)):
-#         for jdx, dt in enumerate(dts):
-#             tps = np.sum([spike_match_jitter(spike_time, dt) for spike_time in dt_pred])
-#             fps = len(dt_pred) - tps
-#             # fps = np.sum([not spike_match_jitter(spike_time, dt) for spike_time in dt_pred]) # false positives = dts in pred not in gt
-#             fns = np.sum([not spike_match_jitter(spike_time, dt_pred) for spike_time in dt]) # false negatives = dts in gt not in pred
-#             sensitivities[idx, jdx] = tps / (tps + fns) # how real spikes are missed
-#             precisions[idx, jdx] = tps / (tps + fps) # how many fake spikes are assumed
-    
-#     # Get best match for each predicted spike with Hungarian algorithm
-#     f1_scores = 2 * sensitivities * precisions / (sensitivities + precisions + 1e-12)
-#     print('Linear sum assignment...')
-#     _, col_ind = linear_sum_assignment((1-f1_scores).numpy())
-#     matches = [col_ind[idx] for idx in range(len(col_ind))]
-#     sensitivities = [sensitivities[idx, matches[idx]].item() for idx in range(len(col_ind))]
-#     precisions = [precisions[idx, matches[idx]].item() for idx in range(len(col_ind))]
-#     f1_scores = [f1_scores[idx, matches[idx]].item() for idx in range(len(col_ind))]
-#     return matches, f1_scores, sensitivities, precisions
-
-def spike_matching(dts, dts_pred, fs, jitter=0.002):
+def spike_matching(dts, dts_pred, fs, old_matches=None, jitter=0.002):
     ''' For each motor unit, compute the spiking accuracy, sensitivity and precision.'''
     precisions = torch.zeros(len(dts_pred), len(dts))
     sensitivities = torch.zeros(len(dts_pred), len(dts))
@@ -675,7 +968,7 @@ def spike_matching(dts, dts_pred, fs, jitter=0.002):
         
         for jdx, dt in enumerate(dts):
             # Broadcast subtraction
-            time_diffs = torch.abs(pred_times - dt.reshape(1, -1))  # Shape: (n_pred, n_true)
+            time_diffs = torch.abs(pred_times.reshape(-1, 1) - dt.reshape(1, -1))  # Shape: (n_pred, n_true)
             
             # Compute matches using broadcasting
             matches = (time_diffs <= int(jitter*fs)).any(dim=1)  # Assuming spike_match_jitter threshold is 1
@@ -686,22 +979,303 @@ def spike_matching(dts, dts_pred, fs, jitter=0.002):
             gt_matches = (time_diffs <= int(jitter*fs)).any(dim=0)
             fns = (~gt_matches).sum()
             
-            sensitivities[idx, jdx] = tps / (tps + fns)
-            precisions[idx, jdx] = tps / (tps + fps)
+            if (tps + fns) == 0:
+                sensitivities[idx, jdx] = 0.0
+            else:
+                sensitivities[idx, jdx] = tps / (tps + fns)
+            if (tps + fps) == 0:
+                precisions[idx, jdx] = 0.0
+            else:
+                precisions[idx, jdx] = tps / (tps + fps)
     
     # Get best match for each predicted spike with Hungarian algorithm
     f1_scores = 2 * sensitivities * precisions / (sensitivities + precisions + 1e-12)
-    print('Linear sum assignment...')
-    _, col_ind = linear_sum_assignment((1-f1_scores).numpy())
+    
+    if old_matches is None:
+        print('Linear sum assignment...')
+        row_ind, col_ind = linear_sum_assignment((1-f1_scores).numpy())
+    else:
+        row_ind, col_ind = np.array(list(old_matches.keys())), np.array(list(old_matches.values()))
     
     # Vectorize final computations
-    matches = col_ind.tolist()
-    idx_range = torch.arange(len(col_ind))
-    sensitivities = sensitivities[idx_range, col_ind].tolist()
-    precisions = precisions[idx_range, col_ind].tolist()
-    f1_scores = f1_scores[idx_range, col_ind].tolist()
+    matches = {row_ind[i]: col_ind[i] for i in range(len(row_ind))}
+
+    # Or more simply:
+    matches = dict(zip(row_ind.tolist(), col_ind.tolist()))
+
+    # Then get the corresponding metrics
+    sensitivities = sensitivities[row_ind, col_ind].tolist()
+    precisions = precisions[row_ind, col_ind].tolist()
+    f1_scores = f1_scores[row_ind, col_ind].tolist()
     
     return matches, f1_scores, sensitivities, precisions
+
+# def spike_matching(dts, dts_pred, fs, jitter=0.002, delay=0):
+#     ''' 
+#     For each motor unit, compute the spiking accuracy, sensitivity and precision.
+#     Searches over possible delays to find the best alignment.
+    
+#     Args:
+#         dts: List of ground truth spike times for each motor unit
+#         dts_pred: List of predicted spike times for each motor unit
+#         fs: Sampling frequency
+#         jitter: Temporal jitter tolerance in seconds
+#         delay: Maximum delay to search in seconds (searches from -delay to +delay). 
+#                If 0, no delay search is performed.
+#     '''
+#     print('SPIKE MATCHING...')
+#     # Convert lists to tensors
+#     dts = [torch.tensor(dt) for dt in dts]
+#     dts_pred = [torch.tensor(dt_pred) for dt_pred in dts_pred]
+    
+#     # Generate delay values to test (in samples, step size = 1 sample)
+#     if delay > 0:
+#         delay_samples = int(delay * fs)
+#         delays = torch.arange(-delay_samples, delay_samples + 1, 1.0)
+#         n_delays = len(delays)
+#     else:
+#         delays = torch.tensor([0.0])
+#         n_delays = 1
+    
+#     precisions = torch.zeros(len(dts_pred), len(dts))
+#     sensitivities = torch.zeros(len(dts_pred), len(dts))
+#     best_delays = torch.zeros(len(dts_pred), len(dts))
+    
+#     jitter_samples = int(jitter * fs)
+    
+#     for idx, dt_pred in tqdm(enumerate(dts_pred)):
+#         pred_times = dt_pred.reshape(-1, 1, 1)  # Shape: (n_pred, 1, 1)
+        
+#         for jdx, dt in enumerate(dts):
+#             gt_times = dt.reshape(1, -1, 1)  # Shape: (1, n_true, 1)
+#             delays_reshaped = delays.reshape(1, 1, -1)  # Shape: (1, 1, n_delays)
+            
+#             # Compute time differences for all delays at once
+#             # Shape: (n_pred, n_true, n_delays)
+#             time_diffs = torch.abs(pred_times - gt_times - delays_reshaped)
+            
+#             # Check matches for each delay
+#             # Shape: (n_pred, n_true, n_delays)
+#             within_jitter = time_diffs <= jitter_samples
+            
+#             # For each delay, compute metrics
+#             # True positives: predicted spikes that match any ground truth
+#             tps_per_delay = within_jitter.any(dim=1).sum(dim=0)  # Shape: (n_delays,)
+            
+#             # False negatives: ground truth spikes that don't match any prediction
+#             fns_per_delay = (~within_jitter.any(dim=0)).sum(dim=0)  # Shape: (n_delays,)
+            
+#             # Compute sensitivity and precision for each delay
+#             n_pred = len(dt_pred)
+#             sensitivities_per_delay = tps_per_delay / (tps_per_delay + fns_per_delay + 1e-12)
+#             precisions_per_delay = tps_per_delay / (n_pred + 1e-12)
+            
+#             # Compute F1 scores for each delay
+#             f1_per_delay = 2 * sensitivities_per_delay * precisions_per_delay / \
+#                           (sensitivities_per_delay + precisions_per_delay + 1e-12)
+            
+#             # Find the best delay
+#             best_delay_idx = torch.argmax(f1_per_delay)
+#             best_delays[idx, jdx] = delays[best_delay_idx]
+            
+#             # Store metrics for the best delay
+#             sensitivities[idx, jdx] = sensitivities_per_delay[best_delay_idx]
+#             precisions[idx, jdx] = precisions_per_delay[best_delay_idx]
+    
+#     # Get best match for each predicted spike with Hungarian algorithm
+#     f1_scores = 2 * sensitivities * precisions / (sensitivities + precisions + 1e-12)
+#     print('Linear sum assignment...')
+#     _, col_ind = linear_sum_assignment((1 - f1_scores).numpy())
+    
+#     # Vectorize final computations
+#     matches = col_ind.tolist()
+#     idx_range = torch.arange(len(col_ind))
+#     sensitivities = sensitivities[idx_range, col_ind].tolist()
+#     precisions = precisions[idx_range, col_ind].tolist()
+#     f1_scores = f1_scores[idx_range, col_ind].tolist()
+#     best_delays_matched = (best_delays[idx_range, col_ind]).tolist()  # Convert back to seconds
+    
+#     return matches, f1_scores, sensitivities, precisions, best_delays_matched
+
+
+def compute_mu_crosscorrelation(mu_set1, mu_set2, duration, fs=2048, 
+                                jitter=0.002, max_lag=0.5, device='cpu'):
+    """
+    Compute temporal cross-correlations between motor unit pairs from two sets.
+    Vectorized implementation using PyTorch for efficiency.
+    
+    Parameters:
+    -----------
+    mu_set1 : list of arrays
+        List of arrays, each containing discharge times (in seconds) for one MU
+    mu_set2 : list of arrays
+        List of arrays, each containing discharge times (in seconds) for one MU
+    duration : float
+        Total duration of recording in seconds
+    fs : int, optional
+        Sampling frequency in Hz (default: 2048)
+    window_size : float, optional
+        Moving average window size in seconds (default: 0.4)
+    max_lag : float, optional
+        Maximum lag for cross-correlation in seconds (default: 0.5)
+    device : str, optional
+        Device to run computations on ('cpu' or 'cuda', default: 'cpu')
+    
+    Returns:
+    --------
+    xcorr_matrix : ndarray
+        Cross-correlation matrix of shape (Nmu1, Nmu2, 2*max_lag_samples+1)
+    lags : ndarray
+        Time lags corresponding to cross-correlation values (in seconds)
+    """
+    
+    # Convert duration and parameters to samples
+    T = int(duration * fs)
+    window_samples = 2*int(jitter*fs) + 1
+    max_lag_samples = int(max_lag * fs)
+    
+    Nmu1 = len(mu_set1)
+    Nmu2 = len(mu_set2)
+    
+    # Create spike trains for set 1
+    spike_trains1 = np.zeros((Nmu1, T))
+    for i, discharge_times in enumerate(mu_set1):
+        spike_indices = (discharge_times * fs).astype(int)
+        spike_indices = spike_indices[spike_indices < T]
+        spike_trains1[i, spike_indices] = 1
+    
+    # Create spike trains for set 2
+    spike_trains2 = np.zeros((Nmu2, T))
+    for i, discharge_times in enumerate(mu_set2):
+        spike_indices = (discharge_times * fs).astype(int)
+        spike_indices = spike_indices[spike_indices < T]
+        spike_trains2[i, spike_indices] = 1
+    
+    # Convert to PyTorch tensors
+    spike_trains1 = torch.from_numpy(spike_trains1).float().to(device)
+    spike_trains2 = torch.from_numpy(spike_trains2).float().to(device)
+    
+    # Apply moving average filter to set 1 using 1D convolution
+    # Shape for conv1d: (batch, channels, length) = (1, Nmu1, T)
+    spike_trains1 = spike_trains1.unsqueeze(0)  # (1, Nmu1, T)
+    
+    # Create moving average kernel
+    window = torch.ones(Nmu1, 1, window_samples, device=device)
+    
+    # Apply depthwise convolution (each channel filtered independently)
+    padding = window_samples // 2  # For centered convolution
+    filtered_trains1 = torch.nn.functional.conv1d(spike_trains1, window, 
+                                padding=padding, groups=Nmu1)
+    
+    # Trim to original length if needed (for even window sizes)
+    if filtered_trains1.shape[2] > T:
+        filtered_trains1 = filtered_trains1[:, :, :T]
+    
+    filtered_trains1 = filtered_trains1.squeeze(0)  # (Nmu1, T)
+    
+    # Compute cross-correlations using FFT-based convolution
+    # Pad signals for full cross-correlation
+    pad_len = T - 1
+    filtered_trains1_padded = torch.nn.functional.pad(filtered_trains1, (pad_len, pad_len))
+    
+    # Flip spike_trains2 for cross-correlation (correlate = convolve with flipped signal)
+    spike_trains2_flipped = torch.flip(spike_trains2, dims=[1])
+    
+    # Reshape for batch convolution
+    # filtered_trains1: (Nmu1, 1, T_padded)
+    # spike_trains2_flipped: (Nmu2, 1, T)
+    filtered_trains1_padded = filtered_trains1_padded.unsqueeze(1)  # (Nmu1, 1, T_padded)
+    spike_trains2_flipped = spike_trains2_flipped.unsqueeze(1)  # (Nmu2, 1, T)
+    
+    # Compute all cross-correlations at once using grouped convolution
+    # For each MU in set 1, correlate with all MUs in set 2
+    xcorr_full = []
+    for i in range(Nmu1):
+        # Convolve one signal from set1 with all signals from set2
+        xcorr_i = torch.nn.functional.conv1d(filtered_trains1_padded[i:i+1].expand(Nmu2, 1, -1),
+                          spike_trains2_flipped,
+                          groups=Nmu2)
+        xcorr_full.append(xcorr_i.squeeze(1))  # (Nmu2, corr_length)
+    
+    xcorr_full = torch.stack(xcorr_full, dim=0)  # (Nmu1, Nmu2, corr_length)
+    
+    # Extract relevant lag range
+    center = xcorr_full.shape[2] // 2
+    xcorr_matrix = xcorr_full[:, :, center - max_lag_samples:center + max_lag_samples + 1]
+    
+    # Convert back to numpy
+    xcorr_matrix = xcorr_matrix.cpu().numpy()
+    
+    # Create lag vector in seconds
+    lags = np.arange(-max_lag_samples, max_lag_samples + 1) / fs
+    
+    return xcorr_matrix, lags
+
+
+def get_aligned_discharge_times(emg_grid, discharge_times_list, L, energy_threshold=0.2):
+    """
+    Align discharge times for multiple MUs based on cumulative energy criterion.
+    
+    Parameters:
+    -----------
+    emg_grid : torch.Tensor, shape (T, 1, H, W)
+        EMG grid data
+    discharge_times_list : list of numpy arrays
+        List where each element is a numpy array of discharge times for one MU
+    L : int
+        MUAP window length
+    energy_threshold : float
+        Fraction of energy that should occur before discharge time (default 0.01 for 99% after)
+    
+    Returns:
+    --------
+    aligned_discharge_times_list : list of numpy arrays
+        Aligned discharge times for each MU
+    shifts : list of int
+        Shift applied to each MU (for debugging/analysis)
+    """
+    aligned_discharge_times_list = []
+    shifts = []
+    
+    for mu_idx, discharge_times in enumerate(discharge_times_list):
+        # Convert to torch tensor for processing
+        discharge_times_torch = torch.tensor(discharge_times, device=emg_grid.device).to(torch.int)
+        
+        # Get STA MUAP template for this MU
+        sta_muap = get_sta_muaps(emg_grid, discharge_times_torch, L, plot=False)  # Shape: (L, H, W)
+        
+        # Compute energy per time sample across all spatial channels
+        energy_per_sample = torch.sum(sta_muap**2, dim=(1, 2))  # Shape: (L,)
+        
+        # Cumulative energy
+        cumulative_energy = torch.cumsum(energy_per_sample, dim=0)
+        total_energy = cumulative_energy[-1]
+        
+        # Find the time index where cumulative energy reaches the threshold
+        threshold_energy = energy_threshold * total_energy
+        onset_idx = torch.argmax((cumulative_energy >= threshold_energy).float())
+        
+        # Current discharge time is at the center (L // 2)
+        current_center = L // 2
+        
+        # Shift needed: move discharge time from current_center to onset_idx
+        shift = onset_idx.item() - current_center
+        
+        # Apply shift and convert back to numpy
+        aligned_times = discharge_times + shift
+
+        # Filter out times that are out of bounds
+        # Keep only: 0 <= aligned_time < T
+        valid_mask = (aligned_times >= 0) & (aligned_times < emg_grid.shape[0])
+        aligned_times_valid = aligned_times[valid_mask]
+        
+        assert np.max(aligned_times_valid) < emg_grid.shape[0] and np.max(aligned_times_valid) >= 0
+
+        aligned_discharge_times_list.append(aligned_times_valid)
+        shifts.append(shift)
+    
+    return aligned_discharge_times_list, shifts
+
 
 def out_of_bounds_pixels(height: int, width: int, theta: float):
     """
@@ -753,7 +1327,7 @@ def out_of_bounds_pixels(height: int, width: int, theta: float):
 
 #     return emg_grid
 
-def handle_outliers(emg_grid):
+def handle_outliers(emg_grid, visible_outliers=None):
     '''Determine outlier channels, and replace them with average of neighbours, 
        prioritizing those with the fewest outlier neighbours.'''
 
@@ -763,8 +1337,11 @@ def handle_outliers(emg_grid):
     flatness = get_spectral_flatness_ar2(emg_grid.squeeze())
     Q1, Q3 = np.quantile(flatness.flatten(), [0.25, 0.75])
     IQR = Q3 - Q1
-    upper = Q3 + 1.5*IQR
+    upper = Q3 + IQR
     outlier_mask = flatness >= upper  # boolean mask of outliers
+
+    if visible_outliers is not None:
+        outlier_mask = np.logical_or(outlier_mask, visible_outliers)
 
     # 1. Count outlier neighbors for each pixel
     kernel = np.array([[1,1,1],[1,0,1],[1,1,1]], dtype=np.uint8)

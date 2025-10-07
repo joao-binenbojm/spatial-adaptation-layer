@@ -263,9 +263,16 @@ if __name__ == '__main__':
                             # Add optimal parameters for testing
                             # sda.sep_mat.weight = torch.nn.Parameter(sep_mat_valid)
                             with torch.no_grad():
-                                sda.sal.xshift[0].copy_(-2*Tx/(W-1))
-                                sda.sal.yshift[0].copy_(-2*Ty/(H-1))
+                                sda.sal.xshift[0].copy_(2*Tx/(W-1))
+                                sda.sal.yshift[0].copy_(2*Ty/(H-1))
                                 sda.sal.rot_theta[0].copy_(theta/np.pi)
+
+                                # Apply affine transformation
+                                emg_grid_test = sda.apply_affine(emg_grid)
+                                emg_grid_test_crop = emg_grid_test[:, :, ycrop:emg_grid.shape[2]-ycrop, xcrop:emg_grid.shape[3]-xcrop].clone()
+                                extended_emg_test_crops = utils.extend_emg_torch(emg_grid_test_crop.squeeze().reshape(emg_grid_crop_test.shape[0], -1), R).T
+                                inv_cov_crop_test = utils.get_inv_cov_torch(extended_emg_crop_test, explained_var=explained_var)
+                                sda.inv_cov = inv_cov_crop_test
 
                             # Test on optimal inverse transformation
                             with torch.no_grad():

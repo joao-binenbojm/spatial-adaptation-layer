@@ -119,9 +119,12 @@ class SpatialAdaptation(torch.nn.Module):
 
         return xshift, yshift, rot_theta, xscale, yscale, xshear, yshear
 
-    def get_affine_transform(self, sal_idx=0, inverse=False):
+    def get_affine_transform(self, sal_idx=0, input_shape=None, inverse=False):
         '''Returns the affine transformation matrix given the current model parameters.'''
-        H, W = self.input_shape
+        if input_shape is not None:
+            H, W = input_shape
+        else:
+            H, W = self.input_shape
         dev = self.xshift[sal_idx].device
         # Apply soft constraints to parameters
         if self.boundaries and self.constrain_params:
