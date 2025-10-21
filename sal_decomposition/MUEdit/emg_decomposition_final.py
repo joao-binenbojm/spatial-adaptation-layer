@@ -15,7 +15,7 @@ np.random.seed(1337) # Fixes random generation to get same results each time the
 class EMG():
 
     def __init__(self):
-        self.its = 5 # number of iterations of the fixed point algorithm 
+        self.its = 500 # number of iterations of the fixed point algorithm 
         self.ref_exist = 1 # if ref_signal exist ref_exist = 1; if not ref_exist = 0 and manual selection of windows
         self.check_emg = 0 # 0 = Automatic selection of EMG channels (remove 5% of channels) ; 1 = Visual checking
         self.drawing_mode = 0 # 0 = Output in the command window ; 1 = Output in a figure
@@ -29,7 +29,7 @@ class EMG():
         self.target_thres = 0.8  # Threshold for segmenting and batching the EMG signals based on a target force profile
         self.initialisation = 0 # 0 = initialisation based on the a maximum value in the EMG signal, 1 = random initialisaiton
         self.cov_thr = 0.5 # Threshold for CoV values when discarding MUs after two fastICA phases
-        self.cov_filter = 1
+        self.cov_filter = 0
         self.dup_thr = 0.3 # Correlation threshold for defining a pair of spike trains as derived from the same MU, hence a duplicate
         self.refine_mu = 1
         self.dup_bgrids = 0
@@ -171,8 +171,8 @@ class offline_EMG(EMG):
         self.signal_dict['extend_obvs'] = self.signal_dict['extend_obvs_old'][:,int(np.round(self.signal_dict['fsamp']*self.edges2remove)):-int(np.round(self.signal_dict['fsamp']*self.edges2remove))]
         self.decomp_dict['whitened_obvs'] = self.decomp_dict['whitened_obvs_old'][:,int(np.round(self.signal_dict['fsamp']*self.edges2remove)):self.signal_dict['extend_obvs_old'].shape[1]-int(np.round(self.signal_dict['fsamp']*self.edges2remove))]
         
-        self.plateau_coords[0] = self.plateau_coords[0]  + int(np.round(self.signal_dict['fsamp']*self.edges2remove))
-        self.plateau_coords[1] = self.plateau_coords[1]  - int(np.round(self.signal_dict['fsamp']*self.edges2remove))
+        # self.plateau_coords[0] = self.plateau_coords[0]  + int(np.round(self.signal_dict['fsamp']*self.edges2remove))
+        # self.plateau_coords[1] = self.plateau_coords[1]  - int(np.round(self.signal_dict['fsamp']*self.edges2remove))
 
         print('Signal extension and whitening complete')
         
@@ -248,7 +248,11 @@ class offline_EMG(EMG):
                     # update the sepearation vector by summing all the spikes
                     w_n_p1 = np.sum(Z[:,spikes],axis=1) # summing the spiking across time, leaving an array that is channels x 1 
                     # minimisation of covariance of interspike intervals
-                    self.decomp_dict['MU_filters'][:,i], spikes, self.decomp_dict['CoVs'][i] = min_cov_isi(w_n_p1,self.decomp_dict['B_sep_mat'],Z, self.signal_dict['fsamp'],CoV,spikes)
+
+                    ##### TESTING WHETHER WE CAN GET GOOD RESULTS WITHOUT THIS REFINEMENT
+                    self.decomp_dict['CoVs'][i] = 0.0
+                    self.decomp_dict['MU_filters'][:,i], spikes = refine_single_vector(w_n_p1, Z, self.signal_dict['fsamp'], spikes)
+                    # self.decomp_dict['MU_filters'][:,i], spikes, self.decomp_dict['CoVs'][i] = min_cov_isi(w_n_p1,self.decomp_dict['B_sep_mat'],Z, self.signal_dict['fsamp'],CoV,spikes)
                     self.decomp_dict['B_sep_mat'][:,i] = (self.decomp_dict['w_sep_vect']).real # no need to shallow copy here
 
                     # calculate SIL
@@ -279,7 +283,7 @@ class offline_EMG(EMG):
                         print('Iteration #{} - Sil = {} - CoV = {}'.format(i, self.decomp_dict['SILs'][i],self.decomp_dict['CoVs'][i]))
 
                 else:
-                    print('Iteration #{} - less than 10 spikes '.format(i))
+                    print('Iteration #{} - less than 1 spikes '.format(i))
                     # without enough spikes, we skip minimising the covariation of discharges to improve the separation vector
                     self.decomp_dict['B_sep_mat'][:,i] = self.decomp_dict['w_sep_vect'].real  # no need to shallow copy here
                 self.mu_dict['raw_sources'] = np.array(raw_sources)
@@ -316,7 +320,7 @@ class offline_EMG(EMG):
             
             # self.mus_in_array[electrode-1] = 1 # if pulse trains were not extracted for this electrode, then it remains at a value of 0
             # removing duplicate MUs
-            discharge_times_new, pulse_trains_new, mu_filters_new =  remove_duplicates(pulse_trains, discharge_times,discharge_times,np.squeeze(self.decomp_dict['masked_mu_filters']),np.round(self.signal_dict['fsamp']/40),0.00025, self.dup_thr, self.signal_dict['fsamp'])
+            discharge_times_new, pulse_trains_new, mu_filters_new =  remove_duplicates(pulse_trains, discharge_times,discharge_times, self.decomp_dict['masked_mu_filters'], np.round(self.signal_dict['fsamp']/40),0.00025, self.dup_thr, self.signal_dict['fsamp'])
             self.decomp_dict['masked_mu_filters'] = []
             self.decomp_dict['masked_mu_filters'] = mu_filters_new
 

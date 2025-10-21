@@ -10,6 +10,7 @@ import torch
 from torchvision.transforms.functional import gaussian_blur
 from tqdm import tqdm
 from math import floor
+from scipy.ndimage import center_of_mass
 
 from sal_decomposition.MUEdit.processing_tools import extend_emg, whiten_emg, get_silohuette, maxk, bandpass_filter, notch_filter
 from sal_decomposition.sda import SpatialDecompositionAdaptation
@@ -85,7 +86,7 @@ def get_base_loss(emg_grid_transform, sda, batch_size=2048, loss='kurtosis', dev
             end_idx = start_idx + batch_size
             batch = emg_grid_transform[start_idx:end_idx]
             
-            # Get source estimates for this batch
+            # Get source estimates for this batch 
             source_est = sda(batch.to(device))
             cur_loss = ica_loss(source_est).item()
             # freq_loss = frequency_regularity_loss(source_est, fs, target_freq=20, sigma=10.0)
@@ -103,9 +104,7 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
     if loss == 'kurtosis':
         ica_loss = KurtosisLoss()
     else:
-        ica_loss = NegentropyLoss()
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, sda.parameters()),
-                                                lr=lr)                 
+        ica_loss = NegentropyLoss()         
  
     # Collect output tensors
     output_list = []
@@ -189,7 +188,10 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
             param.requires_grad = True
 
     # Make channel scalings learnable
-    sda.channel_scales.requires_grad = True
+    # sda.channel_scales.requires_grad = True
+
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, sda.parameters()),
+                                                lr=lr)        
 
     # Loop through the DataLoader
     print('TRAINING FROM BEST INIT. CONDITION...')
@@ -220,7 +222,7 @@ def search_fit_sda(emg_grid_transform, sda, base_loss=1.00, npoints=50, nepochs=
 
         print('LOSS:', epoch_loss/base_loss)
         optimizer.step()
-        print(f'PARAMS:\n xshift: {W*sda.sal.xshift[0].item()/2}, yshift: {H*sda.sal.yshift[0].item()/2}, theta: {sda.sal.rot_theta[0].item()} ')
+        print(f'PARAMS:\n xshift: {(W-1)*sda.sal.xshift[0].item()/2}, yshift: {(H-1)*sda.sal.yshift[0].item()/2}, theta: {sda.sal.rot_theta[0].item()} ')
         # print(f'xscale: {sda.sal.xscale.item()}, yscale: {sda.sal.yscale.item()}')
         # Collect outputs and loss
         losses.append(epoch_loss)
@@ -443,7 +445,7 @@ def get_inv_cov_torch(signal, explained_var=0.99):
 def get_inv_cov_tikhonov(signal, reg=1e-6):
     ''' Get inverse of covariance of extended EMG signal with eigenvalue truncation for regularization all in PyTorch (compute in torch.float64 to avoid precision issues). '''
     cov_mat = torch.cov(signal.to(torch.float64))
-    cov_mat = cov_mat + reg*torch.eye(cov_mat.shape[0]).to(torch.float64)
+    cov_mat = cov_mat + reg*torch.eye(cov_mat.shape[0], device=signal.device).to(torch.float64)
     evalues, evectors  = torch.linalg.eigh(cov_mat)
     sorted_idxs = torch.argsort(evalues, descending=True)
     evalues, evectors = evalues[sorted_idxs], evectors[:, sorted_idxs]
@@ -459,7 +461,7 @@ def whitening_torch(signal, explained_var=0.99):
     cum_explained_var = evalues.cumsum(dim=0) / evalues.sum()
     evalues, evectors = evalues[cum_explained_var <= explained_var], evectors[:, cum_explained_var <= explained_var]
     whit_mat = evectors @ torch.diag(1 / torch.sqrt((evalues))) @ evectors.T
-    return whit_mat @ signal
+    return whit_mat @ signal, whit_mat
 
 def whitening_tikhonov(signal, reg=1e-6):
     ''' Get inverse of covariance of extended EMG signal with eigenvalue truncation for regularization all in PyTorch (compute in torch.float64 to avoid precision issues). '''
@@ -491,12 +493,16 @@ def open_mat_output(DIR, name):
         with h5py.File(os.path.join(DIR, name), 'r') as f:
             signal['data'] = f['signal']['data'][:, :256].T
             signal['target'] = f['signal']['target'][:]
+            signal['path'] = f['signal']['path'][:]
             dts = []
             for idx in range(4):
                 ref = f['edition']['Distimeclean'][idx, 0]
                 for pt_idx in range(f[ref].shape[0]):
-                    subref = f[ref][pt_idx, 0]
-                    dts.append(f[subref][:].squeeze())
+                    if len(f[ref].shape) == 2:
+                        subref = f[ref][pt_idx, 0]
+                        dts.append(f[subref][:].squeeze())
+                    else:
+                        subref = f[ref][pt_idx]
             edition['Dischargetimes'] = dts    
 
     return signal, edition
@@ -505,10 +511,105 @@ def get_target_boundaries(target, threshold=0.9):
     '''Takes in signal and edition dictionaries and returns the data and edition dictionaries with the target timestamps only.'''
     target_max = np.max(target)
     # Find rising and falling edges of target signal
-    rising_edge = np.where(target >= threshold*target_max)[0][0] + 5000
-    falling_edge = np.where(target >= threshold*target_max)[0][-1] - 5000
+    rising_edge = np.where(target >= threshold*target_max)[0][0] + 1000
+    falling_edge = np.where(target >= threshold*target_max)[0][-1] - 1000
  
     return rising_edge, falling_edge
+
+def get_mean_firing_rate(dts, fs):
+    """ Given the discharge times within the plateuau of the task, compute the firing rate in Hz."""
+    rates = fs / np.array([np.diff(dt).mean() for dt in dts])
+    return rates
+
+def get_median_firing_rate(dts, fs):
+    """ Given the discharge times within the plateuau of the task, compute the firing rate in Hz."""
+    rates = fs / np.array([np.median(np.diff(dt)) for dt in dts])
+    return rates
+
+def get_cov_isi(dts):
+    """ Given the discharge times within the plateau, computes the variability of ISIs per unit."""
+    isi_mean = np.array([np.mean(np.diff(dt)) for dt in dts])
+    isi_std = np.array([np.std(np.diff(dt)) for dt in dts])
+    cov = isi_std / (isi_mean + 1e-12)
+    return cov
+
+def get_trimmed_cov_isi(dts, trim_percent=0.01):
+    """
+    Computes the CoV of ISIs after trimming a percentage of
+    outliers from both ends of the ISI distribution.
+
+    This is robust to single missed/false spikes that create
+    artificially large or small ISIs.
+
+    Args:
+        dts: A list of 1D numpy arrays, where each array
+             contains the discharge times for one motor unit.
+        trim_percent: The percentage of ISIs to trim from *each* end
+                      of the sorted distribution.
+                      - 0.05 (default) trims the 5% smallest and 5%
+                        largest ISIs (10% total).
+                      - 0.1 trims 10% from each end (20% total).
+
+    Returns:
+        A 1D numpy array of the trimmed CoV for each unit.
+    """
+    trimmed_covs = []
+    
+    for dt in dts:
+        # Need at least 3 spikes to get 2 ISIs
+        if len(dt) < 3:
+            trimmed_covs.append(np.nan)
+            continue
+            
+        isis = np.diff(dt)
+        n_isis = len(isis)
+        
+        # Need at least 2 ISIs to calculate std
+        if n_isis < 2:
+            trimmed_covs.append(np.nan)
+            continue
+
+        # Sort ISIs to find and remove extremes
+        isis_sorted = np.sort(isis)
+        
+        # Calculate how many ISIs to cut from each end
+        n_to_trim = int(n_isis * trim_percent)
+        
+        # Slice the array to get the "clean" data
+        # Note: If n_to_trim is 0, this just returns the full array
+        if n_to_trim > 0:
+            trimmed_isis = isis_sorted[n_to_trim:-n_to_trim]
+        else:
+            trimmed_isis = isis_sorted # Use all ISIs if trimming is not possible
+
+        # If we trimmed everything (or too much), we can't get a CoV
+        if len(trimmed_isis) < 2:
+            trimmed_covs.append(np.nan)
+            continue
+
+        # Calculate mean and std on the *trimmed* data
+        trimmed_mean = np.mean(trimmed_isis)
+        trimmed_std = np.std(trimmed_isis)
+        
+        # Avoid division by zero
+        if trimmed_mean < 1e-12:
+            trimmed_covs.append(np.nan)
+            continue
+            
+        cov = trimmed_std / (trimmed_mean + 1e-12)
+        trimmed_covs.append(cov)
+        
+    return np.array(trimmed_covs)
+
+def get_recruitment_threshold(dts, target, N=10):
+    """Estimate recruitment threshold (%MVC) based on average of the initial 10 discharge times."""
+    rts = np.zeros(len(dts))
+    start = np.where(target > 1)[0][0]
+    for dt_idx, dt in enumerate(dts):
+        dummy_dt = dt.copy()
+        dummy_dt = dummy_dt[dummy_dt >= start]
+        rts[dt_idx] = np.mean(target[dummy_dt[:N].astype(int)])
+    return rts
 
 def filter_dts(dts, start, end):
     '''Takes in discharge times, removes dts outside of bounds, and accounts for target delay.'''
@@ -613,8 +714,11 @@ def get_spectral_flatness_ar2(data, fs=2048, n_fft=512):
 def get_sta_muaps(emg_grid, discharge_times, L, spacing=15, plot=True):
     '''Takes in extended EMG and dischage times from different MUs and returns separation matrix all in PyTorch.'''
     T, _, H, W = emg_grid.shape
-    if isinstance(discharge_times, list):
-        discharge_times = torch.tensor(discharge_times, device=emg_grid.device)
+    if not isinstance(discharge_times, torch.Tensor):
+        discharge_times = torch.tensor(discharge_times, dtype=torch.long, device=emg_grid.device)
+    else:
+        # If it's already a tensor, make sure it's the right type
+        discharge_times = discharge_times.to(dtype=torch.long)
 
     # Keep only valid spikes (so window fits)
     valid_times = discharge_times[
@@ -653,7 +757,80 @@ def get_sta_muaps(emg_grid, discharge_times, L, spacing=15, plot=True):
         plt.axis("off")
         plt.title("MUAP waveforms (STA)")
         plt.savefig('muaps.jpg')
+        plt.close()
     return sta
+
+def get_p2p_muaps(emg_grid, discharge_times, L, plot=True):
+    '''Takes in extended EMG and dischage times from different MUs and returns separation matrix all in PyTorch.'''
+    sta = get_sta_muaps(emg_grid, discharge_times, L, plot=False)
+    p2p = np.max(sta.numpy(), axis=0) - np.min(sta.numpy(), axis=0)
+    if plot:
+        plt.figure()
+        sns.heatmap(p2p)
+        plt.savefig('peak2peak')
+        plt.close()
+
+    return p2p
+
+def get_p2p_com(emg_grid, discharge_times, L):
+    """ Takes in emg grid and computes the P2P CoM, so we get a rough idea for a given MUAPs location."""
+    p2p = get_p2p_muaps(emg_grid, discharge_times, L, plot=False)
+    cy_scipy, cx_scipy = center_of_mass(np.array(p2p))
+    return cy_scipy, cx_scipy
+
+def get_sta_correlations(emg_grid, dts1, dts2, L, get_p=False):
+    """Aligns temporally, and assumes computes correlation between the STA of two separate spike trains."""
+    H, W = emg_grid.shape[2:]
+
+    dts1, dts2 = dts1.copy(), dts2.copy() # prevents aliasing when we edit the discharge times
+
+    # Finds highest energy point of best channel to align muaps
+    shifts = []
+    for dts in [dts1, dts2]:
+        sta = get_sta_muaps(emg_grid.clone(), dts, L, plot=False)
+        p2p = np.max(sta.numpy(), axis=0) - np.min(sta.numpy(), axis=0)
+        flat_idx = np.argmax(p2p).astype(int)
+        r, c = flat_idx // W, flat_idx % W
+        best_channel_abs = torch.abs(sta[:, r, c])
+        shifts.append(torch.argmax(best_channel_abs).item())
+
+    # Aligning discharge times
+    dts1 = np.array(dts1) - shifts[0]
+    dts2 = np.array(dts2) - shifts[1]
+
+    sta1, sta2 = get_sta_muaps(emg_grid.clone(), dts1, L, plot=False), get_sta_muaps(emg_grid.clone(), dts2, L, plot=False)
+    sta1, sta2 = sta1.numpy().flatten(), sta2.numpy().flatten()
+
+    corr, p = scipy.stats.pearsonr(sta1, sta2) # computes pearson correlation and pearson correlation coefficient
+
+    if get_p:
+        return corr, p
+    else:
+        return corr
+
+def get_stv(emg_grid, discharge_times, L):
+    '''Takes in extended EMG and dischage times from different MUs and returns separation matrix all in PyTorch.'''
+    T, _, H, W = emg_grid.shape
+    if isinstance(discharge_times, list):
+        discharge_times = torch.tensor(discharge_times, device=emg_grid.device)
+
+    # Keep only valid spikes (so window fits)
+    valid_times = discharge_times[
+        (discharge_times >= L) & (discharge_times < T - L + 1)
+    ]
+
+    if len(valid_times) == 0:
+        return torch.zeros(L, H, W, device=emg_grid.device)
+
+    # Collect snippets: (n_spikes, L, 1, H, W)
+    snippets = torch.stack([
+        emg_grid[i-L:i+L+1] for i in valid_times if emg_grid[i-L:i+L+1].shape[0] == 2*L + 1
+    ], dim=0)
+
+    # Average across spikes → (L, H, W)
+    stv = snippets.std(dim=0).squeeze(1)
+    return stv.mean().item()
+
 
 def plot_grid_psd(emg_grid, fs=2048, n_fft=512, spacing=1.2, plot=True):
     """
@@ -884,8 +1061,7 @@ def get_silohuette(sources_pred, distance=4):
     
     for mu_idx in range(sources_pred.shape[1]):
         source_pred = sources_pred[:, mu_idx]
-        source_pred_sq = source_pred ** 2
-        
+        source_pred_sq = np.multiply(source_pred, abs(source_pred))          
         # Find peaks with only distance constraint
         peaks, _ = scipy.signal.find_peaks(source_pred_sq.squeeze(), distance=distance)
         
@@ -903,8 +1079,7 @@ def get_silohuette(sources_pred, distance=4):
             kmeans = KMeans(
                 n_clusters=2, 
                 init='k-means++', 
-                n_init=10,
-                random_state=42
+                n_init=10
             ).fit(peak_values.reshape(-1, 1))
             
             # Identify spike cluster (higher centroid)
@@ -921,8 +1096,8 @@ def get_silohuette(sources_pred, distance=4):
                 spikes_centroid = kmeans.cluster_centers_[spikes_ind]
                 noise_centroid = kmeans.cluster_centers_[noise_ind]
                 
-                intra_dist = np.mean(np.abs(spike_vals - spikes_centroid))
-                inter_dist = np.mean(np.abs(spike_vals - noise_centroid))
+                intra_dist = np.sum(np.square(spike_vals - spikes_centroid))
+                inter_dist = np.sum(np.square(spike_vals - noise_centroid))
                 
                 if max(intra_dist, inter_dist) > 0:
                     sil = (inter_dist - intra_dist) / max(intra_dist, inter_dist)
@@ -953,62 +1128,163 @@ def spike_scores(dts, dts_pred):
     return scores
 
 
+# def spike_matching(dts, dts_pred, fs, old_matches=None, jitter=0.002):
+#     ''' For each motor unit, compute the spiking accuracy, sensitivity and precision.'''
+#     precisions = torch.zeros(len(dts_pred), len(dts))
+#     sensitivities = torch.zeros(len(dts_pred), len(dts))
+#     rate_of_agreement = torch.zeros(len(dts_pred), len(dts)) ## USES THIS TO DETERMINE MATCHES
+    
+#     # Convert lists to tensors/arrays if they aren't already
+#     dts = [torch.tensor(dt) for dt in dts]
+#     dts_pred = [torch.tensor(dt_pred) for dt_pred in dts_pred]
+    
+#     for idx, dt_pred in enumerate(dts_pred):
+#         # Vectorize the outer loop by creating a matrix of differences
+#         pred_times = dt_pred.reshape(-1, 1)  # Shape: (n_pred, 1)
+        
+#         for jdx, dt in enumerate(dts):
+#             # Broadcast subtraction
+#             time_diffs = torch.abs(pred_times.reshape(-1, 1) - dt.reshape(1, -1))  # Shape: (n_pred, n_true)
+            
+#             # Compute matches using broadcasting
+#             matches = (time_diffs <= int(jitter*fs)).any(dim=1)  # Assuming spike_match_jitter threshold is 1
+#             tps = matches.sum()
+#             fps = len(dt_pred) - tps
+            
+#             # Compute false negatives using vectorized operations
+#             gt_matches = (time_diffs <= int(jitter*fs)).any(dim=0)
+#             fns = (~gt_matches).sum()
+            
+#             if (tps + fns) == 0:
+#                 sensitivities[idx, jdx] = 0.0
+#             else:
+#                 sensitivities[idx, jdx] = tps / (tps + fns)
+#             if (tps + fps) == 0:
+#                 precisions[idx, jdx] = 0.0
+#             else:
+#                 precisions[idx, jdx] = tps / (tps + fps)
+#             if (tps + fns + fps) == 0:
+#                 rate_of_agreement[idx, jdx] = 0.0
+#             else:
+#                 rate_of_agreement[idx, jdx] = tps / (tps + fns + fps)
+    
+#     # Get best match for each predicted spike with Hungarian algorithm
+#     f1_scores = 2 * sensitivities * precisions / (sensitivities + precisions + 1e-12)
+    
+#     if old_matches is None:
+#         print('Linear sum assignment...')
+#         # row_ind, col_ind = linear_sum_assignment((1-f1_scores).numpy())
+#         row_ind, col_ind = linear_sum_assignment((1-rate_of_agreement).numpy())
+#     else:
+#         row_ind, col_ind = np.array(list(old_matches.keys())), np.array(list(old_matches.values()))
+    
+#     # Vectorize final computations
+#     matches = {row_ind[i]: col_ind[i] for i in range(len(row_ind))}
+
+#     # Or more simply:
+#     matches = dict(zip(row_ind.tolist(), col_ind.tolist()))
+
+#     # Then get the corresponding metrics
+#     sensitivities = sensitivities[row_ind, col_ind].tolist()
+#     precisions = precisions[row_ind, col_ind].tolist()
+#     f1_scores = f1_scores[row_ind, col_ind].tolist()
+#     rate_of_agreement = rate_of_agreement[row_ind, col_ind].tolist()
+    
+#     return matches, rate_of_agreement, f1_scores, sensitivities, precisions
+
+import torch
+import numpy as np
+from scipy.optimize import linear_sum_assignment
+
 def spike_matching(dts, dts_pred, fs, old_matches=None, jitter=0.002):
-    ''' For each motor unit, compute the spiking accuracy, sensitivity and precision.'''
+    '''
+    For each motor unit, compute the spiking accuracy and validate the matches.
+    '''
     precisions = torch.zeros(len(dts_pred), len(dts))
     sensitivities = torch.zeros(len(dts_pred), len(dts))
+    rate_of_agreement = torch.zeros(len(dts_pred), len(dts))
+
+    dts = [torch.tensor(dt, dtype=torch.float32) for dt in dts]
+    dts_pred = [torch.tensor(dt_pred, dtype=torch.float32) for dt_pred in dts_pred]
     
-    # Convert lists to tensors/arrays if they aren't already
-    dts = [torch.tensor(dt) for dt in dts]
-    dts_pred = [torch.tensor(dt_pred) for dt_pred in dts_pred]
-    
+    jitter_samples = int(jitter * fs)
+
     for idx, dt_pred in enumerate(dts_pred):
-        # Vectorize the outer loop by creating a matrix of differences
-        pred_times = dt_pred.reshape(-1, 1)  # Shape: (n_pred, 1)
-        
+        if dt_pred.numel() == 0:
+            continue
         for jdx, dt in enumerate(dts):
-            # Broadcast subtraction
-            time_diffs = torch.abs(pred_times.reshape(-1, 1) - dt.reshape(1, -1))  # Shape: (n_pred, n_true)
+            if dt.numel() == 0:
+                continue
+
+            time_diffs = torch.abs(dt_pred.reshape(-1, 1) - dt.reshape(1, -1))
             
-            # Compute matches using broadcasting
-            matches = (time_diffs <= int(jitter*fs)).any(dim=1)  # Assuming spike_match_jitter threshold is 1
-            tps = matches.sum()
+            # matches_pred = (time_diffs <= jitter_samples).any(dim=1)
+            # tps = matches_pred.sum()
+            # fps = len(dt_pred) - tps
+            
+            # matches_true = (time_diffs <= jitter_samples).any(dim=0)
+            # fns = (~matches_true).sum()
+
+            matches_true = (time_diffs <= jitter_samples).any(dim=0)
+            tps = matches_true.sum()
+            fns = len(dt) - tps
             fps = len(dt_pred) - tps
-            
-            # Compute false negatives using vectorized operations
-            gt_matches = (time_diffs <= int(jitter*fs)).any(dim=0)
-            fns = (~gt_matches).sum()
-            
-            if (tps + fns) == 0:
-                sensitivities[idx, jdx] = 0.0
-            else:
+
+
+            if (tps + fns) > 0:
                 sensitivities[idx, jdx] = tps / (tps + fns)
-            if (tps + fps) == 0:
-                precisions[idx, jdx] = 0.0
-            else:
+            if (tps + fps) > 0:
                 precisions[idx, jdx] = tps / (tps + fps)
-    
-    # Get best match for each predicted spike with Hungarian algorithm
-    f1_scores = 2 * sensitivities * precisions / (sensitivities + precisions + 1e-12)
-    
+            if (tps + fns + fps) > 0:
+                rate_of_agreement[idx, jdx] = tps / (tps + fns + fps)
+
     if old_matches is None:
-        print('Linear sum assignment...')
-        row_ind, col_ind = linear_sum_assignment((1-f1_scores).numpy())
+        # Use Hungarian algorithm to find the globally optimal assignment
+        row_ind, col_ind = linear_sum_assignment((1 - rate_of_agreement).numpy())
     else:
         row_ind, col_ind = np.array(list(old_matches.keys())), np.array(list(old_matches.values()))
-    
-    # Vectorize final computations
-    matches = {row_ind[i]: col_ind[i] for i in range(len(row_ind))}
 
-    # Or more simply:
+    # --- NEW VALIDATION STEP ---
+    z_scores = []
+    # For each match proposed by the Hungarian algorithm...
+    for r, c in zip(row_ind, col_ind):
+        # The 'signal' is the RoA of the matched pair
+        signal_roa = rate_of_agreement[r, c]
+
+        # The 'noise' distribution is the RoA of this predicted unit
+        # with all OTHER ground truth units it was NOT matched with.
+        mask = torch.ones(rate_of_agreement.shape[1], dtype=torch.bool)
+        mask[c] = False
+        noise_roas = rate_of_agreement[r, mask]
+        
+        # We need at least 2 other units to compute a meaningful std deviation
+        if noise_roas.numel() > 1:
+            mean_noise = noise_roas.mean()
+            std_noise = noise_roas.std()
+            # Add a small epsilon to prevent division by zero if all noise RoAs are the same
+            z = (signal_roa - mean_noise) / (std_noise + 1e-9)
+            z_scores.append(z.item())
+        else:
+            # If there's only one possible ground truth unit, confidence is maximal.
+            # A z-score is not well-defined, so we assign infinity.
+            z_scores.append(float('inf'))
+    # --- END OF NEW STEP ---
+
     matches = dict(zip(row_ind.tolist(), col_ind.tolist()))
 
-    # Then get the corresponding metrics
-    sensitivities = sensitivities[row_ind, col_ind].tolist()
-    precisions = precisions[row_ind, col_ind].tolist()
-    f1_scores = f1_scores[row_ind, col_ind].tolist()
+    matched_sensitivities = sensitivities[row_ind, col_ind].tolist()
+    matched_precisions = precisions[row_ind, col_ind].tolist()
+    matched_roa = rate_of_agreement[row_ind, col_ind].tolist()
     
-    return matches, f1_scores, sensitivities, precisions
+    # Calculate F1 scores only for matched pairs to avoid division by zero
+    f1_scores = []
+    for sens, prec in zip(matched_sensitivities, matched_precisions):
+        if (sens + prec) > 0:
+            f1_scores.append(2 * sens * prec / (sens + prec))
+        else:
+            f1_scores.append(0.0)
+
+    return matches, matched_roa, f1_scores, matched_sensitivities, matched_precisions, z_scores
 
 # def spike_matching(dts, dts_pred, fs, jitter=0.002, delay=0):
 #     ''' 
@@ -1096,6 +1372,27 @@ def spike_matching(dts, dts_pred, fs, old_matches=None, jitter=0.002):
 #     best_delays_matched = (best_delays[idx_range, col_ind]).tolist()  # Convert back to seconds
     
 #     return matches, f1_scores, sensitivities, precisions, best_delays_matched
+
+def get_muap_correlations(emg_grid, pred_dts, mu_dts, L=50):
+    """Computes the correlation between every pair of MUs between session 1 and 2."""
+    Npred = len(pred_dts)
+    sta_pred = torch.zeros(Npred, 2*L + 1, emg_grid.shape[2], emg_grid.shape[3])
+    for idx in range(Npred):
+        sta_pred[idx] = get_sta_muaps(emg_grid, pred_dts[idx].astype(int), L=L, plot=False)
+    
+    Ntrue = len(mu_dts)
+    sta_true = torch.zeros(Ntrue, 2*L + 1, emg_grid.shape[2], emg_grid.shape[3])
+    for idx in range(Ntrue):
+        sta_true[idx] = get_sta_muaps(emg_grid, mu_dts[idx].astype(int), L=L, plot=False)
+    
+    # Use STA estimates and compute correlation between every pair
+    sta_true, sta_pred = sta_true.detach().numpy(), sta_pred.detach().numpy()
+    corrs = np.zeros((Npred, Ntrue))
+    for idx in range(Npred):
+        for jdx in range(Ntrue):
+            corr, p = scipy.stats.pearsonr(sta_true[jdx].flatten(), sta_pred[idx].flatten())
+            corrs[idx, jdx] = corr
+    return corrs
 
 
 def compute_mu_crosscorrelation(mu_set1, mu_set2, duration, fs=2048, 

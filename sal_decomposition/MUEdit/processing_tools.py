@@ -278,45 +278,45 @@ def ortho_gram_schmidt(w,B):
 # Using g' and g'' in the iterations of fast ICA (see Hyvarinen et.al 'Independent Component Analysis: Algorithms and Applications, 
 # and Negro et. al 'Multichannel intramuscular and surface EMG decomposition by convolutive blind source separation)
 
-# @numba.njit
-# def square(x):
-#     return np.square(x)
+#@numba.njit
+def square(x):
+    return np.square(x)
 
-# @numba.njit
-# def skew(x):
-#     return np.square(x)
+##@numba.njit
+def skew(x):
+    return np.square(x)
 
-# @numba.njit
-# def kurtosis(x):
-#     return x**3
+#@numba.njit
+def kurtosis(x):
+    return x**3
 
-# @numba.njit
-# def exp(x):
-#     return np.exp(-np.square(x)/2)
+#@numba.njit
+def exp(x):
+    return np.exp(-np.square(x)/2)
 
-# @numba.njit
-# def logcosh(x):
-#     return np.log(np.cosh(x))
+#@numba.njit
+def logcosh(x):
+    return np.log(np.cosh(x))
 
-# @numba.njit
-# def dot_square(x):
-#     return 2*x
+#@numba.njit
+def dot_square(x):
+    return 2*x
 
-# @numba.njit
-# def dot_skew(x):
-#     return 2*x
+#@numba.njit
+def dot_skew(x):
+    return 2*x
 
-# @numba.njit
-# def dot_kurtosis(x):
-#     return 3*(np.square(x))
+#@numba.njit
+def dot_kurtosis(x):
+    return 3*(np.square(x))
 
-# @numba.njit
-# def dot_exp(x):
-#     return -1*(np.exp(-np.square(x)/2)) + np.dot((np.square(x)), np.exp(-np.square(x)/2))
+#@numba.njit
+def dot_exp(x):
+    return -1*(np.exp(-np.square(x)/2)) + np.dot((np.square(x)), np.exp(-np.square(x)/2))
 
-# @numba.njit
-# def dot_logcosh(x):
-#     return np.tanh(x)
+#@numba.njit
+def dot_logcosh(x):
+    return np.tanh(x)
 
 """
 def _logcosh(da, xp, x):
@@ -350,7 +350,7 @@ def fixed_point_alg(w_n, B, Z,cf, dot_cf, its = 500):
     B_T_B = B @ B.T
     Z_meaner = Z.shape[1]
 
-    while sep_diff[counter] > its_tolerance and counter < its:
+    while sep_diff[counter] > its_tolerance and counter < its - 1:
 
         # transfer current separation vector as the previous arising separation vector
         w_n_1 = w_n.copy()
@@ -420,6 +420,30 @@ def min_cov_isi(w_n,B,Z,fsamp,cov_n,spikes_n):
         _ , spikes_n_1 = get_spikes(w_n,Z,fsamp)
 
     return w_n_1, spikes_n_1, cov_n_1
+
+def refine_single_vector(w_n,Z,fsamp,spikes_n):
+    """ To be used as opposed to min_cov_isi(), so that we can refine vectors but not depend on constant firing rate."""
+    
+    tol = 1e-3 # tolerance between curent and last separation vector, meaning convergence
+    vec_divergence = np.inf
+    cur_iter, max_iters = 0, 5
+    w_n = w_n / np.linalg.norm(w_n)
+    while vec_divergence > tol and cur_iter < max_iters:
+        spikes_n_1 = spikes_n.copy()
+        w_n_1 = w_n.copy() 
+        _ , spikes_n = get_spikes(w_n_1,Z,fsamp)
+        # update the sepearation vector by summing all the spikes
+        w_n = np.sum(Z[:,spikes_n],axis=1) # summing the spiking across time, leaving an array that is channels x 1 
+        w_n = w_n / np.linalg.norm(w_n)
+        vec_divergence = np.abs(w_n @ w_n_1 - 1)
+        cur_iter += 1
+
+    # if you meet the CoV minimisation condition, but with a single-spike-long train, use the updated
+    # separation vector and recompute the spikes
+    if len(spikes_n_1) < 2:
+        _ , spikes_n_1 = get_spikes(w_n,Z,fsamp)
+
+    return w_n_1, spikes_n_1
 
 
 ################################ VALIDATION TOOLS ########################################
@@ -870,7 +894,7 @@ def batch_process_filters(whit_sig, mu_filters,plateau,extender,diff,orig_sig_si
     # mu filters has size no_windows x exten chans x (maximum of) no iterations  --> less if iterations failed to reach SIL threshold
 
     mu_count = mu_filters.shape[1]
-    pulse_trains = np.zeros([mu_count, orig_sig_size]) 
+    pulse_trains = np.zeros([mu_count, orig_sig_size + extender - 1]) 
     discharge_times = [None] * mu_count # do not know size yet, so can only predefine as a list
 
     for mu_candidate in range(np.shape(mu_filters)[1]):
@@ -1240,7 +1264,7 @@ def refine_mus(signal, pulse_trains_n_1, discharge_times_n_1, fsamp, extension_f
 
         mu_filters = np.sum(extend_obvs[:,discharge_times_n_1[mu]],axis=1)
         IPTtmp = np.dot(np.dot(mu_filters.T,invre_obvs),extend_obvs)
-        pulse_trains_n[mu,:] = IPTtmp[:np.shape(signal)[1]]
+        pulse_trains_n[mu,:np.shape(signal)[1]] = IPTtmp[:np.shape(signal)[1]]
 
         #pulse_trains_n[mu,:] = pulse_trains_n[mu,:]/ np.max(pulse_trains_n[mu,:])
         pulse_trains_n[mu,:] = np.multiply( pulse_trains_n[mu,:],abs(pulse_trains_n[mu,:])) 

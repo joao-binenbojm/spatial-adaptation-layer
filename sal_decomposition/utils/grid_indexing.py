@@ -115,10 +115,12 @@ index_matrix4 = np.array([[63, 38, 37, 12, 11, 63, 38, 37, 12, 11], # ankle
 import itertools
 perms = list(itertools.permutations([0, 64, 128, 192]))
 perms_as_lists = [list(p) for p in perms]
-perm = perms_as_lists[0] ############# 17 FOUND IT, BASED ON SUBJECT 3 DATA, no maybe 0 is correct after all
+# perm = perms_as_lists[7] ############# 17 FOUND IT, BASED ON SUBJECT 3 DATA, no maybe 0 is correct after all
 # perm = perms_as_lists[9] #### LOOKS LIKE THE MATCH FOR SIMONS MUEDIT DATA
 perm = [64, 0, 192, 128] #### THIS ONE IS OPTIMAL FOR SUBJECT 3
 
+
+print(perm)
 ## TESTING
 index_matrix4[0:13, 0:5] =  index_matrix4[0:13, 0:5] + perm[0]
 index_matrix4[0:13, 5:10] =  index_matrix4[0:13, 5:10] + perm[1]
@@ -178,7 +180,9 @@ import itertools
 perms = list(itertools.permutations([0, 64, 128, 192]))
 perms_as_lists = [list(p) for p in perms]
 # perm = perms_as_lists[16]
-perm = [192, 64, 0, 128]
+# perm = [192, 64, 0, 128]
+perm = [64, 0, 192, 128] #### THIS ONE IS OPTIMAL FOR SUBJECT 3
+
 
 ## TESTING
 index_matrix2[0:13, 0:5] =  index_matrix2[0:13,0:5] + perm[0]

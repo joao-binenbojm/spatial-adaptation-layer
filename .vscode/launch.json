@@ -10,7 +10,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
-            "args": ["exp_conditions/1-fit-62.5"],
+            "args": ["exp_conditions/5-search_fit-125"],
             "console": "integratedTerminal",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"

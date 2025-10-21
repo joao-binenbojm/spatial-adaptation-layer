@@ -33,8 +33,8 @@ class KurtosisLoss(torch.nn.Module):
         
         # Loss as negative absolute kurtosis to maximize independence
         # print(f'Kurtosis: max={kurtosis.max()}, min={kurtosis.min()}, mean={kurtosis.mean()}')
-        # loss = -torch.mean(kurtosis)
-        loss = -central_average(kurtosis)
+        loss = -torch.mean(kurtosis)
+        # loss = -central_average(kurtosis)
         return loss
 
 class NegentropyLoss(torch.nn.Module):
@@ -57,11 +57,46 @@ class NegentropyLoss(torch.nn.Module):
         G_v_exponential = -torch.exp(-torch.randn_like(y)**2 / 2)
         
         # Combine both contrast functions for negentropy
-        negentropy_logcosh = torch.mean(G_y_logcosh) - torch.mean(G_v_logcosh)
-        negentropy_exponential = torch.mean(G_y_exponential) - torch.mean(G_v_exponential)
+        negentropy_logcosh = torch.mean(G_y_logcosh, dim=0) - torch.mean(G_v_logcosh, dim=0)
+        negentropy_exponential = torch.mean(G_y_exponential, dim=0) - torch.mean(G_v_exponential, dim=0)
         
-        # Sum both to form the final combined negentropy
-        negentropy = negentropy_logcosh**2 + negentropy_exponential**2
+        # Sum both to form the final combined negentropy per source
+        negentropy_per_source = negentropy_logcosh**2 + negentropy_exponential**2
+
+        # Get negentropy averaged across sources
+        negentropy = torch.mean(negentropy_per_source)
         
         # Return the negative to make this a loss function (minimize -J(y))
         return -negentropy
+
+# class NegentropyLoss(torch.nn.Module):
+#     def __init__(self):
+#         super(NegentropyLoss, self).__init__()
+#         # Pre-compute the constant E{G(v)} for a standard normal variable v
+#         # E{log(cosh(v))} is approximately 0.3746
+#         self.E_G_v = 0.3745672233483323
+
+#     def forward(self, y):
+#         # Enforce input y is zero-mean and unit variance
+#         # This is a prerequisite for the negentropy approximation
+#         y_std = y.std(dim=-1, keepdim=True)
+#         y_mean = y.mean(dim=-1, keepdim=True)
+#         y = (y - y_mean) / (y_std + 1e-8)
+
+#         # 1. CHOOSE ONE CONTRAST FUNCTION (log-cosh is robust)
+#         # G(y) = log(cosh(y))
+#         G_y = torch.log(torch.cosh(y))
+
+#         # 2. CALCULATE THE APPROXIMATION
+#         # J(y) ≈ (E{G(y)} - E{G(v)})²
+#         # We use torch.mean as the expectation operator E{}
+#         negentropy_approx = (torch.mean(G_y, dim=-1) - self.E_G_v)**2
+
+#         # 3. AVERAGE ACROSS THE BATCH
+#         # We want to maximize the average negentropy for the batch
+#         mean_negentropy = torch.mean(negentropy_approx)
+        
+#         # 4. NEGATE FOR MINIMIZATION
+#         # Optimizers minimize loss, so we return the negative of the
+#         # quantity we want to maximize.
+#         return -mean_negentropy

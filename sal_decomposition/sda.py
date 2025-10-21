@@ -185,7 +185,7 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         self.grid_shape = grid_shape
         self.nchans = torch.prod(torch.tensor(grid_shape))
         self.extension_factor = extension_factor
-        self.sal = SpatialAdaptation(input_shape=grid_shape, T=True, R=True, Sc=True, Sh=False, mode=mode, circular=False, constrain_params=False)
+        self.sal = SpatialAdaptation(input_shape=grid_shape, T=True, R=True, Sc=False, Sh=False, mode=mode, circular=False, constrain_params=False)
         self.bn = torch.nn.BatchNorm2d(1)
         self.xcrop, self.ycrop = xcrop, ycrop
         self.lcrop, self.rcrop = xcrop, xcrop
@@ -211,15 +211,22 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
     # Extend, whiten and separate sources
     def forward(self, emg, inverse=False):
         # if self.training:
-        scalings = torch.diag(self.channel_scales)
-        D_inv_extended = block_extension(scalings, extension_factor=self.extension_factor)
+        # scalings = torch.diag(self.channel_scales)
+        # D_inv_extended = block_extension(scalings, extension_factor=self.extension_factor)
         # self.update_cropping()
         # self.P_inv_extended = get_P_inv_extended(self.sal, self.extension_factor, sal_idx=0, inverse=inverse) # if testing, assume we have P_inv_extended available to use
         # self.STA_transform = (self.STA @ self.P_inv_extended.T)[:, self.crop_mask] # 
         # self.P_sep_mat = self.STA_transform @ self.inv_cov
+
         sep_mat = self.STA @ self.inv_cov 
-        self.P_sep_mat = self.spatial_transform_filter(sep_mat)
-        self.P_sep_mat = self.P_sep_mat @ D_inv_extended
+        self.P_sep_mat = self.spatial_transform_filter(sep_mat) #[:, self.crop_mask]
+
+        # self.P_sep_mat = self.P_sep_mat @ D_inv_extended
+        # self.P_sep_mat = self.spatial_transform_filter(self.STA)[:, self.crop_mask] @ self.inv_cov
+        
+        # STA_transform = self.spatial_transform_filter(self.STA)
+        # self.P_sep_mat = STA_transform @ self.inv_cov
+
 
         # emg = emg[:, :, self.tcrop:emg.shape[2]-self.bcrop, self.lcrop:emg.shape[3]-self.rcrop] # apply cropping
         extended_emg = self.extend_emg(emg.reshape(emg.shape[0], -1))
