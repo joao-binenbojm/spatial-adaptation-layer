@@ -19,11 +19,10 @@ from sklearn.cluster import KMeans
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial import ConvexHull, Delaunay
 
-
-def apply_affine(emg_grid, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, mode='bilinear'):
+def get_theta(input_shape, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, inverse=False):
     '''Applies an affine transformation to grid coordinates prior to downsampling to simulate a near-perfect interpolation.'''
 
-    N, C, H, W = emg_grid.shape
+    N, C, H, W = input_shape
     Tx, Ty = torch.tensor(2*Tx/(W-1)), torch.tensor(2*Ty/(H-1)) # Normalize translation values automatically
     theta, xscale, yscale = torch.tensor(theta) / torch.pi, torch.tensor(xscale), torch.tensor(yscale)
 
@@ -45,28 +44,42 @@ def apply_affine(emg_grid, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, mode='biline
 
     # theta = Sc @ R @ T # learning order
     theta = T @ R @ Sc
+    if inverse:
+        theta = torch.linalg.inv(theta)
+    return theta
+
+def get_grid(input_shape, theta):
+    """ Gets the output sampling grid based on transformation parameters."""
+    N, C, H, W = input_shape
     theta = theta[0:2,:] # slice into submatrix expected by affine_grid
     theta = theta.repeat(N,1,1)
-    grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=True)
+    grid = torch.nn.functional.affine_grid(theta, size=(N,C,H,W), align_corners=True)
+    return grid
+
+def apply_affine(emg_grid, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, mode='bilinear'):
+    '''Applies an affine transformation to grid coordinates prior to downsampling to simulate a near-perfect interpolation.'''
+
+    theta = get_theta(emg_grid.shape, Tx, Ty, theta, xscale, yscale)
+    grid = get_grid(emg_grid.shape, theta)
     xresamp = torch.nn.functional.grid_sample(emg_grid, grid, mode=mode, align_corners=True)
     
     return xresamp
 
-# def frequency_regularity_loss(spike_train, fs, target_freq=20.0, sigma=10.0):
-#     # Standardize spike train (ensures larger MUAPs are not prioritized)
-#     spike_train = (spike_train - spike_train.mean(dim=0, keepdim=True)) / spike_train.std(dim=0, keepdim=True)
+def get_distance(input_shape, theta1, theta2):
+    """ Compute Euclidean distance between two affine transformations represented by theta matrices."""
+    theta_net = theta1 @ theta2
 
-#     # Compute power spectrum
-#     spectrum = torch.fft.rfft(spike_train, dim=0)
-#     freqs = torch.fft.rfftfreq(spike_train.shape[0], d=1/fs)
-    
-#     # Create gaussian window around expected frequency
-#     window = torch.exp(-(freqs - target_freq)**2 / (2 * sigma**2)).unsqueeze(1).to(spike_train.device)
-    
-#     # Penalize power outside the expected frequency band
-#     spectral_penalty = -torch.sum(torch.abs(spectrum) * window)
-    
-#     return spectral_penalty
+    original_grid = get_grid(input_shape, torch.eye(3))
+    original_grid[:,:,:,0] = original_grid[:,:,:,0]*(input_shape[3]-1)/2
+    original_grid[:,:,:,1] = original_grid[:,:,:,1]*(input_shape[2]-1)/2
+
+    net_grid = get_grid(input_shape, theta_net)
+    net_grid[:,:,:,0] = net_grid[:,:,:,0]*(input_shape[3]-1)/2
+    net_grid[:,:,:,1] = net_grid[:,:,:,1]*(input_shape[2]-1)/2
+
+    dist = torch.sqrt(((original_grid - net_grid)**2).sum(dim=-1)).mean().item()
+    return dist
+
 
 def get_base_loss(emg_grid_transform, sda, batch_size=2048, loss='kurtosis', device='cuda'):
     '''Compute the base loss for the given emg_grid_transform and sda.'''

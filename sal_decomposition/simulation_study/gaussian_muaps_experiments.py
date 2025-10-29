@@ -122,7 +122,7 @@ for trans_idx in range(Nt):
         # set the wandb project where this run will be logged
         project="sda-gaussian-muaps",
         name=f'{opt}-{SNR}-{fxmax}-{trans_idx}',
-        # mode='disabled',
+        mode='disabled',
     )
 
     # Keep track of experimental parameters of the run

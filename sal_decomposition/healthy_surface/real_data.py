@@ -47,9 +47,9 @@ if __name__ == '__main__':
     # Parameters
     subject = 3
     ied = 4
-    mvc = 50
-    session1 = 3
-    session2 = 2
+    mvc = 25
+    session1 = 2
+    session2 = 3
 
     # DIR = '/home/joao/Desktop/datasets/emanuele_arnault/s1_edited'
     DIR = f'/home/joao/Desktop/datasets/emanuele_arnault/s{subject}_edited'
@@ -138,7 +138,7 @@ if __name__ == '__main__':
     # Get crop sep_mat
     extended_emg_train = utils.extend_emg_torch(emg_grid.squeeze().reshape(emg_grid.shape[0], -1), R).T
     # inv_cov_train = utils.get_inv_cov_torch(extended_emg_train, explained_var=explained_var).to(torch.float32)
-    inv_cov_train = utils.get_inv_cov_tikhonov(extended_emg_train, reg=1e-3).to(torch.float32)
+    inv_cov_train = utils.get_inv_cov_tikhonov(extended_emg_train, reg=1e-1).to(torch.float32)
     # emg_grid_crop = emg_grid[:, :, ycrop:emg_grid_test.shape[2]-ycrop, xcrop:emg_grid_test.shape[3]-xcrop].clone()
     # extended_emg = utils.extend_emg_torch(emg_grid_crop.squeeze().reshape(emg_grid_crop.shape[0], -1), R).T
     # inv_cov_train = utils.get_inv_cov_torch(extended_emg, explained_var=explained_var).to(torch.float32)
@@ -170,6 +170,7 @@ if __name__ == '__main__':
     # emg_grid_crop = emg_grid_test[:, :, ycrop:emg_grid_test.shape[2]-ycrop, xcrop:emg_grid_test.shape[3]-xcrop].clone()
     # extended_emg = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T
     # inv_cov = utils.get_inv_cov_torch(extended_emg, explained_var=explained_var).to(torch.float32)
+    # inv_cov = utils.get_inv_cov_tikhonov(extended_emg, reg=1e-1).to(torch.float32)
     # sda.inv_cov = inv_cov
 
     loss_arr = utils.loss_sampling(emg_grid_test.clone(), sda.to(device), base_loss=base_loss, bounds=bounds[:2], batch_size=batch_size, num_points=20, loss='negentropy', device=device)

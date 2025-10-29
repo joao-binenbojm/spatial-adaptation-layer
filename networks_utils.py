@@ -167,7 +167,7 @@ class SpatialAdaptation(torch.nn.Module):
         theta = theta[0:2,:] # slice into submatrix expected by affine_grid
         return theta
 
-    def forward(self, x, sal_idx=0, inverse=False):
+    def forward(self, x, sal_idx=0, inverse=False, padding_mode='zeros'):
         '''Regrids input image based on affine transformation parameters.'''
         dev = x.device # assuming x and model are on the same device
         N, C, H, W = x.shape
@@ -216,7 +216,7 @@ class SpatialAdaptation(torch.nn.Module):
         grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=True)
         if self.circular:
             grid = wrap_grid_horizontally(grid) # wrap x coordinates if electrodes around arm
-        xresamp = torch.nn.functional.grid_sample(x, grid, mode=self.mode, align_corners=True)
+        xresamp = torch.nn.functional.grid_sample(x, grid, mode=self.mode, align_corners=True, padding_mode=padding_mode)
         return xresamp
     
     def reset_params(self, Tx=torch.tensor([0.0,0.0]), Ty=torch.tensor([0.0,0.0]), rot_theta=torch.tensor([0.0,0.0]), xscale=torch.tensor([1.0,1.0]), yscale=torch.tensor([1.0,1.0]), xshear=torch.tensor([0.0,0.0]), yshear=torch.tensor([0.0,0.0])):
