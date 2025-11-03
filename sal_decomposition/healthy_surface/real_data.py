@@ -70,8 +70,10 @@ if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     fsamp = 2048
     batch_size = 10000
-    bounds = [6, 6, 20*np.pi/180]
-    # torch.set_default_dtype(torch.float64)
+    bounds = [2.5, 2.5, 10*np.pi/180]
+
+    delta_width, delta_height = utils.out_of_bounds_pixels(26, 10, bounds[2])
+    xcrop, ycrop = int(bounds[0] + floor(delta_width + 0.5)), int(bounds[1] + floor(delta_height + 0.5))
 
     # Load training data
     sgnl, edition = utils.open_mat_output(DIR, file)
@@ -98,9 +100,6 @@ if __name__ == '__main__':
     mu_dts = utils.squeeze_dts(dts)
     mu_dts = utils.filter_dts(mu_dts, start, end)
     
-    # Align MUAPs in a consistent way across sessions, to make comparison via discharge times more straightforward
-    # mu_dts, shifts = utils.get_aligned_discharge_times(emg_grid, mu_dts, L=50, energy_threshold=0.5)
-
     # Load test data
     sgnl2, edition2 = utils.open_mat_output(DIR, file2)
     start2, end2 = utils.get_target_boundaries(sgnl2['target'].squeeze())
@@ -126,28 +125,26 @@ if __name__ == '__main__':
     mu_dts2 = utils.squeeze_dts(dts2)
     mu_dts2 = utils.filter_dts(mu_dts2, start2, end2)
 
-    # Align MUAPs in a consistent way across sessions, to make comparison via discharge times more straightforward
-    # mu_dts2, shifts2 = utils.get_aligned_discharge_times(emg_grid_test, mu_dts2, L=50, energy_threshold=0.5)
-
     # Set pipeline parameters
     R = 16
-    # explained_var = 1-1e-3
-    # delta_width, delta_height = utils.out_of_bounds_pixels(H, W, bounds[2])
-    # xcrop, ycrop = bounds[0] + floor(delta_width + 0.5), bounds[1] + floor(delta_height + 0.5)
+    reg = 1e-1
 
     # Get crop sep_mat
-    extended_emg_train = utils.extend_emg_torch(emg_grid.squeeze().reshape(emg_grid.shape[0], -1), R).T
-    # inv_cov_train = utils.get_inv_cov_torch(extended_emg_train, explained_var=explained_var).to(torch.float32)
-    inv_cov_train = utils.get_inv_cov_tikhonov(extended_emg_train, reg=1e-1).to(torch.float32)
+    print(f'CROPS: XCROP: {xcrop}, YCROP: {ycrop}')
+    emg_grid_crop_train = emg_grid[:, :, ycrop:emg_grid.shape[2]-ycrop, xcrop:emg_grid.shape[3]-xcrop].clone()
+    extended_emg_crop_train = utils.extend_emg_torch(emg_grid_crop_train.squeeze().reshape(emg_grid_crop_train.shape[0], -1), R).T
+    inv_cov_train = utils.get_inv_cov_tikhonov(extended_emg_crop_train, reg=reg).to(torch.float32)
     # emg_grid_crop = emg_grid[:, :, ycrop:emg_grid_test.shape[2]-ycrop, xcrop:emg_grid_test.shape[3]-xcrop].clone()
     # extended_emg = utils.extend_emg_torch(emg_grid_crop.squeeze().reshape(emg_grid_crop.shape[0], -1), R).T
     # inv_cov_train = utils.get_inv_cov_torch(extended_emg, explained_var=explained_var).to(torch.float32)
     print('STA template estimation with peeling...')
-    STA = utils.get_sta_templates_peeloff(emg_grid, mu_dts, R=R, L=50).to(torch.float32)
+    extended_emg = utils.extend_emg_torch(emg_grid.squeeze().reshape(emg_grid.shape[0], -1), R).T
+    STA = utils.get_sta_templates(extended_emg, mu_dts).to(torch.float32) # gets STA templates from Session 1 from the raw data
+    # STA = utils.get_sta_templates_peeloff(emg_grid, mu_dts, R=R, L=50).to(torch.float32)
 
     # Initialize SDA module
     # sda = SpatialDecompositionAdaptation(grid_shape=(H, W), STA=STA, inv_cov=inv_cov_train, xcrop=xcrop, ycrop=ycrop, extension_factor=R)
-    sda = SpatialDecompositionAdaptation(grid_shape=(H, W), STA=STA, inv_cov=inv_cov_train, extension_factor=R)
+    sda = SpatialDecompositionAdaptation(grid_shape=(H, W), STA=STA, inv_cov=inv_cov_train, xcrop=xcrop, ycrop=ycrop, extension_factor=R)
     # sda.sal.mode = 'bicubic'
 
     with torch.no_grad():
@@ -167,13 +164,12 @@ if __name__ == '__main__':
     base_loss = utils.get_base_loss(emg_grid, sda.to(device), batch_size=batch_size, loss='negentropy', device=device)
     
     # Get inverse covariance of the test grid, and determine the spatial transformation required for the STA templates to become optimal separation vectors
-    # emg_grid_crop = emg_grid_test[:, :, ycrop:emg_grid_test.shape[2]-ycrop, xcrop:emg_grid_test.shape[3]-xcrop].clone()
-    # extended_emg = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T
-    # inv_cov = utils.get_inv_cov_torch(extended_emg, explained_var=explained_var).to(torch.float32)
-    # inv_cov = utils.get_inv_cov_tikhonov(extended_emg, reg=1e-1).to(torch.float32)
-    # sda.inv_cov = inv_cov
+    emg_grid_crop_test = emg_grid_test[:, :, ycrop:emg_grid_test.shape[2]-ycrop, xcrop:emg_grid_test.shape[3]-xcrop].clone()
+    extended_emg = utils.extend_emg_torch(emg_grid_crop_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T
+    inv_cov = utils.get_inv_cov_tikhonov(extended_emg, reg=reg).to(torch.float32)
+    sda.inv_cov = inv_cov
 
-    loss_arr = utils.loss_sampling(emg_grid_test.clone(), sda.to(device), base_loss=base_loss, bounds=bounds[:2], batch_size=batch_size, num_points=20, loss='negentropy', device=device)
+    # loss_arr = utils.loss_sampling(emg_grid_test.clone(), sda.to(device), base_loss=base_loss, bounds=bounds[:2], batch_size=batch_size, num_points=20, loss='negentropy', device=device)
     sources, losses = utils.search_fit_sda(emg_grid_test.clone(), sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=500, nepochs=100, lr=5e-3, boundaries=bounds, loss='negentropy', device=device)
 
     # Get new inverse covariance
@@ -182,31 +178,40 @@ if __name__ == '__main__':
 
     # Get minimum distance between original and transformed grid
     Tx, Ty, theta = (W-1)*sda.sal.xshift[0].item()/2, (H-1)*sda.sal.yshift[0].item()/2, sda.sal.rot_theta[0].item()*np.pi
-    original_grid, transformed_grid, min_distance = utils.get_min_distance((H, W), -Tx, -Ty, -theta)
-    print(f'MIN DISTANCE: {min_distance} pixels')
     print(f"Tx: {Tx}, Ty: {Ty}, theta: {theta}")
+
+    # original_grid, transformed_grid, min_distance = utils.get_min_distance((H, W), -Tx, -Ty, -theta)
+    # print(f'MIN DISTANCE: {min_distance} pixels')
 
     # Create mask based on transformed coordinates being within convex 
     # lcrop, rcrop, bcrop, tcrop = utils.get_min_conservative_crop((H, W), transformed_grid, original_grid)
 
     # Update SDA module with new separation matrix
     print('Obtaining new separation matrix...')
-    # sda.lcrop, sda.rcrop = lcrop, rcrop
-    # sda.bcrop, sda.tcrop = bcrop, tcrop
-    # emg_grid_valid = emg_grid_test[:, :, tcrop:H-bcrop, lcrop:W-rcrop]
-    # extended_emg_valid = utils.extend_emg_torch(emg_grid_valid.squeeze().reshape(emg_grid_valid.shape[0], -1), R).T
-    # inv_cov_valid = utils.get_inv_cov_torch(extended_emg_valid, explained_var=explained_var).to(torch.float32)
-    # sda.inv_cov = inv_cov_valid
-    # sda.crop_mask = sda.get_crop_mask()
+    # Create mask based on transformed coordinates being within convex
+    print('RECOMPUTING MINIMALLY CROPPED INVERSE COVARIANCE MATRIX...')
+    theta = sda.sal.get_affine_transform(input_shape=(H, W), inverse=True)
+    theta = theta.repeat(1, 1, 1)
+    transformed_grid = sda.sal.get_grid(theta, input_shape=(H, W))
+    transformed_grid[:,:,:,0] = (W-1)*(1 + transformed_grid[:,:,:,0])/2
+    transformed_grid[:,:,:,1] = (H-1)*(1 + transformed_grid[:,:,:,1])/2
 
-    # Get predictions for all MUs now
-    # STA = utils.get_sta_templates_peeloff(emg_grid.clone(), mu_dts, R=R, L=50).to(torch.float32)
-    # sda.STA = STA
+    original_grid = torch.nn.functional.affine_grid(torch.eye(3)[0:2,:].unsqueeze(0), size=(1,1,H,W), align_corners=True)
+    original_grid[:,:,:,0] = (W-1)*(1 + original_grid[:,:,:,0])/2
+    original_grid[:,:,:,1] = (H-1)*(1 + original_grid[:,:,:,1])/2
+
+    lcrop, rcrop, bcrop, tcrop = utils.get_min_conservative_crop((H, W), transformed_grid.detach().cpu(), original_grid)
+    sda.lcrop, sda.rcrop, sda.tcrop, sda.bcrop = lcrop, rcrop, tcrop, bcrop
+    sda.crop_mask = sda.get_crop_mask()
+
+    emg_grid_crop_test = emg_grid_test[:, :, tcrop:emg_grid_test.shape[2]-bcrop, lcrop:emg_grid_test.shape[3]-rcrop].clone()
+    extended_emg = utils.extend_emg_torch(emg_grid_crop_test.squeeze().reshape(emg_grid_crop_test.shape[0], -1), R).T
+    inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg, reg=reg).to(torch.float32)
+    sda.inv_cov = inv_cov_test
 
     # Get initial source estimates
     with torch.no_grad():
         sources = sda(emg_grid_test)
-
 
     # Get performance on new test grid post training
     pred_dts, sils = utils.get_silohuette(sources)
@@ -256,9 +261,8 @@ if __name__ == '__main__':
     # matches = {idx: _matches[sort_idx] for idx, sort_idx in enumerate(sorted_idxs)}
 
     # Get new covariance matrix 
-    extended_emg_test = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T
-    # inv_cov_test = utils.get_inv_cov_torch(extended_emg_test, explained_var=1-1e-4)
-    inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg_test, reg=1e-3) #.to(torch.float32)
+    extended_emg_test = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T.to(torch.float32)
+    inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg_test, reg=1e-3).to(torch.float32)
 
 
     # Refinement of MUs detected
@@ -269,7 +273,8 @@ if __name__ == '__main__':
         pred_dts = [item['pred_dts'] for item in match_data]
 
         with torch.no_grad():
-            sta_test = utils.get_sta_templates_peeloff(emg_grid_test.clone(), pred_dts, R=R, L=50)
+            # sta_test = utils.get_sta_templates_peeloff(emg_grid_test.clone(), pred_dts, R=R, L=50).to(torch.float32)
+            sta_test = utils.get_sta_templates(extended_emg_test, pred_dts).to(torch.float32)
             sep_mat_test = sta_test @ inv_cov_test
             sources = (sep_mat_test @ extended_emg_test).T
 

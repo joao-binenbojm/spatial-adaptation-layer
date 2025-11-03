@@ -166,56 +166,26 @@ class SpatialAdaptation(torch.nn.Module):
             theta = torch.linalg.inv(theta)
         theta = theta[0:2,:] # slice into submatrix expected by affine_grid
         return theta
+    
+    def get_grid(self, theta, input_shape=None):
+        '''Returns the sampling grid based on the affine transformation parameters.'''
+        grid = torch.nn.functional.affine_grid(theta, size=(theta.shape[0],1,input_shape[0], input_shape[1]), align_corners=True)
+        if self.circular:
+            grid = wrap_grid_horizontally(grid) # wrap x coordinates if electrodes around arm
+        return grid
+    
+    def transform(self, x, grid, padding_mode='zeros'):
+        '''Regrids input image based on affine transformation parameters.'''
+        xresamp = torch.nn.functional.grid_sample(x, grid, mode=self.mode, align_corners=True, padding_mode=padding_mode)
+        return xresamp, grid
 
     def forward(self, x, sal_idx=0, inverse=False, padding_mode='zeros'):
         '''Regrids input image based on affine transformation parameters.'''
         dev = x.device # assuming x and model are on the same device
         N, C, H, W = x.shape
-        # # Apply soft constraints to parameters
-        # if self.boundaries and self.constrain_params:
-        #     xshift, yshift, rot_theta, xscale, yscale, xshear, yshear = self.get_constrained_params(sal_idx=sal_idx)
-        # else:
-        #     xshift = self.xshift[sal_idx]
-        #     yshift = self.yshift[sal_idx]
-        #     rot_theta = self.rot_theta[sal_idx]
-        #     xscale = self.xscale[sal_idx]
-        #     yscale = self.yscale[sal_idx]
-        #     xshear = self.xshear[sal_idx]
-        #     yshear = self.yshear[sal_idx]
-
-        # T = torch.cat([ # Translation Matrix
-        #     torch.stack([torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev), xshift.to(dev)]).unsqueeze(0),
-        #     torch.stack([torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev), yshift.to(dev)]).unsqueeze(0),
-        #     torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
-        # ], dim=0)
-        # R = torch.cat([ # Rotation Matrix
-        #     torch.stack([torch.cos(rot_theta.to(dev)), -torch.sin(rot_theta.to(dev)), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-        #     torch.stack([torch.sin(rot_theta.to(dev)), torch.cos(rot_theta.to(dev)), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-        #     torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
-        # ], dim=0)
-        # Sc = torch.cat([ # Scaling Matrix
-        #     torch.stack([xscale.to(dev), torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-        #     torch.stack([torch.tensor(0.0).to(dev), yscale.to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-        #     torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
-        # ], dim=0)
-        # Sh = torch.cat([ # Shear Matrix
-        #     torch.stack([torch.tensor(1.0).to(dev), xshear.to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-        #     torch.stack([yshear.to(dev), torch.tensor(1.0).to(dev), torch.tensor(0.0).to(dev)]).unsqueeze(0),
-        #     torch.stack([torch.tensor(0.0).to(dev), torch.tensor(0.0).to(dev), torch.tensor(1.0).to(dev)]).unsqueeze(0)
-        # ], dim=0)
-
-        # theta = T @ R @ Sc @ Sh
-
-        # if inverse:
-        #     # Invert the transformation matrix
-        #     theta = torch.linalg.inv(theta)
-
-        # theta = theta[0:2,:] # slice into submatrix expected by affine_grid
-        theta = self.get_affine_transform(sal_idx=sal_idx, inverse=inverse).to(dev)
+        theta = self.get_affine_transform(sal_idx=sal_idx, inverse=inverse, input_shape=(H, W)).to(dev)
         theta = theta.repeat(N,1,1)
-        grid = torch.nn.functional.affine_grid(theta, size = (N,C,H, W), align_corners=True)
-        if self.circular:
-            grid = wrap_grid_horizontally(grid) # wrap x coordinates if electrodes around arm
+        grid = self.get_grid(theta, input_shape=(H, W))
         xresamp = torch.nn.functional.grid_sample(x, grid, mode=self.mode, align_corners=True, padding_mode=padding_mode)
         return xresamp
     

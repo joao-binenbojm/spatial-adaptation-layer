@@ -177,7 +177,6 @@ def get_P_inv_extended(sal, R, sal_idx=0, inverse=False):
     return P_inv_ext
 
 
-
 class SpatialDecompositionAdaptation(torch.nn.Module):    
     # build the constructor
     def __init__(self, grid_shape, STA, inv_cov, ycrop=0, xcrop=0, extension_factor=17, mode='bilinear'):
@@ -206,7 +205,7 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         extended_emg = torch.zeros((emg.shape[0] + self.extension_factor - 1, nchans*self.extension_factor)).to(device)
         for idx in range(self.extension_factor):
             extended_emg[idx:emg.shape[0]+idx, idx*nchans:(idx+1)*nchans] = emg
-        return extended_emg[:-(self.extension_factor-1),:] .T
+        return extended_emg[:-(self.extension_factor-1),:].T
 
     # Extend, whiten and separate sources
     def forward(self, emg, inverse=False):
@@ -222,13 +221,23 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         # self.P_sep_mat = self.spatial_transform_filter(sep_mat) #[:, self.crop_mask]
 
         # self.P_sep_mat = self.P_sep_mat @ D_inv_extended
-        # self.P_sep_mat = self.spatial_transform_filter(self.STA)[:, self.crop_mask] @ self.inv_cov
+        self.P_sep_mat = self.spatial_transform_filter(self.STA)[:, self.crop_mask] @ self.inv_cov
         
-        STA_transform = self.spatial_transform_filter(self.STA)
-        self.P_sep_mat = STA_transform @ self.inv_cov
+        # Transform mask spatially
+        # STA_transform = self.spatial_transform_filter(self.STA)
 
+        # # Apply hard mask to transformed STA
+        # extended_mask_flat = self.get_mask()  # Shape: (M*R,)
+        # STA_transform_masked = STA_transform * extended_mask_flat.unsqueeze(0)  # [N, M*R]
+        # inv_cov_masked = self.inv_cov * extended_mask_flat.unsqueeze(1) * extended_mask_flat.unsqueeze(0)
+        
+        # Get masked separation matrix
+        # self.P_sep_mat = STA_transform_masked @ inv_cov_masked
+        
+        # self.P_sep_mat = STA_transform @ self.inv_cov
+        # self.P_sep_mat = self.STA @ self.inv_cov
 
-        # emg = emg[:, :, self.tcrop:emg.shape[2]-self.bcrop, self.lcrop:emg.shape[3]-self.rcrop] # apply cropping
+        emg = emg[:, :, self.tcrop:emg.shape[2]-self.bcrop, self.lcrop:emg.shape[3]-self.rcrop] # apply cropping
         extended_emg = self.extend_emg(emg.reshape(emg.shape[0], -1))
         sources = self.P_sep_mat @ extended_emg
         return sources.T
@@ -243,6 +252,17 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
     #     self.bcrop = self.ycrop - self.tcrop
     #     self.crop_mask = self.get_crop_mask(grid_shape=self.grid_shape)
     
+    # def get_mask(self):
+    #     ''' Get the spatial mask based on current transformation parameters.'''
+    #     H, W = self.grid_shape
+    #     theta = self.sal.get_affine_transform(input_shape=(H, W)).to(self.P_sep_mat.device)
+    #     theta = theta.repeat(1, 1, 1)
+    #     grid = self.sal.get_grid(theta, input_shape=(H, W))
+    #     in_bounds_mask = ((grid[0, ..., 0].abs() <= 1) & (grid[0, ..., 1].abs() <= 1)).float().detach()
+    #     spatial_mask_flat = in_bounds_mask.reshape(-1)  # Shape: (M,)
+    #     extended_mask_flat = spatial_mask_flat.repeat(self.extension_factor)  # Shape: (M*R,)
+    #     return extended_mask_flat
+
     def spatial_transform_filter(
         self,
         B: torch.Tensor,
@@ -279,7 +299,7 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
 
         # == 2. APPLY TRANSFORMATION ==
         # Create the sampself.extension_factoring grid.
-        B_transformed = self.sal(B_reshaped_for_grid_sample, inverse=True)
+        B_transformed = self.sal(B_reshaped_for_grid_sample)
 
         # == 3. REFOLD ==
         # Reshape back to separate the M and L dimensions: [M, self.extension_factor H, W].
@@ -289,36 +309,6 @@ class SpatialDecompositionAdaptation(torch.nn.Module):
         B_final = B_refolded_spatial.reshape(M, self.extension_factor * C)
 
         return B_final
-
-    # def spatial_transform_filter(self, B: torch.Tensor) -> torch.Tensor:
-    #     H, W = self.grid_shape
-    #     M = B.shape[0]
-    #     C = H * W
-        
-    #     # Transpose to make channels (spatial dimension) the "batch"
-    #     B_T = B.T  # [C*L, M]
-        
-    #     # Reshape: [C*L, M] → [L, C, M] → [L, H, W, M]
-    #     B_T_reshaped = B_T.reshape(self.extension_factor, C, M)
-    #     B_T_spatial = B_T_reshaped.reshape(self.extension_factor, H, W, M)
-        
-    #     # Permute to [L, M, H, W] then reshape to [L*M, 1, H, W]
-    #     B_T_for_grid = B_T_spatial.permute(0, 3, 1, 2).reshape(
-    #         self.extension_factor * M, 1, H, W
-    #     )
-        
-    #     # Apply transformation
-    #     B_T_transformed = self.sal(B_T_for_grid, inverse=False)  # Use inverse=True!
-        
-    #     # Reverse the reshape/permute
-    #     B_T_transformed = B_T_transformed.reshape(self.extension_factor, M, H, W)
-    #     B_T_transformed = B_T_transformed.permute(0, 2, 3, 1)  # [L, H, W, M]
-    #     B_T_final = B_T_transformed.reshape(self.extension_factor * C, M)
-        
-    #     # Transpose back
-    #     B_final = B_T_final.T  # [M, C*L]
-        
-    #     return B_final
     
     def get_crop_mask(self):
         ''' Apply the equivalent cropping operation by transforming an equivalent binary mask the same way as the EMG image frames are transformed.'''

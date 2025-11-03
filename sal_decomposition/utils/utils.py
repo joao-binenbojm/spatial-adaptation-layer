@@ -67,7 +67,7 @@ def apply_affine(emg_grid, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, mode='biline
 
 def get_distance(input_shape, theta1, theta2):
     """ Compute Euclidean distance between two affine transformations represented by theta matrices."""
-    theta_net = theta1 @ theta2
+    theta_net = theta1 @ torch.linalg.inv(theta2)
 
     original_grid = get_grid(input_shape, torch.eye(3))
     original_grid[:,:,:,0] = original_grid[:,:,:,0]*(input_shape[3]-1)/2
