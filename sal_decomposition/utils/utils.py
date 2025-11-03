@@ -19,6 +19,19 @@ from sklearn.cluster import KMeans
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial import ConvexHull, Delaunay
 
+
+def bandstop_filter(data, fsamp=2048): ## ACTUALLY BANDSTOP, NOT NOTCH
+    '''Used to remove powerline interference and its multiples.'''
+    sos = signal.butter(2, (45, 55), btype='bandstop', output='sos', fs=fsamp)
+    data = signal.sosfiltfilt(sos, data, axis=1)
+    return data
+
+def bandpass_filter(data, fsamp=2048):
+    '''Used to maintain only information in relevant anatomical range of sEMG activity.'''
+    sos = signal.butter(2, (20, 500), btype='bandpass', output='sos', fs=fsamp)
+    data = signal.sosfiltfilt(sos, data, axis=1)
+    return data
+
 def get_theta(input_shape, Tx=0, Ty=0, theta=0, xscale=1, yscale=1, inverse=False):
     '''Applies an affine transformation to grid coordinates prior to downsampling to simulate a near-perfect interpolation.'''
 
@@ -918,27 +931,6 @@ def plot_channel_psd(emg_grid, h, w, fs=2048, n_fft=512, plot=True):
 
     return f, Pxx
 
-def kurt_filt_sources(Y):
-    # Y is assumed to have shape (batch_size, num_components)
-    
-    # Calculate the mean and variance of each component along the batch dimension
-    mean_Y = Y.mean(dim=0, keepdim=True)
-    centered_Y = Y - mean_Y
-
-    # Calculate kurtosis for each component
-    # Fourth moment: E[Y_i^4]
-    fourth_moment = torch.mean(centered_Y ** 4, dim=0)
-    
-    # Second moment (variance): E[Y_i^2]
-    second_moment = torch.mean(centered_Y ** 2, dim=0)
-    
-    # Kurtosis for each component: (E[Y_i^4] / (E[Y_i^2])^2) - 3
-    kurtosis = fourth_moment / (second_moment ** 2) - 3
-    filt_kurt = kurtosis > kurtosis.median()
-    # _, filt_kurt = torch.topk(kurtosis, 1)
-    
-    return filt_kurt
-
 def extend_emg_torch(emg, R):
     '''Extend the original EMG batch given extension factor.'''
     device = emg.device
@@ -947,43 +939,6 @@ def extend_emg_torch(emg, R):
     for idx in range(R):
         extended_emg[idx:emg.shape[0]+idx, idx*nchans:(idx+1)*nchans] = emg
     return extended_emg[:-(R-1),:]
-
-# def get_silohuette(sources_pred, distance=4):
-#     '''Get silhouette values given source predictions.'''
-    
-#     # Step 4b:
-#     sils = np.zeros(sources_pred.shape[1])
-#     pred_dts = []
-#     for mu_idx in range(sources_pred.shape[1]):
-#         source_pred = sources_pred[:, mu_idx] # get a single source prediction
-#         source_pred = np.multiply(source_pred, source_pred) # get squared sources
-#         peaks, _ = scipy.signal.find_peaks(source_pred.squeeze(), distance=distance) # default about 2ms 
-#         source_pred /=  np.mean(maxk(source_pred[peaks], 10))
-#         if len(peaks) > 1:
-#             kmeans = KMeans(n_clusters = 2,init = 'k-means++',n_init = 1).fit(source_pred[peaks].reshape(-1,1)) # two classes: 1) spikes 2) noise
-#             # indices of the spike and noise clusters (the spike cluster should have a larger value)
-#             spikes_ind = np.argmax(kmeans.cluster_centers_)
-#             noise_ind = np.argmin(kmeans.cluster_centers_)
-#             # get the points that correspond to each of these clusters
-#             spikes = peaks[np.where(kmeans.labels_ == spikes_ind)]
-#             noise = peaks[np.where(kmeans.labels_ == noise_ind)]
-#             # calculate the centroids
-#             spikes_centroid = kmeans.cluster_centers_[spikes_ind]
-#             noise_centroid = kmeans.cluster_centers_[noise_ind]
-#             # difference between the within-cluster sums of point-to-centroid distances 
-#             intra_sums = (((source_pred[spikes]- spikes_centroid)**2).sum()) 
-#             # difference between the between-cluster sums of point-to-centroid distances
-#             inter_sums = (((source_pred[spikes] - noise_centroid)**2).sum())
-#             sil = (inter_sums - intra_sums) / max(intra_sums, inter_sums)  
-#         else:
-#             sil = 0
-#             spikes = np.array([])
-#         sils[mu_idx] = sil
-#         pred_dts.append(spikes)
-#     return pred_dts, sils
-
-import torch
-import torch.nn.functional as F
 
 def get_sta_templates_peeloff(emg_grid, discharge_times_list, R, L=20):
     """
@@ -1060,7 +1015,6 @@ def get_sta_templates_peeloff(emg_grid, discharge_times_list, R, L=20):
         extended_emg_residual = extended_emg_residual - extended_muap_train
     
     return separation_vectors
-
 
 def get_silohuette(sources_pred, distance=4):
     '''Get silhouette values given source predictions.'''
@@ -1140,74 +1094,6 @@ def spike_scores(dts, dts_pred):
         scores['precision'][mu_idx] = tps / (tps + fps) # how many fake spikes are assumed
     return scores
 
-
-# def spike_matching(dts, dts_pred, fs, old_matches=None, jitter=0.002):
-#     ''' For each motor unit, compute the spiking accuracy, sensitivity and precision.'''
-#     precisions = torch.zeros(len(dts_pred), len(dts))
-#     sensitivities = torch.zeros(len(dts_pred), len(dts))
-#     rate_of_agreement = torch.zeros(len(dts_pred), len(dts)) ## USES THIS TO DETERMINE MATCHES
-    
-#     # Convert lists to tensors/arrays if they aren't already
-#     dts = [torch.tensor(dt) for dt in dts]
-#     dts_pred = [torch.tensor(dt_pred) for dt_pred in dts_pred]
-    
-#     for idx, dt_pred in enumerate(dts_pred):
-#         # Vectorize the outer loop by creating a matrix of differences
-#         pred_times = dt_pred.reshape(-1, 1)  # Shape: (n_pred, 1)
-        
-#         for jdx, dt in enumerate(dts):
-#             # Broadcast subtraction
-#             time_diffs = torch.abs(pred_times.reshape(-1, 1) - dt.reshape(1, -1))  # Shape: (n_pred, n_true)
-            
-#             # Compute matches using broadcasting
-#             matches = (time_diffs <= int(jitter*fs)).any(dim=1)  # Assuming spike_match_jitter threshold is 1
-#             tps = matches.sum()
-#             fps = len(dt_pred) - tps
-            
-#             # Compute false negatives using vectorized operations
-#             gt_matches = (time_diffs <= int(jitter*fs)).any(dim=0)
-#             fns = (~gt_matches).sum()
-            
-#             if (tps + fns) == 0:
-#                 sensitivities[idx, jdx] = 0.0
-#             else:
-#                 sensitivities[idx, jdx] = tps / (tps + fns)
-#             if (tps + fps) == 0:
-#                 precisions[idx, jdx] = 0.0
-#             else:
-#                 precisions[idx, jdx] = tps / (tps + fps)
-#             if (tps + fns + fps) == 0:
-#                 rate_of_agreement[idx, jdx] = 0.0
-#             else:
-#                 rate_of_agreement[idx, jdx] = tps / (tps + fns + fps)
-    
-#     # Get best match for each predicted spike with Hungarian algorithm
-#     f1_scores = 2 * sensitivities * precisions / (sensitivities + precisions + 1e-12)
-    
-#     if old_matches is None:
-#         print('Linear sum assignment...')
-#         # row_ind, col_ind = linear_sum_assignment((1-f1_scores).numpy())
-#         row_ind, col_ind = linear_sum_assignment((1-rate_of_agreement).numpy())
-#     else:
-#         row_ind, col_ind = np.array(list(old_matches.keys())), np.array(list(old_matches.values()))
-    
-#     # Vectorize final computations
-#     matches = {row_ind[i]: col_ind[i] for i in range(len(row_ind))}
-
-#     # Or more simply:
-#     matches = dict(zip(row_ind.tolist(), col_ind.tolist()))
-
-#     # Then get the corresponding metrics
-#     sensitivities = sensitivities[row_ind, col_ind].tolist()
-#     precisions = precisions[row_ind, col_ind].tolist()
-#     f1_scores = f1_scores[row_ind, col_ind].tolist()
-#     rate_of_agreement = rate_of_agreement[row_ind, col_ind].tolist()
-    
-#     return matches, rate_of_agreement, f1_scores, sensitivities, precisions
-
-import torch
-import numpy as np
-from scipy.optimize import linear_sum_assignment
 
 def spike_matching(dts, dts_pred, fs, old_matches=None, jitter=0.002):
     '''
@@ -1298,93 +1184,6 @@ def spike_matching(dts, dts_pred, fs, old_matches=None, jitter=0.002):
             f1_scores.append(0.0)
 
     return matches, matched_roa, f1_scores, matched_sensitivities, matched_precisions, z_scores
-
-# def spike_matching(dts, dts_pred, fs, jitter=0.002, delay=0):
-#     ''' 
-#     For each motor unit, compute the spiking accuracy, sensitivity and precision.
-#     Searches over possible delays to find the best alignment.
-    
-#     Args:
-#         dts: List of ground truth spike times for each motor unit
-#         dts_pred: List of predicted spike times for each motor unit
-#         fs: Sampling frequency
-#         jitter: Temporal jitter tolerance in seconds
-#         delay: Maximum delay to search in seconds (searches from -delay to +delay). 
-#                If 0, no delay search is performed.
-#     '''
-#     print('SPIKE MATCHING...')
-#     # Convert lists to tensors
-#     dts = [torch.tensor(dt) for dt in dts]
-#     dts_pred = [torch.tensor(dt_pred) for dt_pred in dts_pred]
-    
-#     # Generate delay values to test (in samples, step size = 1 sample)
-#     if delay > 0:
-#         delay_samples = int(delay * fs)
-#         delays = torch.arange(-delay_samples, delay_samples + 1, 1.0)
-#         n_delays = len(delays)
-#     else:
-#         delays = torch.tensor([0.0])
-#         n_delays = 1
-    
-#     precisions = torch.zeros(len(dts_pred), len(dts))
-#     sensitivities = torch.zeros(len(dts_pred), len(dts))
-#     best_delays = torch.zeros(len(dts_pred), len(dts))
-    
-#     jitter_samples = int(jitter * fs)
-    
-#     for idx, dt_pred in tqdm(enumerate(dts_pred)):
-#         pred_times = dt_pred.reshape(-1, 1, 1)  # Shape: (n_pred, 1, 1)
-        
-#         for jdx, dt in enumerate(dts):
-#             gt_times = dt.reshape(1, -1, 1)  # Shape: (1, n_true, 1)
-#             delays_reshaped = delays.reshape(1, 1, -1)  # Shape: (1, 1, n_delays)
-            
-#             # Compute time differences for all delays at once
-#             # Shape: (n_pred, n_true, n_delays)
-#             time_diffs = torch.abs(pred_times - gt_times - delays_reshaped)
-            
-#             # Check matches for each delay
-#             # Shape: (n_pred, n_true, n_delays)
-#             within_jitter = time_diffs <= jitter_samples
-            
-#             # For each delay, compute metrics
-#             # True positives: predicted spikes that match any ground truth
-#             tps_per_delay = within_jitter.any(dim=1).sum(dim=0)  # Shape: (n_delays,)
-            
-#             # False negatives: ground truth spikes that don't match any prediction
-#             fns_per_delay = (~within_jitter.any(dim=0)).sum(dim=0)  # Shape: (n_delays,)
-            
-#             # Compute sensitivity and precision for each delay
-#             n_pred = len(dt_pred)
-#             sensitivities_per_delay = tps_per_delay / (tps_per_delay + fns_per_delay + 1e-12)
-#             precisions_per_delay = tps_per_delay / (n_pred + 1e-12)
-            
-#             # Compute F1 scores for each delay
-#             f1_per_delay = 2 * sensitivities_per_delay * precisions_per_delay / \
-#                           (sensitivities_per_delay + precisions_per_delay + 1e-12)
-            
-#             # Find the best delay
-#             best_delay_idx = torch.argmax(f1_per_delay)
-#             best_delays[idx, jdx] = delays[best_delay_idx]
-            
-#             # Store metrics for the best delay
-#             sensitivities[idx, jdx] = sensitivities_per_delay[best_delay_idx]
-#             precisions[idx, jdx] = precisions_per_delay[best_delay_idx]
-    
-#     # Get best match for each predicted spike with Hungarian algorithm
-#     f1_scores = 2 * sensitivities * precisions / (sensitivities + precisions + 1e-12)
-#     print('Linear sum assignment...')
-#     _, col_ind = linear_sum_assignment((1 - f1_scores).numpy())
-    
-#     # Vectorize final computations
-#     matches = col_ind.tolist()
-#     idx_range = torch.arange(len(col_ind))
-#     sensitivities = sensitivities[idx_range, col_ind].tolist()
-#     precisions = precisions[idx_range, col_ind].tolist()
-#     f1_scores = f1_scores[idx_range, col_ind].tolist()
-#     best_delays_matched = (best_delays[idx_range, col_ind]).tolist()  # Convert back to seconds
-    
-#     return matches, f1_scores, sensitivities, precisions, best_delays_matched
 
 def get_muap_correlations(emg_grid, pred_dts, mu_dts, L=50):
     """Computes the correlation between every pair of MUs between session 1 and 2."""

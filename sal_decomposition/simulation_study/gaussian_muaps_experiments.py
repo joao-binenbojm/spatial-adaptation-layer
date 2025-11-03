@@ -175,10 +175,17 @@ for trans_idx in range(Nt):
         sources, losses = utils.search_fit_sda(emg_grid_test.to(torch.float32), sda, base_loss, npoints=3*nepochs, nepochs=0, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
 
     # Get learned transformations
-    Tx_opt, Ty_opt = (W-1)*sda.sal.xshift[0].item()/2, (H-1)*sda.sal.yshift[0].item()/2
-    theta_opt = np.pi*sda.sal.rot_theta[0].item()
-    print('OPTIMAL PARAMETERS FOUND --> Tx:', Tx_opt, 'Ty:', Ty_opt, 'Theta:', theta_opt)
-    params.update({'Tx_opt': Tx_opt, 'Ty_opt':Ty_opt, 'theta_opt': theta_opt})
+    Tx_est, Ty_est = (W-1)*sda.sal.xshift[0].item()/2, (H-1)*sda.sal.yshift[0].item()/2
+    theta_est = np.pi*sda.sal.rot_theta[0].item()
+    print('OPTIMAL PARAMETERS FOUND --> Tx:', Tx_est, 'Ty:', Ty_est, 'Theta:', theta_est)
+    params.update({'Tx_est': Tx_est, 'Ty_est':Ty_est, 'theta_est': theta_est})
+
+    # Estimating the efficacy of spatial adaptation
+    theta1 = utils.get_theta(emg_grid_test.shape, Tx=Tx, Ty=Ty, theta=theta)
+    theta2 = utils.get_theta(emg_grid_test.shape, Tx=Tx_est, Ty=Ty_est, theta=theta_est)
+    distance = utils.get_distance(emg_grid_test.shape, theta1, theta2) # get distance in pixels between initial and final location
+    wandb.log({'transformation_distance': distance})
+    print("Average Post-Correction Distance (mm): ", 4*distance)
 
     # Create mask based on transformed coordinates being within convex
     print('RECOMPUTING MINIMALLY CROPPED INVERSE COVARIANCE MATRIX...')
