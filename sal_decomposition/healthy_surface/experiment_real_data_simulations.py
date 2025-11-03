@@ -32,13 +32,14 @@ if __name__ == '__main__':
     R = 16
     reg = 1e-1
     
-    for sub_idx in [0,1,2]: # 10 subjects
+    for sub_idx in [0,1,2]: 
         DIR = f'/home/joao/Desktop/datasets/emanuele_arnault/s{sub_idx+1}_edited'
+        if sub_idx == 0:
+            DIR = os.path.join(DIR, '4mm')
 
         for mvc in [25, 50]:
             for ses_idx in [0,1,2]:
                 file = f"S{sub_idx+1}_{mvc}_Session{ses_idx+1}_MUEdit_edited.mat" 
-
                 sgnl, edition = utils.open_mat_output(DIR, file)
                 start, end = utils.get_target_boundaries(sgnl['target'].squeeze())
 
@@ -68,6 +69,18 @@ if __name__ == '__main__':
                 mu_dts = utils.squeeze_dts(dts)
                 mu_dts = utils.filter_dts(mu_dts, start, end)
 
+                # Get base metrics
+                # Crop observations and get new sep_mat
+                print(f'CROPS: XCROP: {xcrop}, YCROP: {ycrop}')
+                emg_grid_crop_train = emg_grid[:, :, ycrop:emg_grid.shape[2]-ycrop, xcrop:emg_grid.shape[3]-xcrop].clone()
+                extended_emg_crop_train = utils.extend_emg_torch(emg_grid_crop_train.squeeze().reshape(emg_grid_crop_train.shape[0], -1), R).T
+                inv_cov_train = utils.get_inv_cov_tikhonov(extended_emg_crop_train, reg=reg).to(torch.float32)
+
+                # Test that masking channels is a valid solution
+                print('TESTING MASKING CHANNELS...')
+                extended_emg_train = utils.extend_emg_torch(emg_grid.squeeze().reshape(emg_grid.shape[0], -1), R).T
+                STA = utils.get_sta_templates(extended_emg_train, mu_dts).to(torch.float32) # gets STA templates from Session 1 from the raw data
+
                 # Loop over extension factor, explained variance, and transformations
                 for trans_idx in range(Nt): # Nt random transformations
                     Tx, Ty, theta = torch.tensor(np.random.uniform(-bounds, bounds)).to(torch.float32)
@@ -76,37 +89,31 @@ if __name__ == '__main__':
                     # Initialize wandb run
                     run = wandb.init(
                         entity='jp2717-imperial-college-london',
-                        project='real-data-simulations',
+                        project='sda-real-data-simulations',
                         name=f'sub_{sub_idx+1}_ses_{ses_idx+1}_mvc_{mvc}',
-                        config={'Subject': sub_idx+1, 'Session':ses_idx+1, 'MVC': mvc,
-                                'Tx': Tx, 'Ty': Ty, 'theta': theta}, #, 'xscale': xscale, 'yscale': yscale},
+                        config={'Subject': sub_idx+1, 'Session':ses_idx+1, 'MVC': mvc},
                         mode='disabled'
                     )
 
-                    # Crop observations and get new sep_mat
-                    print(f'CROPS: XCROP: {xcrop}, YCROP: {ycrop}')
-                    emg_grid_crop_train = emg_grid[:, :, ycrop:emg_grid.shape[2]-ycrop, xcrop:emg_grid.shape[3]-xcrop].clone()
-                    extended_emg_crop_train = utils.extend_emg_torch(emg_grid_crop_train.squeeze().reshape(emg_grid_crop_train.shape[0], -1), R).T
-                    inv_cov_train = utils.get_inv_cov_tikhonov(extended_emg_crop_train, reg=reg).to(torch.float32)
-
-                    # Test that masking channels is a valid solution
-                    print('TESTING MASKING CHANNELS...')
-                    extended_emg = utils.extend_emg_torch(emg_grid.squeeze().reshape(emg_grid.shape[0], -1), R).T
-                    STA = utils.get_sta_templates(extended_emg, mu_dts).to(torch.float32) # gets STA templates from Session 1 from the raw data
+                    params = {"Tx": Tx, "Ty": Ty, "theta": theta}
 
                     sda = SpatialDecompositionAdaptation(grid_shape=(H, W), STA=STA, inv_cov=inv_cov_train, xcrop=xcrop, ycrop=ycrop, extension_factor=R)
                     base_loss = utils.get_base_loss(emg_grid, sda, batch_size=batch_size, loss=loss, device='cpu')
 
                     # Test on original grid with non-regularized whitening matrix
                     with torch.no_grad():
-                        source_est = sda(emg_grid)
-                    pred_dts, sils = utils.get_silohuette(source_est)
+                        sources = sda(emg_grid)
+                    pred_dts, sils = utils.get_silohuette(sources)
                     matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts, pred_dts, fs=fsamp)
                     print('ROA Training:', np.mean(rate_of_agreement))
                     print('#mu_train:', sum([roa > 0.7 for roa in rate_of_agreement]))
-                    wandb.log({'roa_train': np.mean(rate_of_agreement)})
-                    wandb.log({'roa_train_std': np.std(rate_of_agreement)})
-                    wandb.log({'#mu_train': sum([roa > 0.7 for roa in rate_of_agreement])})
+
+                    params.update({
+                        'sils_base_avg': np.mean(sils), 'sils_base_std': np.std(sils),
+                        'f1_score_base_avg': np.mean(f1_scores), 'f1_score_base_std': np.std(f1_scores),
+                        'rate_of_agreement_base_avg': np.mean(rate_of_agreement), 'rate_of_agreement_base_std': np.std(rate_of_agreement),
+                        '#mu_matches_base': np.sum([r > 0.7 for r in rate_of_agreement])
+                        })
 
                     # Add optimal parameters for testing
                     with torch.no_grad():
@@ -115,6 +122,22 @@ if __name__ == '__main__':
                         sda.sal.rot_theta[0].copy_(theta/np.pi)
                         emg_grid_test = sda.sal(emg_grid) # apply spatial transformation to get simulated data
                     
+                    # Compute performance post-transform, before adaptation
+                    with torch.no_grad():
+                        sources = sda(emg_grid_test)
+                    pred_dts, sils = utils.get_silohuette(sources)
+                    matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts, pred_dts, fs=fsamp)
+                    print('ROA Post-transform:', np.mean(rate_of_agreement))
+                    print('#mu_transform:', sum([roa > 0.7 for roa in rate_of_agreement]))
+
+                    params.update({
+                        'sils_transform_avg': np.mean(sils), 'sils_transform_std': np.std(sils),
+                        'f1_score_transform_avg': np.mean(f1_scores), 'f1_score_transform_std': np.std(f1_scores),
+                        'rate_of_agreement_transform_avg': np.mean(rate_of_agreement), 'rate_of_agreement_transform_std': np.std(rate_of_agreement),
+                        '#mu_matches_transform': np.sum([r > 0.7 for r in rate_of_agreement])
+                    })
+
+                    # Update inverse covariance matrix based on session 2 data
                     emg_grid_crop_test = emg_grid_test[:, :, ycrop:emg_grid_test.shape[2]-ycrop, xcrop:emg_grid_test.shape[3]-xcrop].clone()
                     extended_emg = utils.extend_emg_torch(emg_grid_crop_test.squeeze().reshape(emg_grid_crop_test.shape[0], -1), R).T
                     inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg, reg=reg).to(torch.float32)
@@ -125,12 +148,9 @@ if __name__ == '__main__':
                         sda.sal.xshift[0].copy_(0.0)
                         sda.sal.yshift[0].copy_(0.0)
                         sda.sal.rot_theta[0].copy_(0.0)
-                        emg_grid_test = sda.sal(emg_grid) # apply spatial transformation to get simulated data
 
                     # Fit SDA model to determine optimal spatial transformation
-                    # loss_arr = utils.loss_sampling(emg_grid_test.clone(), sda.to(device), base_loss=base_loss, bounds=bounds[:2], batch_size=batch_size, num_points=20, loss='negentropy', device=device)
                     sources, losses = utils.search_fit_sda(emg_grid_test, sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=2*nepochs, nepochs=nepochs, lr=lr, boundaries=bounds, device='cuda', loss=loss)
-
                     sda.to('cpu') # send back to CPU
 
                     # Log parameters
@@ -171,49 +191,41 @@ if __name__ == '__main__':
                     matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts, pred_dts, fs=fsamp)
                     print("ROA Test:", np.mean(rate_of_agreement))
                     print('#mu_test: ', sum([roa > 0.7 for roa in rate_of_agreement]))
-                    wandb.log({'roa_test': np.mean(rate_of_agreement)})
-                    wandb.log({'roa_test_std': np.std(rate_of_agreement)})
-                    wandb.log({'#mu_test': sum([roa > 0.7 for roa in rate_of_agreement])})
+                    params.update({
+                        'sils_avg': np.mean(sils), 'sils_std': np.std(sils),
+                        'f1_score_avg': np.mean(f1_scores), 'f1_score_std': np.std(f1_scores),
+                        'rate_of_agreement_avg': np.mean(rate_of_agreement), 'rate_of_agreement_std': np.std(rate_of_agreement),
+                        '#mu_matches': np.sum([r > 0.7 for r in rate_of_agreement])
+                    })
 
                     # Get new covariance matrix 
                     extended_emg_test = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T
-                    inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg_test, reg=1e-1) #.to(torch.float32)
+                    inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg_test, reg=1e-3) #.to(torch.float32)
 
                     # Refinement of MUs detected
-                    Nr = 20
-                    # official_matches = dict(matches)
+                    Nr = 10
                     for idx in tqdm(range(Nr)):
-                        # Get sorted pred_dts
-                        pred_dts = [item['pred_dts'] for item in match_data]
-
                         with torch.no_grad():
-                            sta_test = utils.get_sta_templates_peeloff(emg_grid_test.clone(), pred_dts, R=R, L=50)
+                            sta_test = utils.get_sta_templates(extended_emg_test.clone(), pred_dts)
                             sep_mat_test = sta_test @ inv_cov_test
                             sources = (sep_mat_test @ extended_emg_test).T
 
                         # Recompute predicted discharges and compute performances: only consider original matches made, not new ones!!
                         pred_dts, sils = utils.get_silohuette(sources)
-                        for i, item in enumerate(match_data):
-                            item['pred_dts'] = pred_dts[i]
-                            item['sil'] = sils[i]
-
-                        mu_dts = [item['mu_dts'] for item in match_data]
 
                         # Compute metrics
-                        matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts, pred_dts, old_matches={idx:idx for idx in range(len(pred_dts))}, fs=fsamp)
+                        matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts, pred_dts, old_matches=matches, fs=fsamp)
                         print(f"Refinement Step #{idx+1} --> #MU matches: {np.sum([r > 0.7 for r in rate_of_agreement])}, RoA: {np.mean(rate_of_agreement)}, F1-Score: {np.mean(f1_scores)}, Precision: {np.mean(precisions)}, Sensitivity: {np.mean(sensitivities)}")
-
-                        # Adding RoA to match data
-                        for i, item in enumerate(match_data):
-                            item['roa'] = rate_of_agreement[i]
-
-                        # Sort again based on SIL value
-                        match_data = sorted(match_data, key=lambda x: x['roa'], reverse=True)
 
                     print(rate_of_agreement)
                     print()                
                     
-                    wandb.log({'roa_refine': np.mean(rate_of_agreement)})
-                    wandb.log({'roa_refine_std': np.std(rate_of_agreement)})
-                    wandb.log({'#mu_refine': sum([roa > 0.7 for roa in rate_of_agreement])})
+                    params.update({
+                        'sils_refine_avg': np.mean(sils), 'sils_refine_std': np.std(sils),
+                        'f1_score_refine_avg': np.mean(f1_scores), 'f1_score_refine_std': np.std(f1_scores),
+                        'rate_of_agreement_refine_avg': np.mean(rate_of_agreement), 'rate_of_agreement_refine_std': np.std(rate_of_agreement),
+                        '#mu_matches_refine': np.sum([r > 0.7 for r in rate_of_agreement])
+                    })
+
+                    wandb.log(params)
                     wandb.finish()

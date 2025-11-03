@@ -6,9 +6,11 @@ from tqdm import tqdm
 import sys
 import json
 import pickle
+import os
 from math import floor
 import wandb
 import pandas as pd
+import getpass # To get your username
 
 import sal_decomposition.utils.simulation_utils as sutils
 from sal_decomposition.utils import utils
@@ -34,6 +36,27 @@ checklist = []
 #             checklist.append((fxmax, snr, opt))
 #     except KeyError:
 #         print(f"Skipping run {run.id} due to missing entries.")
+
+# 1. Get username and job ID for creating a unique path
+username = getpass.getuser()
+job_id = os.environ.get('PBS_JOBID', 'local-job')
+
+# 2. Define a unique log directory on the fast, local scratch disk
+scratch_dir = os.environ.get('TMPDIR')
+if scratch_dir:
+    # Create a unique directory for this specific job
+    print('RUNNING OFFLINE WANDB...')
+    wandb_log_dir = os.path.join(scratch_dir, f"{username}/wandb_logs/{job_id}")
+    os.makedirs(wandb_log_dir, exist_ok=True)
+    
+    # 3. Set W&B environment variables
+    os.environ["WANDB_DIR"] = wandb_log_dir  # Store logs here
+    os.environ["WANDB_MODE"] = "offline"      # Run offline
+    os.environ["WANDB_START_METHOD"] = "thread" # Avoid multiprocessing issues
+    
+    print(f"[W&B Setup] Running in offline mode. Logs saved to: {wandb_log_dir}")
+else:
+    print("[W&B Setup] Warning: $TMPDIR not found. Defaulting to standard W&B behavior.")
 
 # Define experimental parameters
 mu_count = 20
@@ -112,22 +135,14 @@ with torch.no_grad():
     matches_base, rate_of_agreement_base, f1_scores_base, sensitivities_base, precisions_base,_ = utils.spike_matching(dts, pred_dts, fs=fsamp)
     print('RoA Training:', np.mean(rate_of_agreement_base))
 
-# Test 30 randomly sampled spatial transformations
+# Test 50 randomly sampled spatial transformations
 for trans_idx in range(Nt):
     Tx, Ty = float(Txs[trans_idx]), float(Tys[trans_idx])
     theta = float(thetas[trans_idx])
-    print('Paremeters of Transform --> Tx:', Tx, 'Ty:', Ty, 'Theta:', theta)
+    print(f'Paremeters of Transform #{trans_idx+1}--> Tx:', Tx, 'Ty:', Ty, 'Theta:', theta)
 
     print('INITIALIZE SDA MODULE...')
     sda = SpatialDecompositionAdaptation(grid_shape=(H, W), STA=STA, inv_cov=inv_cov_train, xcrop=xcrop, ycrop=ycrop, extension_factor=R).to(device) # create SAL-Decomposition model
-
-    # Start the wandb run
-    wandb.init(
-        # set the wandb project where this run will be logged
-        project="sda-gaussian-muaps",
-        name=f'{opt}-{SNR}-{fxmax}-{trans_idx}',
-        # mode='disabled',
-    )
 
     # Keep track of experimental parameters of the run
     params = {'opt': opt, 'SNR':SNR, 'fxmax': fxmax,
@@ -184,11 +199,11 @@ for trans_idx in range(Nt):
     theta1 = utils.get_theta(emg_grid_test.shape, Tx=Tx, Ty=Ty, theta=theta)
     theta2 = utils.get_theta(emg_grid_test.shape, Tx=Tx_est, Ty=Ty_est, theta=theta_est)
     distance = utils.get_distance(emg_grid_test.shape, theta1, theta2) # get distance in pixels between initial and final location
-    wandb.log({'transformation_distance': distance})
+    params['transformation_distance'] = distance
     print("Average Post-Correction Distance (mm): ", 4*distance)
 
     # Create mask based on transformed coordinates being within convex
-    print('RECOMPUTING MINIMALLY CROPPED INVERSE COVARIANCE MATRIX...')
+    print('RECOMPUTING MINIMALLY CROPPED sINVERSE COVARIANCE MATRIX...')
     theta = sda.sal.get_affine_transform(input_shape=(H, W))
     theta = theta.repeat(1, 1, 1)
     transformed_grid = sda.sal.get_grid(theta, input_shape=(H, W))
@@ -216,7 +231,7 @@ for trans_idx in range(Nt):
     params.update({'sils_avg': np.mean(sils), 'sils_std': np.std(sils),
                 'f1_score_avg': np.mean(f1_scores), 'f1_score_std': np.std(f1_scores),
                 'rate_of_agreement_avg': np.mean(rate_of_agreement), 'rate_of_agreement_std': np.std(rate_of_agreement),
-                '#mu_matches_avg': np.sum([r > 0.7 for r in rate_of_agreement])
+                '#mu_matches': np.sum([r > 0.7 for r in rate_of_agreement])
     })
 
     # Get new covariance matrix 
@@ -248,6 +263,12 @@ for trans_idx in range(Nt):
     })
 
     # Finish wandb run with all scores and parameters of the system
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project="sda-gaussian-muaps",
+        name=f'{opt}-{SNR}-{fxmax}-{trans_idx}',
+        # mode='disabled',
+    )
     wandb.log(params)
     wandb.finish()
 

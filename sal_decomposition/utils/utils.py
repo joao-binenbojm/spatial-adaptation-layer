@@ -940,81 +940,81 @@ def extend_emg_torch(emg, R):
         extended_emg[idx:emg.shape[0]+idx, idx*nchans:(idx+1)*nchans] = emg
     return extended_emg[:-(R-1),:]
 
-def get_sta_templates_peeloff(emg_grid, discharge_times_list, R, L=20):
-    """
-    Update separation vectors using sequential peeling (no new discharge detection).
+# def get_sta_templates_peeloff(emg_grid, discharge_times_list, R, L=20):
+#     """
+#     Update separation vectors using sequential peeling (no new discharge detection).
     
-    Args:
-        emg_grid: (T, 1, H, W) original grid format EMG
-        discharge_times_list: list of N discharge time arrays (one per MU)
-        L: template length for MUAP
-        R: extension factor for extended observation
+#     Args:
+#         emg_grid: (T, 1, H, W) original grid format EMG
+#         discharge_times_list: list of N discharge time arrays (one per MU)
+#         L: template length for MUAP
+#         R: extension factor for extended observation
         
-    Returns:
-        separation_vectors: (N, nchans*R) updated separation vectors
-        muap_templates: list of N MUAP templates (L, H, W)
-    """
-    T, _, H, W = emg_grid.shape
-    nchans = H * W
-    N = len(discharge_times_list)
-    device = emg_grid.device
+#     Returns:
+#         separation_vectors: (N, nchans*R) updated separation vectors
+#         muap_templates: list of N MUAP templates (L, H, W)
+#     """
+#     T, _, H, W = emg_grid.shape
+#     nchans = H * W
+#     N = len(discharge_times_list)
+#     device = emg_grid.device
     
-    # Flatten and extend the original EMG
-    emg_flat = emg_grid.squeeze(1).reshape(T, nchans)  # (T, nchans)
-    extended_emg = extend_emg_torch(emg_flat, R)  # (T, nchans*R)
-    extended_emg_residual = extended_emg.clone()
+#     # Flatten and extend the original EMG
+#     emg_flat = emg_grid.squeeze(1).reshape(T, nchans)  # (T, nchans)
+#     extended_emg = extend_emg_torch(emg_flat, R)  # (T, nchans*R)
+#     extended_emg_residual = extended_emg.clone()
     
-    # Initialize outputs
-    separation_vectors = torch.zeros((N, nchans * R), dtype=torch.float64, device=device)
-    muap_templates = []
+#     # Initialize outputs
+#     separation_vectors = torch.zeros((N, nchans * R), dtype=torch.float64, device=device)
+#     muap_templates = []
         
-    # Sequential peeling (no ordering, just go through MUs in order)
-    for mu_idx in tqdm(range(N)):
-        dts = torch.tensor(discharge_times_list[mu_idx], device=device)
+#     # Sequential peeling (no ordering, just go through MUs in order)
+#     for mu_idx in tqdm(range(N)):
+#         dts = torch.tensor(discharge_times_list[mu_idx], device=device)
                 
-        # Keep only valid times for this MU
-        valid_times = dts[(dts >= L) & (dts < T - L)].long()
+#         # Keep only valid times for this MU
+#         valid_times = dts[(dts >= L) & (dts < T - L)].long()
 
-        if len(valid_times) == 0:
-            muap_templates.append(torch.zeros(L, H, W, device=device))
-            continue
+#         if len(valid_times) == 0:
+#             muap_templates.append(torch.zeros(L, H, W, device=device))
+#             continue
         
-        # 1. Compute separation vector: STA at spike times in extended space (no windowing)
-        sep_vec = extended_emg_residual[valid_times, :].mean(dim=0)  # (nchans*R,)
-        sep_vec = sep_vec / (torch.norm(sep_vec) + 1e-12)
-        separation_vectors[mu_idx] = sep_vec
+#         # 1. Compute separation vector: STA at spike times in extended space (no windowing)
+#         sep_vec = extended_emg_residual[valid_times, :].mean(dim=0)  # (nchans*R,)
+#         sep_vec = sep_vec / (torch.norm(sep_vec) + 1e-12)
+#         separation_vectors[mu_idx] = sep_vec
         
-        # 2. Compute MUAP template on current residual for peeling
-        emg_residual_flat = extended_emg_residual[:, :nchans]  # Take delay-0 channels
-        emg_residual_grid = emg_residual_flat.reshape(T, 1, H, W)
+#         # 2. Compute MUAP template on current residual for peeling
+#         emg_residual_flat = extended_emg_residual[:, :nchans]  # Take delay-0 channels
+#         emg_residual_grid = emg_residual_flat.reshape(T, 1, H, W)
         
-        sta_muaps = get_sta_muaps(emg_residual_grid, valid_times, L, plot=False)
-        muap_templates.append(sta_muaps)
+#         sta_muaps = get_sta_muaps(emg_residual_grid, valid_times, L, plot=False)
+#         muap_templates.append(sta_muaps)
         
-        # 3. Create spike train
-        spike_train = torch.zeros(T, device=device, dtype=torch.float64)
-        spike_train[valid_times.long()] = 1.0
-        spike_train = spike_train.view(1, 1, -1)  # (batch=1, in_ch=1, T)
+#         # 3. Create spike train
+#         spike_train = torch.zeros(T, device=device, dtype=torch.float64)
+#         spike_train[valid_times.long()] = 1.0
+#         spike_train = spike_train.view(1, 1, -1)  # (batch=1, in_ch=1, T)
         
-        # 4. Convolve spike train with MUAP template (center aligned)
-        sta_flat = sta_muaps.reshape(2*L + 1, nchans)  # (L, nchans)
-        sta_flat = torch.flip(sta_flat, dims=[0]) # flip for it to make sense with cross-correlation
-        kernel = sta_flat.T.unsqueeze(1)         # (nchans, 1, L)        
-        kernel_full = torch.zeros(2*L + 1 + L, nchans, device=sta_flat.device, dtype=sta_flat.dtype)
-        # Put the STA template starting at index 'half'
-        kernel_full[L:L + 2*L + 1, :] = sta_flat
-        kernel_full = kernel_full.T.unsqueeze(1)  # shape (nchans, 1, kernel_size)
+#         # 4. Convolve spike train with MUAP template (center aligned)
+#         sta_flat = sta_muaps.reshape(2*L + 1, nchans)  # (L, nchans)
+#         sta_flat = torch.flip(sta_flat, dims=[0]) # flip for it to make sense with cross-correlation
+#         kernel = sta_flat.T.unsqueeze(1)         # (nchans, 1, L)        
+#         kernel_full = torch.zeros(2*L + 1 + L, nchans, device=sta_flat.device, dtype=sta_flat.dtype)
+#         # Put the STA template starting at index 'half'
+#         kernel_full[L:L + 2*L + 1, :] = sta_flat
+#         kernel_full = kernel_full.T.unsqueeze(1)  # shape (nchans, 1, kernel_size)
 
-        # Conv without padding (so kernel is placed starting at spike index)
-        muap_train = F.conv1d(spike_train, kernel, padding='same').squeeze().T  # (1, nchans, T-L+1)
+#         # Conv without padding (so kernel is placed starting at spike index)
+#         muap_train = F.conv1d(spike_train, kernel, padding='same').squeeze().T  # (1, nchans, T-L+1)
         
-        # 5. Extend the MUAP train
-        extended_muap_train = extend_emg_torch(muap_train, R)
+#         # 5. Extend the MUAP train
+#         extended_muap_train = extend_emg_torch(muap_train, R)
         
-        # 6. Peel: subtract from residual for next MU
-        extended_emg_residual = extended_emg_residual - extended_muap_train
+#         # 6. Peel: subtract from residual for next MU
+#         extended_emg_residual = extended_emg_residual - extended_muap_train
     
-    return separation_vectors
+#     return separation_vectors
 
 def get_silohuette(sources_pred, distance=4):
     '''Get silhouette values given source predictions.'''
