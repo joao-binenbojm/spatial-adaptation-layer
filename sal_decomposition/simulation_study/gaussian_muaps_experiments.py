@@ -53,7 +53,7 @@ Tmean, ISV = 60, 0.2 # sample statistics of spikes # equivalent of 30Hz with fs=
 H, W, L = 26, 10, 50
 R = 16
 sampfactor=14
-reg = 1e-1
+reg = 5e-1
 delay = (torch.floor(torch.tensor([L + R])/2) - 1).to(torch.int) # delay introduced by causality of triggering process
 
 # Training params
@@ -141,14 +141,14 @@ for trans_idx in range(Nt):
 
     with torch.no_grad():
         print('APPLY TRANSFORM...')
-        emg_grid_transform = utils.apply_affine(emg_grid.detach().cpu().clone(), Tx*sampfactor, Ty*sampfactor, theta, mode='bicubic')
+        emg_grid_test = utils.apply_affine(emg_grid.detach().cpu().clone(), Tx*sampfactor, Ty*sampfactor, theta, mode='bicubic')
 
         print('DOWNSAMPLING...')
-        emg_grid_transform = sutils.downsample_grid(emg_grid_transform, sampfactor).to(device)
+        emg_grid_test = sutils.downsample_grid(emg_grid_test, sampfactor).to(device)
 
         print('POST-TRANSFORM SOURCE ESTIMATE')
         with torch.no_grad():
-            sources_transform = sda(emg_grid_transform)
+            sources_transform = sda(emg_grid_test)
 
         pred_dts, sils = utils.get_silohuette(sources_transform.detach().cpu().numpy())
         matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(dts, pred_dts, fs=fsamp)
@@ -160,51 +160,46 @@ for trans_idx in range(Nt):
                 '#mu_matches_transform': np.sum([r > 0.7 for r in rate_of_agreement])
         })
 
-        emg_grid_crop_test = emg_grid_transform[:, :, ycrop:emg_grid_transform.shape[2]-ycrop, xcrop:emg_grid_transform.shape[3]-xcrop].clone()
+        emg_grid_crop_test = emg_grid_test[:, :, ycrop:emg_grid_test.shape[2]-ycrop, xcrop:emg_grid_test.shape[3]-xcrop].clone()
         extended_emg = utils.extend_emg_torch(emg_grid_crop_test.squeeze().reshape(emg_grid_crop_test.shape[0], -1), R).T
         inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg, reg=reg).to(torch.float32)
         sda.inv_cov = inv_cov_test
 
     # Optimization
     if opt == 'fit':
-        sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=0, nepochs=nepochs, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+        sources, losses = utils.search_fit_sda(emg_grid_test.to(torch.float32), sda, base_loss, npoints=0, nepochs=nepochs, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
 
     elif opt == 'search_fit':
-        sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=2*nepochs, nepochs=nepochs//2, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+        sources, losses = utils.search_fit_sda(emg_grid_test.to(torch.float32), sda, base_loss, npoints=2*nepochs, nepochs=nepochs//2, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
     else: # search only
-        sources, losses = utils.search_fit_sda(emg_grid_transform.to(torch.float32), sda, base_loss, npoints=3*nepochs, nepochs=0, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+        sources, losses = utils.search_fit_sda(emg_grid_test.to(torch.float32), sda, base_loss, npoints=3*nepochs, nepochs=0, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
 
     # Get learned transformations
     Tx_opt, Ty_opt = (W-1)*sda.sal.xshift[0].item()/2, (H-1)*sda.sal.yshift[0].item()/2
     theta_opt = np.pi*sda.sal.rot_theta[0].item()
-    xscale_opt, yscale_opt = sda.sal.xscale[0].item(), sda.sal.yscale[0].item()
-
+    print('OPTIMAL PARAMETERS FOUND --> Tx:', Tx_opt, 'Ty:', Ty_opt, 'Theta:', theta_opt)
     params.update({'Tx_opt': Tx_opt, 'Ty_opt':Ty_opt, 'theta_opt': theta_opt})
 
     # Create mask based on transformed coordinates being within convex
     print('RECOMPUTING MINIMALLY CROPPED INVERSE COVARIANCE MATRIX...')
-    theta = sda.sal.get_affine_transform(input_shape=(H, W), inverse=True)
+    theta = sda.sal.get_affine_transform(input_shape=(H, W))
     theta = theta.repeat(1, 1, 1)
     transformed_grid = sda.sal.get_grid(theta, input_shape=(H, W))
     transformed_grid[:,:,:,0] = (W-1)*(1 + transformed_grid[:,:,:,0])/2
     transformed_grid[:,:,:,1] = (H-1)*(1 + transformed_grid[:,:,:,1])/2
 
-    original_grid = torch.nn.functional.affine_grid(torch.eye(3)[0:2,:].unsqueeze(0), size=(1,1,H,W), align_corners=True)
-    original_grid[:,:,:,0] = (W-1)*(1 + original_grid[:,:,:,0])/2
-    original_grid[:,:,:,1] = (H-1)*(1 + original_grid[:,:,:,1])/2
-
-    lcrop, rcrop, bcrop, tcrop = utils.get_min_conservative_crop((H, W), transformed_grid.detach().cpu(), original_grid)
+    lcrop, rcrop, bcrop, tcrop = utils.get_min_conservative_crop((H, W), transformed_grid.detach().cpu(), xcrop_max=xcrop, ycrop_max=ycrop)
     sda.lcrop, sda.rcrop, sda.tcrop, sda.bcrop = lcrop, rcrop, tcrop, bcrop
     sda.crop_mask = sda.get_crop_mask()
 
-    emg_grid_crop_test = emg_grid_transform[:, :, tcrop:emg_grid_transform.shape[2]-bcrop, lcrop:emg_grid_transform.shape[3]-rcrop].clone()
+    emg_grid_crop_test = emg_grid_test[:, :, tcrop:emg_grid_test.shape[2]-bcrop, lcrop:emg_grid_test.shape[3]-rcrop].clone()
     extended_emg = utils.extend_emg_torch(emg_grid_crop_test.squeeze().reshape(emg_grid_crop_test.shape[0], -1), R).T
     inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg, reg=reg).to(torch.float32)
     sda.inv_cov = inv_cov_test
 
     # Optimal predictions
     with torch.no_grad():
-        sources = sda(emg_grid_transform)
+        sources = sda(emg_grid_test)
 
     # Performance metrics based on output sources
     pred_dts, sils = utils.get_silohuette(sources.detach().cpu().numpy())
@@ -218,17 +213,16 @@ for trans_idx in range(Nt):
     })
 
     # Get new covariance matrix 
-    extended_emg_transform = utils.extend_emg_torch(emg_grid_transform.squeeze().reshape(emg_grid_transform.shape[0], -1), R).to(torch.float32).T
-    inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg_transform, reg=1e-1).to(torch.float32)
+    extended_emg_test = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).to(torch.float32).T
+    inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg_test, reg=reg).to(torch.float32)
 
     # Refinement of MUs detected
     Nr = 10
-    # official_matches = dict(matches)
     for idx in tqdm(range(Nr)):
         with torch.no_grad():
-            sta_test = utils.get_sta_templates(extended_emg_transform.clone(), pred_dts).to(torch.float32).to(device)
+            sta_test = utils.get_sta_templates(extended_emg_test.clone(), pred_dts).to(torch.float32).to(device)
             sep_mat_test = sta_test @ inv_cov_test
-            sources = (sep_mat_test @ extended_emg_transform).T
+            sources = (sep_mat_test @ extended_emg_test).T
 
         # Recompute predicted discharges and compute performances: only consider original matches made, not new ones!!
         pred_dts, sils = utils.get_silohuette(sources)

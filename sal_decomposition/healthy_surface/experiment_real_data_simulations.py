@@ -35,6 +35,7 @@ if __name__ == '__main__':
     batch_size = 10000
     loss='negentropy'
     Nt = 50
+    nepochs = 250
     bounds = np.array([2.5, 2.5, 15*np.pi/180])
 
     y_margin, x_margin = utils.out_of_bounds_pixels(26, 10, bounds[2])
@@ -124,7 +125,7 @@ if __name__ == '__main__':
                     sda.sal.xshift[0].copy_(2*Tx/(W-1))
                     sda.sal.yshift[0].copy_(2*Ty/(H-1))
                     sda.sal.rot_theta[0].copy_(theta/np.pi)
-                    emg_grid_test = sda.sal(emg_grid, padding_mode='reflection') # apply spatial transformation to get simulated data
+                    emg_grid_test = sda.sal(emg_grid, padding_mode='zeros') # apply spatial transformation to get simulated data
                 
                 emg_grid_crop_test = emg_grid_test[:, :, ycrop:emg_grid_test.shape[2]-ycrop, xcrop:emg_grid_test.shape[3]-xcrop].clone()
                 extended_emg = utils.extend_emg_torch(emg_grid_crop_test.squeeze().reshape(emg_grid_crop_test.shape[0], -1), R).T
@@ -143,8 +144,8 @@ if __name__ == '__main__':
 
 
                 # Fit SDA model to determine optimal spatial transformation
-                loss_arr = utils.loss_sampling(emg_grid_test.clone(), sda.to(device), base_loss=base_loss, bounds=bounds[:2], batch_size=batch_size, num_points=20, loss='negentropy', device=device)
-                sources, losses = utils.search_fit_sda(emg_grid_test, sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=500, nepochs=250, lr=5e-3, boundaries=bounds, device='cuda', loss=loss)
+                # loss_arr = utils.loss_sampling(emg_grid_test.clone(), sda.to(device), base_loss=base_loss, bounds=bounds[:2], batch_size=batch_size, num_points=20, loss='negentropy', device=device)
+                sources, losses = utils.search_fit_sda(emg_grid_test, sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=2*nepochs, nepochs=nepochs, lr=5e-3, boundaries=bounds, device='cuda', loss=loss)
 
                 sda.to('cpu') # send back to CPU
 
@@ -157,20 +158,13 @@ if __name__ == '__main__':
                 # Estimating the efficacy of spatial adaptation
                 theta1 = utils.get_theta(emg_grid_test.shape, Tx=Tx, Ty=Ty, theta=theta)
                 theta2 = utils.get_theta(emg_grid_test.shape, Tx=Tx_est, Ty=Ty_est, theta=theta_est)
-                # theta_net = utils.get_theta(emg_grid_test.shape, Tx=Tx_est-Tx, Ty=Ty_est-Ty, theta=theta_est-theta)
                 distance = utils.get_distance(emg_grid_test.shape, theta1, theta2) # get distance in pixels between initial and final location
                 wandb.log({'transformation_distance': distance})
                 print("Average Post-Correction Distance (mm): ", 4*distance)
 
-                # Get minimal needed cropping estimates
-                # original_grid, transformed_grid, min_distance = utils.get_min_distance((H, W), Tx_est, Ty_est, theta_est)
-                # print(f'MIN DISTANCE: {min_distance} pixels')
-                # wandb.log({'min_distance': min_distance})
-
-
                 # Create mask based on transformed coordinates being within convex
                 print('RECOMPUTING MINIMALLY CROPPED INVERSE COVARIANCE MATRIX...')
-                theta = sda.sal.get_affine_transform(input_shape=(H, W), inverse=True)
+                theta = sda.sal.get_affine_transform(input_shape=(H, W))
                 theta = theta.repeat(1, 1, 1)
                 transformed_grid = sda.sal.get_grid(theta, input_shape=(H, W))
                 transformed_grid[:,:,:,0] = (W-1)*(1 + transformed_grid[:,:,:,0])/2

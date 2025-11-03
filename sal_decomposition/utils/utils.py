@@ -1728,31 +1728,71 @@ def get_min_distance(grid_shape, Tx, Ty, theta):
     min_distance = torch.min(distances)
     return original_grid, transformed_grid, min_distance
 
-def get_min_conservative_crop(grid_shape, transformed_grid, original_grid):
+# def get_min_conservative_crop(grid_shape, transformed_grid, original_grid):
+#     '''Given a transformed grid and original grid coordinates, find the smallest crop for each side such that no dead channels are included.'''
+#     H, W = grid_shape
+#     # transformed_coordinates = transformed_grid[0, :, :, :].cpu().numpy().reshape(-1, 2)
+#     # original_coordinates = original_grid[0, :, :, :].cpu().numpy().reshape(-1, 2)
+#     # hull = ConvexHull(transformed_coordinates)
+#     # delaunay = Delaunay(transformed_coordinates[hull.vertices])
+#     # inside = delaunay.find_simplex(original_coordinates) >= 0
+#     # mask = torch.tensor(inside.reshape(H, W))
+    
+#     if transformed_grid.dim() == 4:
+#         transformed_grid = transformed_grid.squeeze(0)
+
+#     # Check if new coordinates are inside the original boundaries
+#     mask_x_in_bounds = (transformed_grid[..., 0] >= 0) & (transformed_grid[..., 0] < W)
+#     mask_y_in_bounds = (transformed_grid[..., 1] >= 0) & (transformed_grid[..., 1] < H)
+    
+#     # The pixel is "safe" ONLY if BOTH its x' and y' are in-bounds
+#     mask = (mask_x_in_bounds & mask_y_in_bounds).cpu()
+    
+#     # Find most conservative crop
+#     lcrop, rcrop, bcrop, tcrop = W//2 - 1, W//2 - 1, H//2 - 1, H//2 - 1
+#     min_crop = False
+#     while not min_crop:
+#         crop_sum = lcrop + rcrop + bcrop + tcrop
+#         if mask[tcrop:H-bcrop, lcrop-1:W-rcrop].all() and lcrop > 0:
+#             lcrop -= 1
+#         if mask[tcrop:H-bcrop, lcrop:W-(rcrop-1)].all() and rcrop > 0:
+#             rcrop -= 1
+#         if mask[tcrop-1:H-bcrop, lcrop:W-rcrop].all() and tcrop > 0:
+#             tcrop -= 1
+#         if mask[tcrop:H-(bcrop-1), lcrop:W-rcrop].all() and bcrop > 0:
+#             bcrop -= 1
+#         if crop_sum == lcrop + rcrop + bcrop + tcrop: # if no more changes, we have found the minimum crop
+#             min_crop = True
+#     return lcrop, rcrop, bcrop, tcrop
+
+def get_min_conservative_crop(grid_shape, transformed_grid, xcrop_max, ycrop_max):
     '''Given a transformed grid and original grid coordinates, find the smallest crop for each side such that no dead channels are included.'''
     H, W = grid_shape
-    transformed_coordinates = transformed_grid[0, :, :, :].cpu().numpy().reshape(-1, 2)
-    original_coordinates = original_grid[0, :, :, :].cpu().numpy().reshape(-1, 2)
-    hull = ConvexHull(transformed_coordinates)
-    delaunay = Delaunay(transformed_coordinates[hull.vertices])
-    inside = delaunay.find_simplex(original_coordinates) >= 0
-    mask = torch.tensor(inside.reshape(H, W))
+    
+    if transformed_grid.dim() == 4:
+        transformed_grid = transformed_grid.squeeze(0)
+
+    # Check if new coordinates are inside the original boundaries
+    mask_x_in_bounds = (transformed_grid[..., 0] >= 0) & (transformed_grid[..., 0] < W)
+    mask_y_in_bounds = (transformed_grid[..., 1] >= 0) & (transformed_grid[..., 1] < H)
+    
+    # The pixel is "safe" ONLY if BOTH its x' and y' are in-bounds
+    mask = (mask_x_in_bounds & mask_y_in_bounds).cpu()
     
     # Find most conservative crop
-    lcrop, rcrop, bcrop, tcrop = W//2 - 1, W//2 - 1, H//2 - 1, H//2 - 1
-    min_crop = False
-    while not min_crop:
-        crop_sum = lcrop + rcrop + bcrop + tcrop
-        if mask[tcrop:H-bcrop, lcrop-1:W-rcrop].all() and lcrop > 0:
-            lcrop -= 1
-        if mask[tcrop:H-bcrop, lcrop:W-(rcrop-1)].all() and rcrop > 0:
-            rcrop -= 1
-        if mask[tcrop-1:H-bcrop, lcrop:W-rcrop].all() and tcrop > 0:
-            tcrop -= 1
-        if mask[tcrop:H-(bcrop-1), lcrop:W-rcrop].all() and bcrop > 0:
-            bcrop -= 1
-        if crop_sum == lcrop + rcrop + bcrop + tcrop: # if no more changes, we have found the minimum crop
-            min_crop = True
+    options = []
+    for lcrop in range(xcrop_max + 1):
+        for rcrop in range(xcrop_max + 1):
+            for tcrop in range(ycrop_max + 1):
+                for bcrop in range(ycrop_max + 1):
+                    if mask[tcrop:H-bcrop, lcrop:W-rcrop].all():
+                        options.append({"crops": (lcrop, rcrop, bcrop, tcrop),
+                                        "area": (H - tcrop - bcrop) * (W - lcrop - rcrop)
+                                        })
+    
+    # Select the option with the largest area (smallest crop)
+    best_crop_dict = max(options, key=lambda x: x["area"])
+    lcrop, rcrop, bcrop, tcrop = best_crop_dict["crops"]
     return lcrop, rcrop, bcrop, tcrop
 
 
