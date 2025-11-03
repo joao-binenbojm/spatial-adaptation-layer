@@ -35,10 +35,10 @@ if __name__ == '__main__':
     batch_size = 10000
     loss='negentropy'
     Nt = 50
-    bounds = np.array([2.5, 2.5, 10*np.pi/180])
+    bounds = np.array([2.5, 2.5, 15*np.pi/180])
 
-    delta_width, delta_height = utils.out_of_bounds_pixels(26, 10, bounds[2])
-    xcrop, ycrop = int(bounds[0] + floor(delta_width + 0.5)), int(bounds[1] + floor(delta_height + 0.5))
+    y_margin, x_margin = utils.out_of_bounds_pixels(26, 10, bounds[2])
+    xcrop, ycrop = int(bounds[0] + floor(x_margin + 0.5)), int(bounds[1] + floor(y_margin + 0.5))
     
     R = 16
     reg = 1e-1

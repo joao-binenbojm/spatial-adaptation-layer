@@ -219,21 +219,21 @@ if __name__ == '__main__':
     fr_pred = utils.get_mean_firing_rate(pred_dts, fs=fsamp)
     print(rate_of_agreement)
 
-    match_data = []
-    for idx, (pred_idx, true_idx) in enumerate(matches.items()):
-        # if zscores[pred_idx] > 3:
-        # Bundle everything together
-        match_info = {
-            "mu_dts": mu_dts[pred_idx],
-            "pred_dts": pred_dts[pred_idx],
-            "mu_dts2": mu_dts2[true_idx],
-            "sil": sils[pred_idx],
-            "roa": rate_of_agreement[idx]
-        }
-        match_data.append(match_info)
+    # match_data = []
+    # for idx, (pred_idx, true_idx) in enumerate(matches.items()):
+    #     # if zscores[pred_idx] > 3:
+    #     # Bundle everything together
+    #     match_info = {
+    #         "mu_dts": mu_dts[pred_idx],
+    #         "pred_dts": pred_dts[pred_idx],
+    #         "mu_dts2": mu_dts2[true_idx],
+    #         "sil": sils[pred_idx],
+    #         "roa": rate_of_agreement[idx]
+    #     }
+    #     match_data.append(match_info)
 
-    # Sort by SIL
-    match_data = sorted(match_data, key=lambda x: x['roa'], reverse=True)
+    # # Sort by SIL
+    # match_data = sorted(match_data, key=lambda x: x['roa'], reverse=True)
 
     # # Determine which MUs are above the threhsold and constitute matches
     # filtered_matches = {}
@@ -251,7 +251,7 @@ if __name__ == '__main__':
     # pred_dts = filtered_pred_dts.copy()
     # sils = filtered_sils.copy()
     # matches = dict(filtered_matches)
-    print(f"#Matches: {len(match_data)}")
+    # print(f"#Matches: {len(match_data)}")
 
     # # Now we sort the matched MUs by SIL
     # sorted_idxs = np.argsort(sils)[::-1]
@@ -266,11 +266,11 @@ if __name__ == '__main__':
 
 
     # Refinement of MUs detected
-    Nr = 20
+    Nr = 10
     # official_matches = dict(matches)
     for idx in tqdm(range(Nr)):
         # Get sorted pred_dts
-        pred_dts = [item['pred_dts'] for item in match_data]
+        # pred_dts = [item['pred_dts'] for item in match_data]
 
         with torch.no_grad():
             # sta_test = utils.get_sta_templates_peeloff(emg_grid_test.clone(), pred_dts, R=R, L=50).to(torch.float32)
@@ -280,26 +280,26 @@ if __name__ == '__main__':
 
         # Recompute predicted discharges and compute performances: only consider original matches made, not new ones!!
         pred_dts, sils = utils.get_silohuette(sources)
-        for i, item in enumerate(match_data):
-            item['pred_dts'] = pred_dts[i]
-            item['sil'] = sils[i]
+        # for i, item in enumerate(match_data):
+        #     item['pred_dts'] = pred_dts[i]
+        #     item['sil'] = sils[i]
 
-        mu_dts2 = [item['mu_dts2'] for item in match_data]
-        mu_dts = [item['mu_dts'] for item in match_data]
+        # mu_dts2 = [item['mu_dts2'] for item in match_data]
+        # mu_dts = [item['mu_dts'] for item in match_data]
 
         # Compute metrics
-        matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts2, pred_dts, old_matches={idx:idx for idx in range(len(pred_dts))}, fs=fsamp)
+        matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts2, pred_dts, old_matches=matches, fs=fsamp)
+        # matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts2, pred_dts, old_matches={idx:idx for idx in range(len(pred_dts))}, fs=fsamp)
         fr_train, fr_pred = utils.get_median_firing_rate(mu_dts, fs=fsamp), utils.get_median_firing_rate(pred_dts, fs=fsamp)
-        # corrs = [utils.get_sta_correlations(emg_grid_test.clone(), pred_dts[idx].astype(int), mu_dts2[idx].astype(int), L=50) for idx in range(len(pred_dts))]
         print(f"Refinement Step #{idx+1} --> #MU matches: {np.sum([r > 0.7 for r in rate_of_agreement])}, RoA: {np.mean(rate_of_agreement)}, F1-Score: {np.mean(f1_scores)}, Precision: {np.mean(precisions)}, Sensitivity: {np.mean(sensitivities)}")
         print(f"Average firing rate difference between matches: {np.mean([np.abs(fr_train[idx]-fr_pred[idx]) for idx in range(len(mu_dts)) if rate_of_agreement[idx] > 0.7])}")
 
-        # Adding RoA to match data
-        for i, item in enumerate(match_data):
-            item['roa'] = rate_of_agreement[i]
+        # # Adding RoA to match data
+        # for i, item in enumerate(match_data):
+        #     item['roa'] = rate_of_agreement[i]
 
-        # Sort again based on SIL value
-        match_data = sorted(match_data, key=lambda x: x['roa'], reverse=True)
+        # # Sort again based on SIL value
+        # match_data = sorted(match_data, key=lambda x: x['roa'], reverse=True)
 
     print(rate_of_agreement)
     print()

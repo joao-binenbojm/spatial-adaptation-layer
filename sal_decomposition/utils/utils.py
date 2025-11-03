@@ -1606,10 +1606,10 @@ def out_of_bounds_pixels(height: int, width: int, theta: float):
     new_height = abs(width * np.sin(theta)) + abs(height * np.cos(theta))
     
     # Compute out-of-bounds pixels
-    delta_width = (new_width - width) / 2
-    delta_height = (new_height - height) / 2
+    y_margin = (new_width - width) / 2
+    x_margin = (new_height - height) / 2
     
-    return delta_width, delta_height
+    return y_margin, x_margin
 
 # def handle_outliers(emg_grid):
 #     '''Determine outlier channels based on spectral flatness, and replace them with average of neighbours.'''
