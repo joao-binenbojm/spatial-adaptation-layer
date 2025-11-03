@@ -52,7 +52,7 @@ duration = 20000 # number of time samples in EMG, equivalent of 10s with fs=2000
 Tmean, ISV = 60, 0.2 # sample statistics of spikes # equivalent of 30Hz with fs=2000Hz
 H, W, L = 26, 10, 50
 R = 16
-sampfactor=14
+sampfactor = 14
 reg = 5e-1
 delay = (torch.floor(torch.tensor([L + R])/2) - 1).to(torch.int) # delay introduced by causality of triggering process
 
