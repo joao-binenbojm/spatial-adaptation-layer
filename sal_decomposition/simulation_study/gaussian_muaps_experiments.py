@@ -37,27 +37,6 @@ checklist = []
 #     except KeyError:
 #         print(f"Skipping run {run.id} due to missing entries.")
 
-# 1. Get username and job ID for creating a unique path
-username = getpass.getuser()
-job_id = os.environ.get('PBS_JOBID', 'local-job')
-
-# 2. Define a unique log directory on the fast, local scratch disk
-scratch_dir = os.environ.get('TMPDIR')
-if scratch_dir:
-    # Create a unique directory for this specific job
-    print('RUNNING OFFLINE WANDB...')
-    wandb_log_dir = os.path.join(scratch_dir, f"{username}/wandb_logs/{job_id}")
-    os.makedirs(wandb_log_dir, exist_ok=True)
-    
-    # 3. Set W&B environment variables
-    os.environ["WANDB_DIR"] = wandb_log_dir  # Store logs here
-    os.environ["WANDB_MODE"] = "offline"      # Run offline
-    os.environ["WANDB_START_METHOD"] = "thread" # Avoid multiprocessing issues
-    
-    print(f"[W&B Setup] Running in offline mode. Logs saved to: {wandb_log_dir}")
-else:
-    print("[W&B Setup] Warning: $TMPDIR not found. Defaulting to standard W&B behavior.")
-
 # Define experimental parameters
 mu_count = 20
 exp_name = sys.argv[1]  # First argument after script name

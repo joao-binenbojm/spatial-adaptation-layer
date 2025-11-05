@@ -22,7 +22,6 @@ if __name__ == '__main__':
 
     # Parameters
     ied = 4
-    mvc = 25
     H, W = 26, 10
     index_matrix = index_matrix4
 
@@ -35,8 +34,8 @@ if __name__ == '__main__':
     # Set pipeline parameters
     R = 16
     reg = 1e-1
-    bounds = [2.5, 2.5, 15*np.pi/180]
-    y_margin, x_margin = utils.out_of_bounds_pixels(26, 10, bounds[2])
+    bounds = [2.5, 4.0, 15*np.pi/180]
+    y_margin, x_margin = utils.out_of_bounds_pixels(H, W, bounds[2])
     xcrop, ycrop = int(bounds[0] + floor(x_margin + 0.5)), int(bounds[1] + floor(y_margin + 0.5))
 
     with open('./sal_decomposition/healthy_surface/outlier_channels.json', 'r') as f:
@@ -54,9 +53,12 @@ if __name__ == '__main__':
                         continue
                     
                     ###################### TEST LOADING SPECIFIC COMBINATION TO TEST WHETHER ANYTHING HAS CHANGED
-                    DIR = f'/home/joao/Desktop/datasets/emanuele_arnault/s{subject+1}_edited'
+                    mvc = 50
                     subject = 2
-                    ses1, ses2 = 0, 1
+                    ses1, ses2 = 2, 0
+                    DIR = f'/home/joao/Desktop/datasets/emanuele_arnault/s{subject+1}_edited'
+                    if subject == 0:
+                        DIR  = os.path.join(DIR, f'{ied}mm')
                     #############################################################################################
                     # Initialize wandb run
                     run = wandb.init(
@@ -76,9 +78,11 @@ if __name__ == '__main__':
                     start, end = utils.get_target_boundaries(sgnl['target'].squeeze())
                     print('FILTERING TRAINING DATA...')
                     emg = sgnl['data']
+                    emg = emg - emg.mean(axis=0, keepdims=True) # average referencing
                     emg = utils.bandstop_filter(utils.bandpass_filter(emg, fsamp=fsamp), fsamp=fsamp)
                     emg = (emg - emg.mean(axis=1, keepdims=True)) / (emg.std(axis=1, keepdims=True) + 1e-12) # centering emg
                     emg_grid_original = utils.make_grid(emg, index_matrix4)
+                    
                     H, W = emg_grid_original.shape[2], emg_grid_original.shape[3]
                     Nch = H*W
                     # Compute outliers as channels average of neighbours
@@ -99,6 +103,7 @@ if __name__ == '__main__':
                     sgnl2, edition2 = utils.open_mat_output(DIR, file2)
                     start2, end2 = utils.get_target_boundaries(sgnl2['target'].squeeze())
                     emg2 = sgnl2['data']
+                    emg2 = emg2 - emg2.mean(axis=0, keepdims=True) # average referencing
                     print('FILTERING TEST DATA...')
                     emg2 = utils.bandstop_filter(utils.bandpass_filter(emg2, fsamp=fsamp), fsamp=fsamp)
                     emg2 = (emg2 - emg2.mean(axis=1, keepdims=True)) / (emg2.std() + 1e-12)
@@ -119,7 +124,8 @@ if __name__ == '__main__':
                     fr_test = utils.get_mean_firing_rate(mu_dts2, fs=fsamp)
 
                     # Get cropped inverse covariance
-                    emg_grid_crop = emg_grid[:, :, ycrop:emg_grid_test.shape[2]-ycrop, xcrop:emg_grid_test.shape[3]-xcrop].clone()
+                    print(f'CROPS: XCROP: {xcrop}, YCROP: {ycrop}')
+                    emg_grid_crop = emg_grid[:, :, ycrop:emg_grid.shape[2]-ycrop, xcrop:emg_grid.shape[3]-xcrop].clone()
                     extended_emg_crop = utils.extend_emg_torch(emg_grid_crop.squeeze().reshape(emg_grid_crop.shape[0], -1), R).T
                     inv_cov_train = utils.get_inv_cov_tikhonov(extended_emg_crop, reg=reg).to(torch.float32)
 
@@ -134,6 +140,7 @@ if __name__ == '__main__':
                     pred_dts_train, sils = utils.get_silohuette(sources)
                     matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts, pred_dts_train, fs=fsamp)
                     print('RoA Training:', np.mean(rate_of_agreement))
+                    print(rate_of_agreement)
 
                     params = {
                         'sils_base_avg': np.mean(sils), 'sils_base_std': np.std(sils),
@@ -143,7 +150,7 @@ if __name__ == '__main__':
                     }
 
                     # Get base loss so we can understand how much sparsity relative to the training set/original decomposition
-                    base_loss = utils.get_base_loss(emg_grid, sda.to(device), batch_size=batch_size, loss='negentropy', device=device)
+                    base_loss = utils.get_base_loss(emg_grid.clone(), sda.to(device), batch_size=batch_size, loss='negentropy', device=device)
             
                     # Get inverse covariance of the test grid, and determine the spatial transformation required for the STA templates to become optimal separation vectors
                     emg_grid_crop_test = emg_grid_test[:, :, ycrop:emg_grid_test.shape[2]-ycrop, xcrop:emg_grid_test.shape[3]-xcrop].clone()
@@ -151,12 +158,14 @@ if __name__ == '__main__':
                     inv_cov = utils.get_inv_cov_tikhonov(extended_emg_crop_test, reg=reg).to(torch.float32)
                     sda.inv_cov = inv_cov
 
-                    loss_arr = utils.loss_sampling(emg_grid_test, sda.to(device), base_loss=base_loss, bounds=(2.5, 2.5), batch_size=batch_size, num_points=20, loss='negentropy', device=device)
+                    loss_arr = utils.loss_sampling(emg_grid_test.clone(), sda.to(device), base_loss=base_loss, bounds=bounds[:2], batch_size=batch_size, num_points=20, loss='negentropy', device=device)
                     sources, losses = utils.search_fit_sda(emg_grid_test.clone(), sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=2*nepochs, nepochs=nepochs, lr=5e-3, boundaries=bounds, loss='negentropy', device=device)
 
                     # Get new inverse covariance
                     sda = sda.to('cpu')
                     sda.sal.mode = 'bicubic'
+
+                    # base_loss = utils.get_base_loss(emg_grid_test.clone(), sda.to(device), batch_size=batch_size, loss='negentropy', device=device)
 
                     # Get minimum distance between original and transformed grid
                     Tx_est, Ty_est, theta_est = (W-1)*sda.sal.xshift[0].item()/2, (H-1)*sda.sal.yshift[0].item()/2, sda.sal.rot_theta[0].item()*np.pi
@@ -177,13 +186,13 @@ if __name__ == '__main__':
                     transformed_grid[:,:,:,0] = (W-1)*(1 + transformed_grid[:,:,:,0])/2
                     transformed_grid[:,:,:,1] = (H-1)*(1 + transformed_grid[:,:,:,1])/2
 
-                    lcrop, rcrop, bcrop, tcrop = utils.get_min_conservative_crop((H, W), transformed_grid, xcrop_new=xcrop, ycrop_new=ycrop)
+                    lcrop, rcrop, bcrop, tcrop = utils.get_min_conservative_crop((H, W), transformed_grid, xcrop_max=xcrop, ycrop_max=ycrop)
                     sda.lcrop, sda.rcrop, sda.tcrop, sda.bcrop = lcrop, rcrop, tcrop, bcrop
                     sda.crop_mask = sda.get_crop_mask()
 
                     emg_grid_crop_test = emg_grid_test[:, :, tcrop:emg_grid_test.shape[2]-bcrop, lcrop:emg_grid_test.shape[3]-rcrop].clone()
-                    extended_emg = utils.extend_emg_torch(emg_grid_crop_test.squeeze().reshape(emg_grid_crop_test.shape[0], -1), R).T
-                    inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg, reg=reg).to(torch.float32)
+                    extended_emg_crop_test = utils.extend_emg_torch(emg_grid_crop_test.squeeze().reshape(emg_grid_crop_test.shape[0], -1), R).T
+                    inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg_crop_test, reg=reg).to(torch.float32)
                     sda.inv_cov = inv_cov_test
 
                     # Optimal predictions
@@ -191,8 +200,8 @@ if __name__ == '__main__':
                         sources = sda(emg_grid_test)
 
                     pred_dts, sils = utils.get_silohuette(sources.to('cpu'))
-                    matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts, pred_dts, fs=fsamp)
-                    print("ROA Test:", np.mean(rate_of_agreement))
+                    matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts2, pred_dts, fs=fsamp)
+                    print("ROA Test:", rate_of_agreement)
                     print('#mu_test: ', sum([roa > 0.7 for roa in rate_of_agreement]))
                     params.update({
                         'sils_avg': np.mean(sils), 'sils_std': np.std(sils),
@@ -202,24 +211,24 @@ if __name__ == '__main__':
                     })
 
                     # Get new covariance matrix based on statistics of full test data
-                    extended_emg_test = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T
-                    inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg, reg=reg).to(torch.float32)
+                    extended_emg_test = utils.extend_emg_torch(emg_grid_test.squeeze().reshape(emg_grid_test.shape[0], -1), R).T.to(torch.float32)
+                    inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg_test, reg=1e-3).to(torch.float32)
 
                     # Refinement of MUs detected
-                    Nr = 10
+                    Nr = 50
                     official_matches = dict(matches)
                     for idx in tqdm(range(Nr)):
                         with torch.no_grad():
-                            sta_test = utils.get_sta_templates(extended_emg_test.clone(), pred_dts)
+                            sta_test = utils.get_sta_templates(extended_emg_test.clone(), pred_dts).to(torch.float32)
                             sep_mat_test = sta_test @ inv_cov_test
                             sources = (sep_mat_test @ extended_emg_test).T
 
-                        # Recompute predicted discharges and compute performances: only consider original matches made, not new ones!!
-                        pred_dts, sils = utils.get_silohuette(sources)
-                        matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts2, pred_dts, old_matches=official_matches, fs=fsamp)
-                        print(f"Refinement Step #{idx+1} --> #MU matches: {np.sum([r > 0.7 for r in rate_of_agreement])}, RoA: {np.mean(rate_of_agreement)}, F1-Score: {np.mean(f1_scores)}")
-                        
-                    print(rate_of_agreement)
+                            # Recompute predicted discharges and compute performances: only consider original matches made, not new ones!!
+                            pred_dts, sils = utils.get_silohuette(sources)
+                            matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts2, pred_dts, old_matches=official_matches, fs=fsamp)
+                            print(f"Refinement Step #{idx+1} --> #MU matches: {np.sum([r > 0.7 for r in rate_of_agreement])}, RoA: {np.mean(rate_of_agreement)}, F1-Score: {np.mean(f1_scores)}")
+                            print(rate_of_agreement)
+                    # print(rate_of_agreement)
                     params = {
                         'sils_refine_avg': np.mean(sils), 'sils_refine_std': np.std(sils),
                         'f1_score_refine_avg': np.mean(f1_scores), 'f1_score_refine_std': np.std(f1_scores),

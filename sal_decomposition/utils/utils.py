@@ -1185,140 +1185,140 @@ def spike_matching(dts, dts_pred, fs, old_matches=None, jitter=0.002):
 
     return matches, matched_roa, f1_scores, matched_sensitivities, matched_precisions, z_scores
 
-def get_muap_correlations(emg_grid, pred_dts, mu_dts, L=50):
-    """Computes the correlation between every pair of MUs between session 1 and 2."""
-    Npred = len(pred_dts)
-    sta_pred = torch.zeros(Npred, 2*L + 1, emg_grid.shape[2], emg_grid.shape[3])
-    for idx in range(Npred):
-        sta_pred[idx] = get_sta_muaps(emg_grid, pred_dts[idx].astype(int), L=L, plot=False)
+# def get_muap_correlations(emg_grid, pred_dts, mu_dts, L=50):
+#     """Computes the correlation between every pair of MUs between session 1 and 2."""
+#     Npred = len(pred_dts)
+#     sta_pred = torch.zeros(Npred, 2*L + 1, emg_grid.shape[2], emg_grid.shape[3])
+#     for idx in range(Npred):
+#         sta_pred[idx] = get_sta_muaps(emg_grid, pred_dts[idx].astype(int), L=L, plot=False)
     
-    Ntrue = len(mu_dts)
-    sta_true = torch.zeros(Ntrue, 2*L + 1, emg_grid.shape[2], emg_grid.shape[3])
-    for idx in range(Ntrue):
-        sta_true[idx] = get_sta_muaps(emg_grid, mu_dts[idx].astype(int), L=L, plot=False)
+#     Ntrue = len(mu_dts)
+#     sta_true = torch.zeros(Ntrue, 2*L + 1, emg_grid.shape[2], emg_grid.shape[3])
+#     for idx in range(Ntrue):
+#         sta_true[idx] = get_sta_muaps(emg_grid, mu_dts[idx].astype(int), L=L, plot=False)
     
-    # Use STA estimates and compute correlation between every pair
-    sta_true, sta_pred = sta_true.detach().numpy(), sta_pred.detach().numpy()
-    corrs = np.zeros((Npred, Ntrue))
-    for idx in range(Npred):
-        for jdx in range(Ntrue):
-            corr, p = scipy.stats.pearsonr(sta_true[jdx].flatten(), sta_pred[idx].flatten())
-            corrs[idx, jdx] = corr
-    return corrs
+#     # Use STA estimates and compute correlation between every pair
+#     sta_true, sta_pred = sta_true.detach().numpy(), sta_pred.detach().numpy()
+#     corrs = np.zeros((Npred, Ntrue))
+#     for idx in range(Npred):
+#         for jdx in range(Ntrue):
+#             corr, p = scipy.stats.pearsonr(sta_true[jdx].flatten(), sta_pred[idx].flatten())
+#             corrs[idx, jdx] = corr
+#     return corrs
 
 
-def compute_mu_crosscorrelation(mu_set1, mu_set2, duration, fs=2048, 
-                                jitter=0.002, max_lag=0.5, device='cpu'):
-    """
-    Compute temporal cross-correlations between motor unit pairs from two sets.
-    Vectorized implementation using PyTorch for efficiency.
+# def compute_mu_crosscorrelation(mu_set1, mu_set2, duration, fs=2048, 
+#                                 jitter=0.002, max_lag=0.5, device='cpu'):
+#     """
+#     Compute temporal cross-correlations between motor unit pairs from two sets.
+#     Vectorized implementation using PyTorch for efficiency.
     
-    Parameters:
-    -----------
-    mu_set1 : list of arrays
-        List of arrays, each containing discharge times (in seconds) for one MU
-    mu_set2 : list of arrays
-        List of arrays, each containing discharge times (in seconds) for one MU
-    duration : float
-        Total duration of recording in seconds
-    fs : int, optional
-        Sampling frequency in Hz (default: 2048)
-    window_size : float, optional
-        Moving average window size in seconds (default: 0.4)
-    max_lag : float, optional
-        Maximum lag for cross-correlation in seconds (default: 0.5)
-    device : str, optional
-        Device to run computations on ('cpu' or 'cuda', default: 'cpu')
+#     Parameters:
+#     -----------
+#     mu_set1 : list of arrays
+#         List of arrays, each containing discharge times (in seconds) for one MU
+#     mu_set2 : list of arrays
+#         List of arrays, each containing discharge times (in seconds) for one MU
+#     duration : float
+#         Total duration of recording in seconds
+#     fs : int, optional
+#         Sampling frequency in Hz (default: 2048)
+#     window_size : float, optional
+#         Moving average window size in seconds (default: 0.4)
+#     max_lag : float, optional
+#         Maximum lag for cross-correlation in seconds (default: 0.5)
+#     device : str, optional
+#         Device to run computations on ('cpu' or 'cuda', default: 'cpu')
     
-    Returns:
-    --------
-    xcorr_matrix : ndarray
-        Cross-correlation matrix of shape (Nmu1, Nmu2, 2*max_lag_samples+1)
-    lags : ndarray
-        Time lags corresponding to cross-correlation values (in seconds)
-    """
+#     Returns:
+#     --------
+#     xcorr_matrix : ndarray
+#         Cross-correlation matrix of shape (Nmu1, Nmu2, 2*max_lag_samples+1)
+#     lags : ndarray
+#         Time lags corresponding to cross-correlation values (in seconds)
+#     """
     
-    # Convert duration and parameters to samples
-    T = int(duration * fs)
-    window_samples = 2*int(jitter*fs) + 1
-    max_lag_samples = int(max_lag * fs)
+#     # Convert duration and parameters to samples
+#     T = int(duration * fs)
+#     window_samples = 2*int(jitter*fs) + 1
+#     max_lag_samples = int(max_lag * fs)
     
-    Nmu1 = len(mu_set1)
-    Nmu2 = len(mu_set2)
+#     Nmu1 = len(mu_set1)
+#     Nmu2 = len(mu_set2)
     
-    # Create spike trains for set 1
-    spike_trains1 = np.zeros((Nmu1, T))
-    for i, discharge_times in enumerate(mu_set1):
-        spike_indices = (discharge_times * fs).astype(int)
-        spike_indices = spike_indices[spike_indices < T]
-        spike_trains1[i, spike_indices] = 1
+#     # Create spike trains for set 1
+#     spike_trains1 = np.zeros((Nmu1, T))
+#     for i, discharge_times in enumerate(mu_set1):
+#         spike_indices = (discharge_times * fs).astype(int)
+#         spike_indices = spike_indices[spike_indices < T]
+#         spike_trains1[i, spike_indices] = 1
     
-    # Create spike trains for set 2
-    spike_trains2 = np.zeros((Nmu2, T))
-    for i, discharge_times in enumerate(mu_set2):
-        spike_indices = (discharge_times * fs).astype(int)
-        spike_indices = spike_indices[spike_indices < T]
-        spike_trains2[i, spike_indices] = 1
+#     # Create spike trains for set 2
+#     spike_trains2 = np.zeros((Nmu2, T))
+#     for i, discharge_times in enumerate(mu_set2):
+#         spike_indices = (discharge_times * fs).astype(int)
+#         spike_indices = spike_indices[spike_indices < T]
+#         spike_trains2[i, spike_indices] = 1
     
-    # Convert to PyTorch tensors
-    spike_trains1 = torch.from_numpy(spike_trains1).float().to(device)
-    spike_trains2 = torch.from_numpy(spike_trains2).float().to(device)
+#     # Convert to PyTorch tensors
+#     spike_trains1 = torch.from_numpy(spike_trains1).float().to(device)
+#     spike_trains2 = torch.from_numpy(spike_trains2).float().to(device)
     
-    # Apply moving average filter to set 1 using 1D convolution
-    # Shape for conv1d: (batch, channels, length) = (1, Nmu1, T)
-    spike_trains1 = spike_trains1.unsqueeze(0)  # (1, Nmu1, T)
+#     # Apply moving average filter to set 1 using 1D convolution
+#     # Shape for conv1d: (batch, channels, length) = (1, Nmu1, T)
+#     spike_trains1 = spike_trains1.unsqueeze(0)  # (1, Nmu1, T)
     
-    # Create moving average kernel
-    window = torch.ones(Nmu1, 1, window_samples, device=device)
+#     # Create moving average kernel
+#     window = torch.ones(Nmu1, 1, window_samples, device=device)
     
-    # Apply depthwise convolution (each channel filtered independently)
-    padding = window_samples // 2  # For centered convolution
-    filtered_trains1 = torch.nn.functional.conv1d(spike_trains1, window, 
-                                padding=padding, groups=Nmu1)
+#     # Apply depthwise convolution (each channel filtered independently)
+#     padding = window_samples // 2  # For centered convolution
+#     filtered_trains1 = torch.nn.functional.conv1d(spike_trains1, window, 
+#                                 padding=padding, groups=Nmu1)
     
-    # Trim to original length if needed (for even window sizes)
-    if filtered_trains1.shape[2] > T:
-        filtered_trains1 = filtered_trains1[:, :, :T]
+#     # Trim to original length if needed (for even window sizes)
+#     if filtered_trains1.shape[2] > T:
+#         filtered_trains1 = filtered_trains1[:, :, :T]
     
-    filtered_trains1 = filtered_trains1.squeeze(0)  # (Nmu1, T)
+#     filtered_trains1 = filtered_trains1.squeeze(0)  # (Nmu1, T)
     
-    # Compute cross-correlations using FFT-based convolution
-    # Pad signals for full cross-correlation
-    pad_len = T - 1
-    filtered_trains1_padded = torch.nn.functional.pad(filtered_trains1, (pad_len, pad_len))
+#     # Compute cross-correlations using FFT-based convolution
+#     # Pad signals for full cross-correlation
+#     pad_len = T - 1
+#     filtered_trains1_padded = torch.nn.functional.pad(filtered_trains1, (pad_len, pad_len))
     
-    # Flip spike_trains2 for cross-correlation (correlate = convolve with flipped signal)
-    spike_trains2_flipped = torch.flip(spike_trains2, dims=[1])
+#     # Flip spike_trains2 for cross-correlation (correlate = convolve with flipped signal)
+#     spike_trains2_flipped = torch.flip(spike_trains2, dims=[1])
     
-    # Reshape for batch convolution
-    # filtered_trains1: (Nmu1, 1, T_padded)
-    # spike_trains2_flipped: (Nmu2, 1, T)
-    filtered_trains1_padded = filtered_trains1_padded.unsqueeze(1)  # (Nmu1, 1, T_padded)
-    spike_trains2_flipped = spike_trains2_flipped.unsqueeze(1)  # (Nmu2, 1, T)
+#     # Reshape for batch convolution
+#     # filtered_trains1: (Nmu1, 1, T_padded)
+#     # spike_trains2_flipped: (Nmu2, 1, T)
+#     filtered_trains1_padded = filtered_trains1_padded.unsqueeze(1)  # (Nmu1, 1, T_padded)
+#     spike_trains2_flipped = spike_trains2_flipped.unsqueeze(1)  # (Nmu2, 1, T)
     
-    # Compute all cross-correlations at once using grouped convolution
-    # For each MU in set 1, correlate with all MUs in set 2
-    xcorr_full = []
-    for i in range(Nmu1):
-        # Convolve one signal from set1 with all signals from set2
-        xcorr_i = torch.nn.functional.conv1d(filtered_trains1_padded[i:i+1].expand(Nmu2, 1, -1),
-                          spike_trains2_flipped,
-                          groups=Nmu2)
-        xcorr_full.append(xcorr_i.squeeze(1))  # (Nmu2, corr_length)
+#     # Compute all cross-correlations at once using grouped convolution
+#     # For each MU in set 1, correlate with all MUs in set 2
+#     xcorr_full = []
+#     for i in range(Nmu1):
+#         # Convolve one signal from set1 with all signals from set2
+#         xcorr_i = torch.nn.functional.conv1d(filtered_trains1_padded[i:i+1].expand(Nmu2, 1, -1),
+#                           spike_trains2_flipped,
+#                           groups=Nmu2)
+#         xcorr_full.append(xcorr_i.squeeze(1))  # (Nmu2, corr_length)
     
-    xcorr_full = torch.stack(xcorr_full, dim=0)  # (Nmu1, Nmu2, corr_length)
+#     xcorr_full = torch.stack(xcorr_full, dim=0)  # (Nmu1, Nmu2, corr_length)
     
-    # Extract relevant lag range
-    center = xcorr_full.shape[2] // 2
-    xcorr_matrix = xcorr_full[:, :, center - max_lag_samples:center + max_lag_samples + 1]
+#     # Extract relevant lag range
+#     center = xcorr_full.shape[2] // 2
+#     xcorr_matrix = xcorr_full[:, :, center - max_lag_samples:center + max_lag_samples + 1]
     
-    # Convert back to numpy
-    xcorr_matrix = xcorr_matrix.cpu().numpy()
+#     # Convert back to numpy
+#     xcorr_matrix = xcorr_matrix.cpu().numpy()
     
-    # Create lag vector in seconds
-    lags = np.arange(-max_lag_samples, max_lag_samples + 1) / fs
+#     # Create lag vector in seconds
+#     lags = np.arange(-max_lag_samples, max_lag_samples + 1) / fs
     
-    return xcorr_matrix, lags
+#     return xcorr_matrix, lags
 
 
 def get_aligned_discharge_times(emg_grid, discharge_times_list, L, energy_threshold=0.2):
@@ -1410,32 +1410,6 @@ def out_of_bounds_pixels(height: int, width: int, theta: float):
     
     return y_margin, x_margin
 
-# def handle_outliers(emg_grid):
-#     '''Determine outlier channels based on spectral flatness, and replace them with average of neighbours.'''
-#     # Determine coordinates of outliers
-#     H, W = emg_grid.shape[2:]
-#     flatness = torch.tensor(get_spectral_flatness_ar2(emg_grid.squeeze()))
-#     Q1, Q3 = torch.quantile(flatness.flatten(), torch.tensor([0.25, 0.75]))
-#     IQR = Q3 - Q1
-#     upper = Q3 + 1.5*IQR
-#     y, x = torch.where(flatness >= upper) # only keep non-noisy channel
-#     y, x = y.tolist(), x.tolist()
-
-#     idx = 0
-#     while idx < len(y): # for each outlier
-#         l,r,b,t = x[idx] != 0, x[idx] != W-1, y[idx] != H-1, y[idx] != 0
-#         subgrid = emg_grid[:, :, y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten(start_dim=2, end_dim=3)
-#         subgrid_flatness = flatness[y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten()
-#         subgrid = subgrid[:, :, subgrid_flatness < upper] # remove outlier channels included
-#         if subgrid.shape[2] < 3: # if less than 3 valid neighbours, try again after filling in more channels
-#             y.append(y[idx])
-#             x.append(x[idx])
-#         else:
-#             emg_grid[:,:,y[idx], x[idx]] = subgrid.mean(dim=2) # compute as average of neighbours
-#         idx += 1
-
-#     return emg_grid
-
 def handle_outliers(emg_grid, visible_outliers=None):
     '''Determine outlier channels, and replace them with average of neighbours, 
        prioritizing those with the fewest outlier neighbours.'''
@@ -1446,7 +1420,7 @@ def handle_outliers(emg_grid, visible_outliers=None):
     flatness = get_spectral_flatness_ar2(emg_grid.squeeze())
     Q1, Q3 = np.quantile(flatness.flatten(), [0.25, 0.75])
     IQR = Q3 - Q1
-    upper = Q3 + IQR
+    upper = Q3 + 1.5*IQR
     outlier_mask = flatness >= upper  # boolean mask of outliers
 
     if visible_outliers is not None:
@@ -1491,32 +1465,6 @@ def handle_outliers(emg_grid, visible_outliers=None):
 
     return torch.tensor(emg_grid)
 
-# def handle_outliers_old(emg_grid):
-#     '''Determine outlier channels, and replace them with average of neighbours.'''
-#     # Determine coordinates of outliers
-#     H, W = emg_grid.shape[2:]
-#     emg_grid_var = emg_grid.var(dim=[0,1])
-#     Q1, Q3 = torch.quantile(emg_grid_var.flatten(), 0.25), torch.quantile(emg_grid_var.flatten(), 0.75)
-#     IQR = Q3 - Q1
-#     lower, upper = Q1 -3.0*IQR, Q3 + 3.0*IQR
-#     y, x = torch.where(torch.logical_or(emg_grid_var >= upper, emg_grid_var <= lower)) # only keep non-noisy channel
-#     y, x = y.tolist(), x.tolist()
-
-#     idx = 0
-#     while idx < len(y): # for each outlier
-#         l,r,b,t = x[idx] != 0, x[idx] != W-1, y[idx] != H-1, y[idx] != 0
-#         subgrid = emg_grid[:, :, y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten(start_dim=2, end_dim=3)
-#         subgridvar = emg_grid_var[y[idx]-t:y[idx]+b+1, x[idx]-l:x[idx]+r+1].flatten()
-#         subgrid = subgrid[:, :, torch.logical_and(subgridvar < upper, subgridvar > lower)] # remove outlier channels included
-#         if subgrid.shape[2] < 3: # if less than 3 valid neighbours, try again after filling in more channels
-#             y.append(y[idx])
-#             x.append(x[idx])
-#         else:
-#             emg_grid[:,:,y[idx], x[idx]] = subgrid.mean(dim=2) # compute as average of neighbours
-#         idx += 1
-
-#     return emg_grid
-
 def get_min_distance(grid_shape, Tx, Ty, theta):
     '''Obtain minimum distance of a given electrode in transformed grid to an electrode in the old grid coordiantes, averaged across electrodes.'''
     H, W = grid_shape
@@ -1526,43 +1474,6 @@ def get_min_distance(grid_shape, Tx, Ty, theta):
     distances = torch.linalg.norm(original_grid - center, dim=3)
     min_distance = torch.min(distances)
     return original_grid, transformed_grid, min_distance
-
-# def get_min_conservative_crop(grid_shape, transformed_grid, original_grid):
-#     '''Given a transformed grid and original grid coordinates, find the smallest crop for each side such that no dead channels are included.'''
-#     H, W = grid_shape
-#     # transformed_coordinates = transformed_grid[0, :, :, :].cpu().numpy().reshape(-1, 2)
-#     # original_coordinates = original_grid[0, :, :, :].cpu().numpy().reshape(-1, 2)
-#     # hull = ConvexHull(transformed_coordinates)
-#     # delaunay = Delaunay(transformed_coordinates[hull.vertices])
-#     # inside = delaunay.find_simplex(original_coordinates) >= 0
-#     # mask = torch.tensor(inside.reshape(H, W))
-    
-#     if transformed_grid.dim() == 4:
-#         transformed_grid = transformed_grid.squeeze(0)
-
-#     # Check if new coordinates are inside the original boundaries
-#     mask_x_in_bounds = (transformed_grid[..., 0] >= 0) & (transformed_grid[..., 0] < W)
-#     mask_y_in_bounds = (transformed_grid[..., 1] >= 0) & (transformed_grid[..., 1] < H)
-    
-#     # The pixel is "safe" ONLY if BOTH its x' and y' are in-bounds
-#     mask = (mask_x_in_bounds & mask_y_in_bounds).cpu()
-    
-#     # Find most conservative crop
-#     lcrop, rcrop, bcrop, tcrop = W//2 - 1, W//2 - 1, H//2 - 1, H//2 - 1
-#     min_crop = False
-#     while not min_crop:
-#         crop_sum = lcrop + rcrop + bcrop + tcrop
-#         if mask[tcrop:H-bcrop, lcrop-1:W-rcrop].all() and lcrop > 0:
-#             lcrop -= 1
-#         if mask[tcrop:H-bcrop, lcrop:W-(rcrop-1)].all() and rcrop > 0:
-#             rcrop -= 1
-#         if mask[tcrop-1:H-bcrop, lcrop:W-rcrop].all() and tcrop > 0:
-#             tcrop -= 1
-#         if mask[tcrop:H-(bcrop-1), lcrop:W-rcrop].all() and bcrop > 0:
-#             bcrop -= 1
-#         if crop_sum == lcrop + rcrop + bcrop + tcrop: # if no more changes, we have found the minimum crop
-#             min_crop = True
-#     return lcrop, rcrop, bcrop, tcrop
 
 def get_min_conservative_crop(grid_shape, transformed_grid, xcrop_max, ycrop_max):
     '''Given a transformed grid and original grid coordinates, find the smallest crop for each side such that no dead channels are included.'''
@@ -1594,115 +1505,109 @@ def get_min_conservative_crop(grid_shape, transformed_grid, xcrop_max, ycrop_max
     lcrop, rcrop, bcrop, tcrop = best_crop_dict["crops"]
     return lcrop, rcrop, bcrop, tcrop
 
+def calculate_spatial_coherence(data_grid: np.ndarray) -> np.ndarray:
+    """
+    Calculates the spatial coherence map for an HD-sEMG grid.
 
-def refine_sep_mat(emg_grid_transform, sda, base_loss=1.00, nepochs=50, batch_size=2048, lr=1e-4, device='cpu', loss='kurtosis', R=16):
-    ''' Fit SDA to emg_grid data to find optimal affine parameters. If plot, plot learning of all parameters and loss over iterations.'''
+    The coherence for a given electrode is the average absolute
+    Pearson correlation between its signal and the signals of its
+    immediate 8 (Queen's case) neighbors.
+
+    Args:
+        data_grid (np.ndarray): The input sEMG data. Must be in
+            (T, 1, H, W) or (T, H, W) format.
+            - T: Number of time samples
+            - H: Grid height
+            - W: Grid width
+
+    Returns:
+        np.ndarray: An (H, W) array where each element (h, w)
+            represents the spatial coherence of that electrode.
+    """
     
-    N, C, H, W = emg_grid_transform.shape
-    if loss == 'kurtosis':
-        ica_loss = KurtosisLoss()
-    else:
-        ica_loss = NegentropyLoss()
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, sda.parameters()),
-                                                lr=lr)                 
-
-    # Collect output tensors
-    output_list = []
-    losses = []
-    xshifts,yshifts,angles,xscales,yscales = [], [], [], [], []
-
-    # Freeze all parameters except for SAL parameters
-    for param in sda.parameters():
-        param.requires_grad = False
+    # --- 1. Input Data Validation and Reshaping ---
     
-    # Searching through initial conditions
-    print('SAMPLING AND EVALUATING INITIAL CONDITIONS...')
-    losses = torch.zeros(npoints)
-    # engine = scipy.stats.qmc.LatinHypercube(d=5)
-    engine = scipy.stats.qmc.LatinHypercube(d=3)
-    init_params = 2*torch.tensor(engine.random(n=npoints)).to(torch.float64)-1 # scale from [0,1] to [-1, 1]
-    init_params[:,0], init_params[:,1], init_params[:, 2] = 2*boundaries[0]*init_params[:,0]/W, 2*boundaries[1]*init_params[:,1]/H, boundaries[2]*init_params[:, 2]/np.pi
-    # init_params[:, 3] = torch.pow((1 + torch.abs(init_params[:, 3])*boundaries[3]), torch.sign(init_params[:, 3]) ) # generates scalings appropriately
-    # init_params[:, 4] = torch.pow((1 + torch.abs(init_params[:, 4])*boundaries[4]), torch.sign(init_params[:, 4]) )
+    # Ensure data is a numpy array
+    if not isinstance(data_grid, np.ndarray):
+        data_grid = np.array(data_grid)
 
-    init_params = init_params.to(device)
-    sda.train() # leave batch norm parameters adaptive
-    with torch.no_grad():
-        
-        for npoint in tqdm(range(npoints)):
-            # Set initial conditions
-            sda.sal.xshift[0].data, sda.sal.yshift[0].data, sda.sal.rot_theta[0].data = init_params[npoint, :3]
-            # sda.sal.xscale.data, sda.sal.yscale.data = init_params[npoint, 3:]
-
-            # Evaluate loss function at given condition across batches
-            n_batches = emg_grid_transform.shape[0] // batch_size
-            total_loss = 0
-            
-            for batch_idx in range(n_batches):
-                start_idx = batch_idx * batch_size
-                end_idx = min((batch_idx + 1) * batch_size, emg_grid_transform.shape[0])
-                batch = emg_grid_transform[start_idx:end_idx]
-                
-                # Get source estimates for this batch
-                source_est = sda(batch.to(device))
-                total_loss += ica_loss(source_est).item()
-            
-            # Average loss across batches
-            avg_loss = total_loss / n_batches
-            losses[npoint] = avg_loss
-
-        if npoints > 0:
-            losses = losses / base_loss # normalize by baseline loss
-            sda.sal.xshift.data, sda.sal.yshift.data, sda.sal.rot_theta.data = init_params[losses.argmax(), :3] # get best initialization
-            # sda.sal.xscale.data, sda.sal.yscale.data = init_params[losses.argmax(), 3:]
-            print(f'TOP 5 LOSS VALUES SAMPLED: {torch.topk(losses, k=torch.min(torch.tensor([npoints, 5])))}')
-
-    # Make SAL parameters learnable
-    # for param in sda.sal.parameters():
-    if frozen_sep_mat:
-        for param in sda.sal.parameters():
-            param.requires_grad = True        
+    # Handle (T, 1, H, W) format by removing the singleton dimension
+    if data_grid.ndim == 4:
+        if data_grid.shape[1] == 1:
+            # Squeeze the channel dimension, new shape is (T, H, W)
+            data = data_grid.squeeze(axis=1) 
+        else:
+            raise ValueError(f"Input has {data_grid.shape[1]} channels, expected 1.")
+    elif data_grid.ndim == 3:
+        # Assumes (T, H, W) format
+        data = data_grid
     else:
-        for param in sda.parameters():
-            param.requires_grad = True
+        raise ValueError(f"Input has {data_grid.ndim} dimensions, expected 3 or 4.")
 
-    # Loop through the DataLoader
-    print('TRAINING FROM BEST INIT. CONDITION...')
-    losses = []
-    for ne in tqdm(range(nepochs)):
-        # Forward pass through the model
-        n_batches = emg_grid_transform.shape[0] // batch_size
-        epoch_loss = 0
-        
-        for batch_idx in range(n_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = min((batch_idx + 1) * batch_size, emg_grid_transform.shape[0])
-            batch = emg_grid_transform[start_idx:end_idx]
-            
-            # Get source estimates for this batch
-            source_est = sda(batch.to(device))
-            batch_loss = ica_loss(source_est)
-            
-            # Backprop for this batch
-            optimizer.zero_grad()
-            batch_loss.backward()
-            optimizer.step()
-            
-            epoch_loss += batch_loss.item()
-        
-        # Average loss for the epoch
-        epoch_loss = epoch_loss / n_batches
+    # Get dimensions
+    T, H, W = data.shape
 
-        print('LOSS:', epoch_loss/base_loss)
-        optimizer.step()
-        print(f'PARAMS:\n xshift: {W*sda.sal.xshift.item()/2}, yshift: {H*sda.sal.yshift.item()/2}, theta: {sda.sal.rot_theta.item()} ')
-        # print(f'xscale: {sda.sal.xscale.item()}, yscale: {sda.sal.yscale.item()}')
-        # Collect outputs and loss
-        losses.append(epoch_loss)
-        xshifts.append(sda.sal.xshift.item())
-        yshifts.append(sda.sal.yshift.item())
-        angles.append(sda.sal.rot_theta.item())
-        # xscales.append(sda.sal.xscale.item())
-        # yscales.append(sda.sal.yscale.item())
+    # Handle a special case: a 1x1 grid has no neighbors
+    if H == 1 and W == 1:
+        return np.array([[np.nan]]) # Coherence is undefined
 
-    return losses
+    # --- 2. Initialize Output Map ---
+    # Create an empty map to store the coherence value for each electrode
+    coherence_map = np.zeros((H, W))
+
+    # --- 3. Iterate Through Each Electrode in the Grid ---
+    for h in range(H):
+        for w in range(W):
+            
+            # Get the time-series signal for the center electrode
+            center_signal = data[:, h, w]
+            
+            neighbor_correlations = []
+
+            # --- 4. Find All Valid Neighbors (8-way, "Queen's Case") ---
+            for dh in [-1, 0, 1]:  # Delta for height
+                for dw in [-1, 0, 1]: # Delta for width
+                    
+                    # Skip the center electrode itself (delta = 0, 0)
+                    if dh == 0 and dw == 0:
+                        continue
+
+                    # Calculate the neighbor's coordinates
+                    nh, nw = h + dh, w + dw
+
+                    # --- 5. Boundary Check: Ensure Neighbor is Inside the Grid ---
+                    if 0 <= nh < H and 0 <= nw < W:
+                        
+                        # Get the neighbor's time-series signal
+                        neighbor_signal = data[:, nh, nw]
+
+                        # --- 6. Calculate Pearson Correlation ---
+                        # np.corrcoef returns a 2x2 matrix:
+                        # [[corr(A,A), corr(A,B)],
+                        #  [corr(B,A), corr(B,B)]]
+                        # We need the off-diagonal element [0, 1]
+                        
+                        # Use a try-except block to handle potential division by
+                        # zero if a signal is constant (zero variance)
+                        try:
+                            corr_matrix = np.corrcoef(center_signal, neighbor_signal)
+                            r = corr_matrix[0, 1]
+                            
+                            # Check if r is NaN (can happen with constant signals)
+                            if not np.isnan(r):
+                                neighbor_correlations.append(np.abs(r))
+                                
+                        except ValueError:
+                            # This can happen if signals are empty or all-NaN
+                            pass 
+
+            # --- 7. Calculate Average Coherence for This Electrode ---
+            if neighbor_correlations:
+                # If we found any valid neighbors, take the mean
+                coherence_map[h, w] = np.mean(neighbor_correlations)
+            else:
+                # No valid neighbors found (e.g., a 1x1 grid, though handled above)
+                # or all neighbor correlations resulted in NaN.
+                coherence_map[h, w] = np.nan
+
+    return coherence_map

@@ -1,6 +1,7 @@
 import numpy as np
 from scipy import signal
 import os
+import getpass
 import json
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -17,6 +18,29 @@ import wandb
 
 if __name__ == '__main__':
 
+    # 1. Get username and job ID for creating a unique path
+    username = getpass.getuser()
+    job_id = os.environ.get('PBS_JOBID', 'local-job')
+
+    # 2. Define a unique log directory on the fast, local scratch disk
+    scratch_dir = os.environ.get('TMPDIR')
+    if scratch_dir:
+        # Create a unique directory for this specific job
+        print('RUNNING OFFLINE WANDB...')
+        wandb_log_dir = os.path.join(scratch_dir, f"{username}/wandb_logs/{job_id}")
+        os.makedirs(wandb_log_dir, exist_ok=True)
+        
+        # 3. Set W&B environment variables
+        os.environ["WANDB_DIR"] = wandb_log_dir  # Store logs here
+        os.environ["WANDB_MODE"] = "offline"      # Run offline
+        os.environ["WANDB_START_METHOD"] = "thread" # Avoid multiprocessing issues
+        
+        print(f"[W&B Setup] Running in offline mode. Logs saved to: {wandb_log_dir}")
+    else:
+        print("[W&B Setup] Warning: $TMPDIR not found. Defaulting to standard W&B behavior.")
+
+
+    # Defining experimental parameters
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     fsamp = 2048
     batch_size = 10000
@@ -70,7 +94,6 @@ if __name__ == '__main__':
                 mu_dts = utils.filter_dts(mu_dts, start, end)
 
                 # Get base metrics
-                # Crop observations and get new sep_mat
                 print(f'CROPS: XCROP: {xcrop}, YCROP: {ycrop}')
                 emg_grid_crop_train = emg_grid[:, :, ycrop:emg_grid.shape[2]-ycrop, xcrop:emg_grid.shape[3]-xcrop].clone()
                 extended_emg_crop_train = utils.extend_emg_torch(emg_grid_crop_train.squeeze().reshape(emg_grid_crop_train.shape[0], -1), R).T
@@ -84,7 +107,7 @@ if __name__ == '__main__':
                 # Loop over extension factor, explained variance, and transformations
                 for trans_idx in range(Nt): # Nt random transformations
                     Tx, Ty, theta = torch.tensor(np.random.uniform(-bounds, bounds)).to(torch.float32)
-                    print(f"Transformation parameters: Tx: {Tx}, Ty: {Ty}, rot_theta: {theta}")
+                    print(f"Transformation parameters #{trans_idx+1}: Tx: {Tx}, Ty: {Ty}, rot_theta: {theta}")
 
                     # Initialize wandb run
                     run = wandb.init(
