@@ -37,6 +37,10 @@ checklist = []
 #     except KeyError:
 #         print(f"Skipping run {run.id} due to missing entries.")
 
+os.environ["WANDB_DIR"] = "/rds/general/user/jp2717/home/wand_store"
+os.environ["WANDB_MODE"] = "offline"      # Bypasses network firewall
+os.environ["WANDB_START_METHOD"] = "thread" # Avoids multiprocessing issues
+
 # Define experimental parameters
 mu_count = 20
 exp_name = sys.argv[1]  # First argument after script name
