@@ -22,21 +22,6 @@ from sal_decomposition.simulation_study._sda_pipeline import SDAExperiment
 # this will allow us to continue where we left off if the system breaks
 # checklist is a set of tuples of experimental conditions
 
-# # Get checklist of all runs done so far
-checklist = []
-# api = wandb.Api()
-# runs = api.runs(f"jp2717-imperial-college-london/sal-decomposition-simulations3")
-# checklist = []
-# for run in runs:
-#     try:
-#         snr = run.summary.get("SNR")
-#         fxmax = run.summary.get("fxmax")
-#         opt = run.summary.get("opt")
-#         if snr is not None and fxmax is not None and opt is not None:
-#             checklist.append((fxmax, snr, opt))
-#     except KeyError:
-#         print(f"Skipping run {run.id} due to missing entries.")
-
 # Define experimental parameters
 mu_count = 20
 exp_name = sys.argv[1]  # First argument after script name
@@ -218,7 +203,7 @@ for trans_idx in range(Nt):
     inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg_test, reg=reg).to(torch.float32)
 
     # Refinement of MUs detected
-    Nr = 10
+    Nr = 20
     for idx in tqdm(range(Nr)):
         with torch.no_grad():
             sta_test = utils.get_sta_templates(extended_emg_test.clone(), pred_dts).to(torch.float32).to(device)
@@ -246,7 +231,7 @@ for trans_idx in range(Nt):
         # set the wandb project where this run will be logged
         project="sda-gaussian-muaps",
         name=f'{opt}-{SNR}-{fxmax}-{trans_idx}',
-        # mode='disabled',
+        # mode='disabled'
     )
     wandb.log(params)
     wandb.finish()

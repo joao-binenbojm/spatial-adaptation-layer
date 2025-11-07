@@ -769,7 +769,7 @@ def get_sta_muaps(emg_grid, discharge_times, L, spacing=15, plot=True):
         # If plotting, the normalise so we can better visualize muaps
         # sta = (sta - sta.mean()) / (sta.std() + 1e-9)
         sta = (sta - sta.min()) / (sta.max() - sta.min() + 1e-9)
-        plt.figure(figsize=(W/2, H/2))
+        plt.figure(figsize=(10*W/2, 10*H/2))
         
         for h in range(H):
             for w in range(W):
@@ -777,13 +777,13 @@ def get_sta_muaps(emg_grid, discharge_times, L, spacing=15, plot=True):
                 # shift by electrode position
                 y_offset = (H-1-h) * spacing
                 x_offset = w * (2*L + 1) * spacing / W  # scale horizontally
-                plt.plot(time + x_offset, 15.0*y + y_offset, color="k", lw=0.6)
+                plt.plot(time + x_offset, 15.0*y + y_offset, color="k", lw=4)
                 # plt.vlines((time + x_offset), )
 
         plt.axis("off")
         plt.title("MUAP waveforms (STA)")
         plt.savefig('muaps.jpg')
-        plt.close()
+        # plt.close()
     return sta
 
 def get_p2p_muaps(emg_grid, discharge_times, L, plot=True):
