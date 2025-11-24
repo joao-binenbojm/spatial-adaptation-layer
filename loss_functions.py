@@ -46,8 +46,8 @@ class NegentropyLoss(torch.nn.Module):
         y = (y - y.mean(dim=0, keepdim=True)) / (y.std(dim=0, keepdim=True) + 1e-8)
         
         # Log-cosh contrast function
-        G_y_logcosh = torch.log(torch.cosh(y))
-        G_v_logcosh = torch.log(torch.cosh(torch.randn_like(y)))
+        # G_y_logcosh = torch.log(torch.cosh(y))
+        # G_v_logcosh = torch.log(torch.cosh(torch.randn_like(y)))
 
         # Square contrast function
         # negentropy = torch.mean(torch.square(y)) - torch.log(torch.cosh(torch.randn_like(y)))
@@ -57,11 +57,12 @@ class NegentropyLoss(torch.nn.Module):
         G_v_exponential = -torch.exp(-torch.randn_like(y)**2 / 2)
         
         # Combine both contrast functions for negentropy
-        negentropy_logcosh = torch.mean(G_y_logcosh, dim=0) - torch.mean(G_v_logcosh, dim=0)
+        # negentropy_logcosh = torch.mean(G_y_logcosh, dim=0) - torch.mean(G_v_logcosh, dim=0)
         negentropy_exponential = torch.mean(G_y_exponential, dim=0) - torch.mean(G_v_exponential, dim=0)
         
         # Sum both to form the final combined negentropy per source
-        negentropy_per_source = negentropy_logcosh**2 + negentropy_exponential**2
+        # negentropy_per_source = negentropy_logcosh**2 + negentropy_exponential**2
+        negentropy_per_source = negentropy_exponential**2
 
         # Get negentropy averaged across sources
         negentropy = torch.mean(negentropy_per_source)

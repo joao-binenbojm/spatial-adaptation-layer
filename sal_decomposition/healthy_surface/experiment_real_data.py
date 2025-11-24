@@ -33,8 +33,8 @@ if __name__ == '__main__':
 
     # Set pipeline parameters
     R = 16
-    reg = 1e-1
-    bounds = [2.5, 4.0, 15*np.pi/180]
+    reg = 5e-1
+    bounds = [2.5, 2.5, 15*np.pi/180]
     y_margin, x_margin = utils.out_of_bounds_pixels(H, W, bounds[2])
     xcrop, ycrop = int(bounds[0] + floor(x_margin + 0.5)), int(bounds[1] + floor(y_margin + 0.5))
 
@@ -52,22 +52,14 @@ if __name__ == '__main__':
                     if ses1 == ses2:
                         continue
                     
-                    ###################### TEST LOADING SPECIFIC COMBINATION TO TEST WHETHER ANYTHING HAS CHANGED
-                    mvc = 50
-                    subject = 2
-                    ses1, ses2 = 2, 0
-                    DIR = f'/home/joao/Desktop/datasets/emanuele_arnault/s{subject+1}_edited'
-                    if subject == 0:
-                        DIR  = os.path.join(DIR, f'{ied}mm')
-                    #############################################################################################
-                    # Initialize wandb run
-                    run = wandb.init(
-                        entity='jp2717-imperial-college-london',
-                        project='sda-real-data-simulations',
-                        name=f'sub={subject+1}_ses1={ses1+1}_ses2={ses2+1}mvc={mvc}',
-                        config={'Subject': subject+1, 'Session1':ses1+1, 'Session2':ses2+1, 'MVC': mvc},
-                        mode='disabled'
-                    )
+                    # ###################### TEST LOADING SPECIFIC COMBINATION TO TEST WHETHER ANYTHING HAS CHANGED
+                    # mvc = 25
+                    # subject = 2
+                    # ses1, ses2 = 0, 2
+                    # DIR = f'/home/joao/Desktop/datasets/emanuele_arnault/s{subject+1}_edited'
+                    # if subject == 0:
+                    #     DIR  = os.path.join(DIR, f'{ied}mm')
+                    # #############################################################################################
 
                     # Load both sessions from the same subject
                     file1 = f'S{subject+1}_{mvc}_Session{ses1+1}_MUEdit_edited.mat'
@@ -135,6 +127,7 @@ if __name__ == '__main__':
                     # Initialize SDA module
                     sda = SpatialDecompositionAdaptation(grid_shape=(H, W), STA=STA, inv_cov=inv_cov_train, xcrop=xcrop, ycrop=ycrop, extension_factor=R)
 
+                    # Get baseline predictions intrasession
                     with torch.no_grad():
                         sources = sda(emg_grid)
                     pred_dts_train, sils = utils.get_silohuette(sources)
@@ -149,6 +142,21 @@ if __name__ == '__main__':
                         '#mu_matches_base': np.sum([r > 0.7 for r in rate_of_agreement])
                     }
 
+                    # Get baseline predictions intersession, before any adaptation
+                    with torch.no_grad():
+                        sources = sda(emg_grid_test)
+                    pred_dts_train, sils = utils.get_silohuette(sources)
+                    matches, rate_of_agreement, f1_scores, sensitivities, precisions, zscores = utils.spike_matching(mu_dts, pred_dts_train, fs=fsamp)
+                    print('RoA Training:', np.mean(rate_of_agreement))
+                    print(rate_of_agreement)
+
+                    params.update({
+                        'sils_transform_avg': np.mean(sils), 'sils_base_std': np.std(sils),
+                        'f1_score_transform_avg': np.mean(f1_scores), 'f1_score_transform_std': np.std(f1_scores),
+                        'rate_of_agreement_transform_avg': np.mean(rate_of_agreement), 'rate_of_agreement_transform_std': np.std(rate_of_agreement),
+                        '#mu_matches_transform': np.sum([r > 0.7 for r in rate_of_agreement])
+                    })
+
                     # Get base loss so we can understand how much sparsity relative to the training set/original decomposition
                     base_loss = utils.get_base_loss(emg_grid.clone(), sda.to(device), batch_size=batch_size, loss='negentropy', device=device)
             
@@ -158,25 +166,21 @@ if __name__ == '__main__':
                     inv_cov = utils.get_inv_cov_tikhonov(extended_emg_crop_test, reg=reg).to(torch.float32)
                     sda.inv_cov = inv_cov
 
+                    # Compute and store loss landscapes
                     loss_arr = utils.loss_sampling(emg_grid_test.clone(), sda.to(device), base_loss=base_loss, bounds=bounds[:2], batch_size=batch_size, num_points=20, loss='negentropy', device=device)
+                    os.rename('/home/joao/Desktop/spatial_adaptation_layer/loss_landscape.jpg',
+                        f'/home/joao/Desktop/spatial_adaptation_layer/sal_decomposition/healthy_surface/real_loss_landscapes/{subject+1}-{ses1+1}-{ses2+1}-{mvc}.jpg')
+                    
+                    # Optimize spatial parameters
                     sources, losses = utils.search_fit_sda(emg_grid_test.clone(), sda=sda.to(device), base_loss=base_loss, batch_size=batch_size, npoints=2*nepochs, nepochs=nepochs, lr=5e-3, boundaries=bounds, loss='negentropy', device=device)
 
                     # Get new inverse covariance
                     sda = sda.to('cpu')
                     sda.sal.mode = 'bicubic'
 
-                    # base_loss = utils.get_base_loss(emg_grid_test.clone(), sda.to(device), batch_size=batch_size, loss='negentropy', device=device)
-
                     # Get minimum distance between original and transformed grid
                     Tx_est, Ty_est, theta_est = (W-1)*sda.sal.xshift[0].item()/2, (H-1)*sda.sal.yshift[0].item()/2, sda.sal.rot_theta[0].item()*np.pi
                     print(f"Tx_est: {Tx_est}, Ty_est: {Ty_est}, theta_est: {theta_est}")
-
-                    # Create mask based on transformed coordinates being within convex 
-                    # theta1 = utils.get_theta(emg_grid_test.shape, Tx=Tx_est_est, Ty=Ty, theta=theta_est)
-                    # theta2 = utils.get_theta(emg_grid_test.shape, Tx=Tx_est, Ty=Ty_est, theta=theta_est)
-                    # distance = utils.get_distance(emg_grid_test.shape, theta1, theta2) # get distance in pixels between initial and final location
-                    # wandb.log({'transformation_distance': distance})
-                    # print("Average Post-Correction Distance (mm): ", 4*distance)
 
                     # Create mask based on transformed coordinates being within convex
                     print('RECOMPUTING MINIMALLY CROPPED INVERSE COVARIANCE MATRIX...')
@@ -215,7 +219,7 @@ if __name__ == '__main__':
                     inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg_test, reg=1e-3).to(torch.float32)
 
                     # Refinement of MUs detected
-                    Nr = 50
+                    Nr = 20
                     official_matches = dict(matches)
                     for idx in tqdm(range(Nr)):
                         with torch.no_grad():
@@ -229,9 +233,21 @@ if __name__ == '__main__':
                             print(f"Refinement Step #{idx+1} --> #MU matches: {np.sum([r > 0.7 for r in rate_of_agreement])}, RoA: {np.mean(rate_of_agreement)}, F1-Score: {np.mean(f1_scores)}")
                             print(rate_of_agreement)
                     # print(rate_of_agreement)
-                    params = {
+                    
+                    # Initialize wandb run
+                    run = wandb.init(
+                        entity='jp2717-imperial-college-london',
+                        project='sda-real-data',
+                        name=f'sub={subject+1}_ses1={ses1+1}_ses2={ses2+1}_mvc={mvc}',
+                        config={'Subject': subject+1, 'Session1':ses1+1, 'Session2':ses2+1, 'MVC': mvc},
+                        # mode='disabled'
+                    )
+                    params.update({
                         'sils_refine_avg': np.mean(sils), 'sils_refine_std': np.std(sils),
                         'f1_score_refine_avg': np.mean(f1_scores), 'f1_score_refine_std': np.std(f1_scores),
                         'rate_of_agreement_refine_avg': np.mean(rate_of_agreement), 'rate_of_agreement_refine_std': np.std(rate_of_agreement),
                         '#mu_matches_refine': np.sum([r > 0.7 for r in rate_of_agreement])
-                    }
+                    })
+                    wandb.log(params)
+                    wandb.log({'Tx_est': Tx_est, 'Ty_est': Ty_est, 'theta_est': theta_est})
+                    wandb.finish()

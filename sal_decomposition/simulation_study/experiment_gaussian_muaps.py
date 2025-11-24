@@ -147,11 +147,12 @@ for trans_idx in range(Nt):
     # Optimization
     if opt == 'fit':
         sources, losses = utils.search_fit_sda(emg_grid_test.to(torch.float32), sda, base_loss, npoints=0, nepochs=nepochs, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
-
     elif opt == 'search_fit':
-        sources, losses = utils.search_fit_sda(emg_grid_test.to(torch.float32), sda, base_loss, npoints=2*nepochs, nepochs=nepochs//2, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
-    else: # search only
+        sources, losses = utils.search_fit_sda(emg_grid_test.to(torch.float32), sda, base_loss, npoints=int(1.5*nepochs), nepochs=nepochs//2, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+    elif opt == 'search': # search only
         sources, losses = utils.search_fit_sda(emg_grid_test.to(torch.float32), sda, base_loss, npoints=3*nepochs, nepochs=0, batch_size=batch_size, boundaries=bounds, lr=lr, device=device, loss=loss, plot=0, frozen_sep_mat=True)
+    else:
+        raise ValueError("Invalid optimization method selected.")
 
     # Get learned transformations
     Tx_est, Ty_est = (W-1)*sda.sal.xshift[0].item()/2, (H-1)*sda.sal.yshift[0].item()/2

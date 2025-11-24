@@ -769,7 +769,7 @@ def get_sta_muaps(emg_grid, discharge_times, L, spacing=15, plot=True):
         # If plotting, the normalise so we can better visualize muaps
         # sta = (sta - sta.mean()) / (sta.std() + 1e-9)
         sta = (sta - sta.min()) / (sta.max() - sta.min() + 1e-9)
-        plt.figure(figsize=(10*W/2, 10*H/2))
+        plt.figure(figsize=(W/2, H/2))
         
         for h in range(H):
             for w in range(W):
@@ -777,7 +777,7 @@ def get_sta_muaps(emg_grid, discharge_times, L, spacing=15, plot=True):
                 # shift by electrode position
                 y_offset = (H-1-h) * spacing
                 x_offset = w * (2*L + 1) * spacing / W  # scale horizontally
-                plt.plot(time + x_offset, 15.0*y + y_offset, color="k", lw=4)
+                plt.plot(time + x_offset, 15.0*y + y_offset, color="k", lw=1)
                 # plt.vlines((time + x_offset), )
 
         plt.axis("off")
@@ -1501,8 +1501,12 @@ def get_min_conservative_crop(grid_shape, transformed_grid, xcrop_max, ycrop_max
                                         })
     
     # Select the option with the largest area (smallest crop)
-    best_crop_dict = max(options, key=lambda x: x["area"])
-    lcrop, rcrop, bcrop, tcrop = best_crop_dict["crops"]
+    if len(options) == 0:
+        lcrop, rcrop, bcrop, tcrop = xcrop_max, xcrop_max, ycrop_max, ycrop_max
+    else:
+        best_crop_dict = max(options, key=lambda x: x["area"])
+        lcrop, rcrop, bcrop, tcrop = best_crop_dict["crops"]
+    
     return lcrop, rcrop, bcrop, tcrop
 
 def calculate_spatial_coherence(data_grid: np.ndarray) -> np.ndarray:

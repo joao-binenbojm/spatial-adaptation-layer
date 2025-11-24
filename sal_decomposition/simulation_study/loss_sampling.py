@@ -25,16 +25,16 @@ fs = 2000 # Hz
 fsx = 250 # m^-1
 duration = 20000 # number of time samples in EMG, equivalent of 10s with fs=2000Hz
 Tmean, ISV = 60, 0.2 # sample statistics of spikes # equivalent of 30Hz with fs=2000Hz
-H, W, L = 25, 10, 50
+H, W, L = 26, 10, 50
 R = 16
-sampfactor=15
+sampfactor=14
 mu_count = 20
 SNR = 10
 batch_size = 10000
 delay = (torch.floor(torch.tensor([L + R])/2) - 1).to(torch.int) # delay introduced by causality of triggering process
 reg = 5e-1
 
-Tx, Ty = 1.5, -2.5 # chosen parameters for the translation
+Tx, Ty = 1.5, -2.0 # chosen parameters for the translation
 xcrop, ycrop = ceil(abs(Tx)), ceil(abs(Ty))
 num_points = 20 # generate loss landscape
 loss = 'negentropy'
@@ -75,9 +75,14 @@ with torch.no_grad():
         emg_grid_transform = utils.apply_affine(emg_grid.detach().cpu().clone(), Tx*sampfactor, Ty*sampfactor, 0.0, mode='bicubic')
         emg_grid_transform = sutils.downsample_grid(emg_grid_transform, sampfactor).to(device)
 
+        # Update inverse covariance based on statistics from new session
+        emg_grid_crop_test = emg_grid_transform[:, :, ycrop:emg_grid_transform.shape[2]-ycrop, xcrop:emg_grid_transform.shape[3]-xcrop].clone()
+        extended_emg = utils.extend_emg_torch(emg_grid_crop_test.squeeze().reshape(emg_grid_crop_test.shape[0], -1), R).T
+        inv_cov_test = utils.get_inv_cov_tikhonov(extended_emg, reg=reg).to(torch.float32)
+        sda.inv_cov = inv_cov_test
 
         loss_arr = utils.loss_sampling(emg_grid_transform.clone(), sda.to(device), base_loss=base_loss, bounds=(2.5, 2.5), batch_size=batch_size, num_points=20, loss=loss, device=device)
-        # os.rename('/home/joao/Desktop/spatial-adaptation-layer/sal_decomposition/simulation_study/loss_landscape.jpg',
-        #             f'/home/joao/Desktop/spatial-adaptation-layer/loss_landscapes/{fxmax}.jpg')
-        os.rename(r'C:\Users\Joao\Desktop\spatial-adaptation-layer\sal_decomposition\simulation_study\loss_landscape.jpg',
-            rf'C:\Users\Joao\Desktop\spatial-adaptation-layer\sal_decomposition\simulation_study\loss_landscapes\loss_{fxmax}.jpg')
+        os.rename('/home/joao/Desktop/spatial_adaptation_layer/sal_decomposition/simulation_study/loss_landscape.jpg',
+                    f'/home/joao/Desktop/spatial_adaptation_layer/sal_decomposition/simulation_study/loss_landscapes/{fxmax}.jpg')
+        # os.rename(r'C:\Users\Joao\Desktop\spatial-adaptation-layer\sal_decomposition\simulation_study\loss_landscape.jpg',
+        #     rf'C:\Users\Joao\Desktop\spatial-adaptation-layer\sal_decomposition\simulation_study\loss_landscapes\loss_{fxmax}.jpg')
